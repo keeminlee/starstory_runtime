@@ -57,6 +57,8 @@ export interface Config {
     silenceThresholdDb: number;
     endSilenceMs: number;
     replyCooldownMs: number;
+    interruptActiveMs: number;
+    hushDefault: boolean;
     bargeInMode: BargeInMode;
     microConfirmMs: number;
     microConfirmFrames: number;
@@ -99,6 +101,12 @@ export interface Config {
   features: {
     memoryEnabled: boolean;
     goldMemoryEnabled: boolean;
+    labCommandsEnabled: boolean;
+  };
+
+  access: {
+    devUserIds: string[];
+    devGuildIds: string[];
   };
 
   logging: {

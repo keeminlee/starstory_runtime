@@ -41,6 +41,16 @@ Fixture root:
 - MegaMeecap artifact sanity:
   - Baseline markdown + meta JSON always written
   - Final output written when final pass is enabled
+- Meepo sessions recap UX sanity (Phase 1D):
+  - `/meepo sessions list` shows kind + recap status (`✅` or `—`)
+  - `/meepo sessions view session:<id>` shows base cache status + most recent final recap metadata
+  - `/meepo sessions recap session:<id> style:<pass>` generates recap only for canon/non-lab sessions
+  - Base validity uses `source_hash + base_version`; final validity uses `source_hash + final_style + final_version`
+  - Base file cache is reusable across final style changes
+  - DB contains one `recap_final` row per session (new style overwrites canonical most recent final)
+  - Ambient or lab sessions return friendly canon-only refusal
+  - Top-level `/meepo recap` is not present
+  - Cache invalidation: base regenerates on hash/version mismatch or missing files; final regenerates on style/version mismatch, missing files, or `force:true`
 
 ## 4) Release Metadata
 
@@ -54,3 +64,75 @@ Fixture root:
   - CI gate passes end-to-end
   - Manual checks pass
   - Known gaps are explicitly documented
+
+## 6) GitHub Release Draft (v1.0.0)
+
+### Release Title (Primary)
+
+`Meepo v1.0.0 — First Public Release: Voice-First Session Memory for D&D`
+
+### Alternate Titles
+
+- `Meepo v1.0.0 — Debut Release (Discord Voice, Ledger, Recaps, and Silver Lanes)`
+- `Meepo 1.0 — The First Stable Campaign Companion Release`
+
+### Release Notes (Paste into GitHub)
+
+Meepo `v1.0.0` is the first public GitHub release of Meepo: a diegetic Discord companion for D&D campaigns that listens in-session, preserves narrative continuity, and supports recap + memory workflows.
+
+This debut release stabilizes the core runtime loop, introduces deterministic offline lanes for transcript processing, and hardens the release gate for repeatable quality checks.
+
+#### What’s New in v1.0.0
+
+- Added deterministic Silver-Seq segmentation lane with artifact-producing tooling (`src/silver/seq/*`).
+- Added online events compile core reused by live events tooling (`src/events/compileEvents/*`).
+- Added MegaMeecap v1 modular orchestration with prompt, carry, and I/O modules (`src/tools/megameecap/*`).
+- Extracted registry scan/review core with focused tests (`src/registry/scanNamesCore.ts`, `src/registry/reviewNamesCore.ts`).
+- Added bronze transcript view contract + provenance handling in transcript builder.
+
+#### Core Runtime Capabilities
+
+- Discord text + voice integration with STT -> LLM -> TTS closed-loop response flow.
+- Session lifecycle and append-only ledger capture for campaign continuity and recap tooling.
+- Persona-aware behavior, command surfaces for Meepo/session control, and DM-oriented operational tools.
+- OBS overlay support for real-time speaking/presence indicators (`/overlay`, WebSocket updates, registry-driven token loading).
+- Campaign-scoped DB routing guardrails to reduce cross-campaign data leakage risk.
+
+#### Tooling and Developer Workflow
+
+- Release gate standardized behind `npm run ci:verify`:
+  - `npm run typecheck`
+  - `npm run lint`
+  - `npm run test:smoke`
+  - `npm run test`
+  - `npm run stopline:no-getdb-runtime`
+  - `npm run stopline:no-raw-env`
+  - `npm run stopline:repo-hygiene`
+- Added deterministic fixture-backed smoke coverage for MegaMeecap + Silver-Seq.
+- Added targeted voice interrupt test coverage.
+- CI workflow executes `npm run ci:verify` on push and PR.
+
+#### Install / Runtime Notes
+
+- Version: `1.0.0`
+- Runtime: Node.js `22` recommended.
+- Required credentials: `DISCORD_TOKEN`, `OPENAI_API_KEY`.
+- Core startup:
+  - `npm install`
+  - `npm run dev:deploy`
+  - `npm run dev:bot`
+
+#### Secondary Systems in v1
+
+- Missions and meeps command surfaces are available and usable in v1.
+- Economy/mission systems continue to evolve; expect incremental improvements in upcoming releases.
+
+#### Known Gaps (Explicit)
+
+- Some broader test coverage still depends on campaign DB snapshots and is not fully fixture-only.
+- Legacy and v1 tool paths still coexist in some areas; canonical paths are documented but not fully pruned.
+- Smoke tests validate deterministic contracts and artifact shape, not full behavioral/load characteristics.
+
+#### Thanks and Forward Path
+
+This release establishes Meepo’s baseline as a voice-first narrative companion with deterministic processing lanes and stronger release discipline. Next iterations focus on continued consolidation, deeper fixture-first coverage, and expanded memory/reasoning quality.

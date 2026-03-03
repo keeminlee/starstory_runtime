@@ -30,6 +30,9 @@ export default defineConfig({
       "src/tests/test-receiver-stop-phrase-bypass.ts",
       "src/tests/test-receiver-gating.ts",
       "src/tests/test-receiver-rejected-path.ts",
+      "src/tests/test-meepo-wake-ambient.ts",
+      "src/tests/test-meepo-sessions-recap-contract.ts",
+      "src/tests/test-recap-engine.ts",
     ],
     sequence: {
       concurrent: false,

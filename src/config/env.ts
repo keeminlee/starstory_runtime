@@ -144,6 +144,8 @@ export function loadConfig(): Config {
       silenceThresholdDb: optInt("VOICE_SILENCE_THRESHOLD_DB", -40),
       endSilenceMs: optInt("VOICE_END_SILENCE_MS", 700),
       replyCooldownMs: optInt("VOICE_REPLY_COOLDOWN_MS", 5000),
+      interruptActiveMs: optInt("VOICE_INTERRUPT_ACTIVE_MS", 1000),
+      hushDefault: optBool("VOICE_HUSH_DEFAULT", false),
       bargeInMode: enumOf<BargeInMode>("BARGE_IN_MODE", ["immediate", "micro_confirm"] as const, "immediate"),
       microConfirmMs: optInt("MICRO_CONFIRM_MS", 60),
       microConfirmFrames: optInt("MICRO_CONFIRM_FRAMES", 2),
@@ -186,6 +188,18 @@ export function loadConfig(): Config {
     features: {
       memoryEnabled: optBool("MEEPO_MEMORY_ENABLED", true),
       goldMemoryEnabled: optBool("GOLD_MEMORY_ENABLED", false),
+      labCommandsEnabled: optBool("ENABLE_LAB_COMMANDS", false),
+    },
+
+    access: {
+      devUserIds: (opt("DEV_USER_IDS") ?? "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+      devGuildIds: (opt("DEV_GUILD_IDS") ?? "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
     },
 
     logging: {
@@ -227,6 +241,8 @@ export function printConfigSnapshot(cfg: Config): void {
     VOICE_SILENCE_THRESHOLD_DB: cfg.voice.silenceThresholdDb,
     VOICE_END_SILENCE_MS: cfg.voice.endSilenceMs,
     VOICE_REPLY_COOLDOWN_MS: cfg.voice.replyCooldownMs,
+    VOICE_INTERRUPT_ACTIVE_MS: cfg.voice.interruptActiveMs,
+    VOICE_HUSH_DEFAULT: cfg.voice.hushDefault,
     BARGE_IN_MODE: cfg.voice.bargeInMode,
     MICRO_CONFIRM_MS: cfg.voice.microConfirmMs,
     MICRO_CONFIRM_FRAMES: cfg.voice.microConfirmFrames,
@@ -255,6 +271,9 @@ export function printConfigSnapshot(cfg: Config): void {
     FFMPEG_PATH: cfg.audioFx.ffmpegPath,
     MEEPO_MEMORY_ENABLED: cfg.features.memoryEnabled,
     GOLD_MEMORY_ENABLED: cfg.features.goldMemoryEnabled,
+    ENABLE_LAB_COMMANDS: cfg.features.labCommandsEnabled,
+    DEV_USER_IDS: cfg.access.devUserIds.join(","),
+    DEV_GUILD_IDS: cfg.access.devGuildIds.join(","),
     LOG_LEVEL: cfg.logging.level,
     LOG_SCOPES: cfg.logging.scopes?.join(",") ?? "",
     LOG_FORMAT: cfg.logging.format,

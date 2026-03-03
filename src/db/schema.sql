@@ -93,6 +93,30 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_guild_active
 ON sessions(guild_id, ended_at_ms);
 
+-- Session artifacts: recap/transcript exports and future session-scoped files
+CREATE TABLE IF NOT EXISTS session_artifacts (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  artifact_type TEXT NOT NULL,            -- 'megameecap_base' | 'recap_final' | 'transcript_export' | future
+  created_at_ms INTEGER NOT NULL,
+  engine TEXT,
+  source_hash TEXT,
+  strategy TEXT NOT NULL DEFAULT 'default',
+  strategy_version TEXT,
+  meta_json TEXT,
+  content_text TEXT,
+  file_path TEXT,
+  size_bytes INTEGER,
+
+  UNIQUE(session_id, artifact_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_artifacts_session
+ON session_artifacts(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_session_artifacts_type
+ON session_artifacts(artifact_type);
+
 -- Meecaps: structured session summaries (Phase 1+)
 -- Supports two modes:
 --   - V1 JSON: schema-validated scenes/beats (legacy)
@@ -489,6 +513,7 @@ CREATE TABLE IF NOT EXISTS guild_runtime_state (
   active_session_id TEXT,                 -- Current active session (NULL if none)
   active_persona_id TEXT,                 -- meta_meepo | diegetic_meepo | xoblob (default meta_meepo)
   active_mode TEXT,                       -- canon | ambient | lab | dormant
+  diegetic_persona_id TEXT,               -- preferred persona when effective mode resolves to canon
   updated_at_ms INTEGER NOT NULL
 );
 

@@ -2,8 +2,6 @@
 import { log } from "../utils/logger.js";
 import { getDbForCampaign } from "../db.js";
 import { resolveCampaignSlug } from "../campaign/guildConfig.js";
-import { startSession, endSession } from "../sessions/sessions.js";
-import { getGuildMode, sessionKindForMode } from "../sessions/sessionRuntime.js";
 
 const meepoLog = log.withScope("meepo");
 
@@ -65,18 +63,6 @@ export function wakeMeepo(opts: {
 
   meepoLog.info(`Woke up as form_id: meepo`);
 
-  // Day 4: auto-start session on wake
-  const mode = getGuildMode(opts.guildId);
-  if (mode === "dormant") {
-    meepoLog.info(`Guild mode is dormant; skipping auto session start on wake (guild=${opts.guildId})`);
-  } else {
-    startSession(opts.guildId, null, null, {
-      source: "live",
-      modeAtStart: mode,
-      kind: sessionKindForMode(mode),
-    });
-  }
-
   return {
     id,
     name: "Meepo",
@@ -92,10 +78,7 @@ export function wakeMeepo(opts: {
 
 export function sleepMeepo(guildId: string): number {
   const db = getMeepoDbForGuild(guildId);
-  
-  // Day 4: auto-end session on sleep
-  endSession(guildId);
-  
+
   const info = db
     .prepare("UPDATE npc_instances SET is_active = 0 WHERE guild_id = ? AND is_active = 1")
     .run(guildId);

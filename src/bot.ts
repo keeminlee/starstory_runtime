@@ -3,7 +3,7 @@ import { Client, GatewayIntentBits } from "discord.js";
 import { log } from "./utils/logger.js";
 import { registerHandlers } from "./commands/index.js";
 import { getActiveMeepo, wakeMeepo, transformMeepo } from "./meepo/state.js";
-import { getActivePersonaId, getMindspace, setActivePersonaId } from "./meepo/personaState.js";
+import { getEffectivePersonaId, getMindspace, setActivePersonaId } from "./meepo/personaState.js";
 import { getGuildDefaultPersonaId, resolveCampaignSlug } from "./campaign/guildConfig.js";
 import { getPersona } from "./personas/index.js";
 import { autoJoinGeneralVoice } from "./meepo/autoJoinVoice.js";
@@ -165,6 +165,7 @@ client.once("ready", async () => {
         connection,
         guild,
         sttEnabled: true, // ← Enable STT for overlay speaking detection
+        hushEnabled: cfg.voice.hushDefault,
         connectedAt: Date.now(),
       });
 
@@ -451,7 +452,7 @@ client.on("messageCreate", async (message: any) => {
 
     // 4) Tier S/A: Per-user latch. Tier S = voice reply, Tier A = text reply.
     const prefix = cfg.discord.botPrefix;
-    const personaId = getActivePersonaId(message.guildId);
+    const personaId = getEffectivePersonaId(message.guildId);
     const userId = message.author.id;
     const mentionedMeepo = message.mentions?.users?.has(client.user!.id) ?? false;
     const isAnchor = isWakePhrase(content, personaId, { mentioned: mentionedMeepo, prefix });

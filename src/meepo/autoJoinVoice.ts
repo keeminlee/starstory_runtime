@@ -5,6 +5,7 @@ import { getVoiceState, setVoiceState } from "../voice/state.js";
 import { startReceiver } from "../voice/receiver.js";
 import { logSystemEvent } from "../ledger/system.js";
 import { cfg } from "../config/env.js";
+import { resolveGuildHomeVoiceChannelId } from "../campaign/guildConfig.js";
 
 const meepoLog = log.withScope("meepo");
 
@@ -23,7 +24,10 @@ export async function autoJoinGeneralVoice(opts: {
   guildId: string;
   channelId: string; // Text channel for logging
 }): Promise<void> {
-  const generalVoiceChannelId = cfg.overlay.homeVoiceChannelId;
+  const generalVoiceChannelId = resolveGuildHomeVoiceChannelId(
+    opts.guildId,
+    cfg.overlay.homeVoiceChannelId ?? null
+  );
   
   if (!generalVoiceChannelId) {
     meepoLog.debug("MEEPO_HOME_VOICE_CHANNEL_ID not set, skipping auto-join");
@@ -68,6 +72,7 @@ export async function autoJoinGeneralVoice(opts: {
       connection,
       guild,
       sttEnabled: true, // ← Always enable STT when joining voice
+      hushEnabled: cfg.voice.hushDefault,
       connectedAt: Date.now(),
     });
 

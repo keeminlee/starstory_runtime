@@ -5,7 +5,7 @@ import { resolveCampaignDbPath } from "../dataPaths.js";
 import { setActiveSessionId, clearActiveSessionId } from "./sessionRuntime.js";
 import { cfg } from "../config/env.js";
 import type { MeepoMode } from "../config/types.js";
-import { sessionKindForMode } from "./sessionRuntime.js";
+import { resolveEffectiveMode, sessionKindForMode } from "./sessionRuntime.js";
 import { logRuntimeContextBanner } from "../runtime/runtimeContextBanner.js";
 
 export type SessionKind = "canon" | "chat";
@@ -24,6 +24,28 @@ export type Session = {
   started_by_name: string | null;
   source?: string | null;            // 'live' (default) | 'ingest-media' (ingested recordings)
 };
+
+export type SessionArtifactType = "megameecap_base" | "recap_final" | "transcript_export";
+
+export type SessionArtifact = {
+  id: string;
+  session_id: string;
+  artifact_type: SessionArtifactType | string;
+  created_at_ms: number;
+  engine: string | null;
+  source_hash: string | null;
+  strategy: string;
+  strategy_version: string | null;
+  meta_json: string | null;
+  content_text: string | null;
+  file_path: string | null;
+  size_bytes: number | null;
+};
+
+function normalizeArtifactStrategy(strategy?: string | null): string {
+  const value = strategy?.trim();
+  return value && value.length > 0 ? value : "default";
+}
 
 function getSessionDbForGuild(guildId: string) {
   const campaignSlug = resolveCampaignSlug({ guildId });
@@ -50,13 +72,7 @@ export function startSession(
   const sessionId = randomUUID();
   const sessionSource = opts?.source ?? "live";
   const sessionLabel = opts?.label ?? null;
-  const normalizedLabel = (sessionLabel ?? "").trim().toLowerCase();
-  const inferredModeAtStart: MeepoMode = normalizedLabel.includes("test")
-    ? "lab"
-    : normalizedLabel === "chat"
-      ? "ambient"
-      : opts?.modeAtStart ?? cfg.mode;
-  const modeAtStart: MeepoMode = inferredModeAtStart;
+  const modeAtStart: MeepoMode = opts?.modeAtStart ?? resolveEffectiveMode(guildId);
   const sessionKind: SessionKind = opts?.kind ?? sessionKindForMode(modeAtStart);
 
   logRuntimeContextBanner({
@@ -130,6 +146,205 @@ export function getLatestSessionForLabel(label: string, guildId?: string): Sessi
         .get(label) as Session | undefined);
 
   return row ?? null;
+}
+
+export function getMostRecentSession(guildId: string): Session | null {
+  const { db } = getSessionDbForGuild(guildId);
+  const row = db
+    .prepare("SELECT * FROM sessions WHERE guild_id = ? ORDER BY started_at_ms DESC LIMIT 1")
+    .get(guildId) as Session | undefined;
+  return row ?? null;
+}
+
+export function listSessions(guildId: string, limit: number = 10): Session[] {
+  const boundedLimit = Math.max(1, Math.min(50, Math.trunc(limit)));
+  const { db } = getSessionDbForGuild(guildId);
+  const rows = db
+    .prepare("SELECT * FROM sessions WHERE guild_id = ? ORDER BY started_at_ms DESC LIMIT ?")
+    .all(guildId, boundedLimit) as Session[];
+  return rows;
+}
+
+export function getSessionById(guildId: string, sessionId: string): Session | null {
+  const { db } = getSessionDbForGuild(guildId);
+  const row = db
+    .prepare("SELECT * FROM sessions WHERE guild_id = ? AND session_id = ? LIMIT 1")
+    .get(guildId, sessionId) as Session | undefined;
+  return row ?? null;
+}
+
+export function getSessionArtifact(
+  guildId: string,
+  sessionId: string,
+  artifactType: SessionArtifactType | string,
+  strategy?: string | null
+): SessionArtifact | null {
+  const { db } = getSessionDbForGuild(guildId);
+  const row =
+    strategy == null
+      ? (db
+          .prepare(
+            `
+            SELECT sa.*
+            FROM session_artifacts sa
+            JOIN sessions s ON s.session_id = sa.session_id
+            WHERE s.guild_id = ?
+              AND sa.session_id = ?
+              AND sa.artifact_type = ?
+            LIMIT 1
+            `
+          )
+          .get(guildId, sessionId, artifactType) as SessionArtifact | undefined)
+      : (db
+          .prepare(
+            `
+            SELECT sa.*
+            FROM session_artifacts sa
+            JOIN sessions s ON s.session_id = sa.session_id
+            WHERE s.guild_id = ?
+              AND sa.session_id = ?
+              AND sa.artifact_type = ?
+              AND sa.strategy = ?
+            LIMIT 1
+            `
+          )
+          .get(guildId, sessionId, artifactType, normalizeArtifactStrategy(strategy)) as SessionArtifact | undefined);
+
+  return row ?? null;
+}
+
+export function getSessionArtifactsForSession(guildId: string, sessionId: string): SessionArtifact[] {
+  const { db } = getSessionDbForGuild(guildId);
+  const rows = db
+    .prepare(
+      `
+      SELECT sa.*
+      FROM session_artifacts sa
+      JOIN sessions s ON s.session_id = sa.session_id
+      WHERE s.guild_id = ?
+        AND sa.session_id = ?
+      ORDER BY sa.created_at_ms DESC
+      `
+    )
+    .all(guildId, sessionId) as SessionArtifact[];
+
+  return rows;
+}
+
+export function getSessionArtifactMap(
+  guildId: string,
+  sessionIds: string[],
+  artifactType: SessionArtifactType | string,
+  strategy?: string | null
+): Map<string, SessionArtifact> {
+  const out = new Map<string, SessionArtifact>();
+  if (sessionIds.length === 0) return out;
+
+  const { db } = getSessionDbForGuild(guildId);
+  const placeholders = sessionIds.map(() => "?").join(",");
+  const rows =
+    strategy == null
+      ? (db
+          .prepare(
+            `
+            SELECT sa.*
+            FROM session_artifacts sa
+            JOIN sessions s ON s.session_id = sa.session_id
+            WHERE s.guild_id = ?
+              AND sa.artifact_type = ?
+              AND sa.session_id IN (${placeholders})
+            ORDER BY sa.created_at_ms DESC
+            `
+          )
+          .all(guildId, artifactType, ...sessionIds) as SessionArtifact[])
+      : (db
+          .prepare(
+            `
+            SELECT sa.*
+            FROM session_artifacts sa
+            JOIN sessions s ON s.session_id = sa.session_id
+            WHERE s.guild_id = ?
+              AND sa.artifact_type = ?
+              AND sa.strategy = ?
+              AND sa.session_id IN (${placeholders})
+            `
+          )
+          .all(guildId, artifactType, normalizeArtifactStrategy(strategy), ...sessionIds) as SessionArtifact[]);
+
+  for (const row of rows) {
+    out.set(row.session_id, row);
+  }
+
+  return out;
+}
+
+export function upsertSessionArtifact(args: {
+  guildId: string;
+  sessionId: string;
+  artifactType: SessionArtifactType | string;
+  createdAtMs?: number;
+  engine?: string | null;
+  sourceHash?: string | null;
+  strategy?: string | null;
+  strategyVersion?: string | null;
+  metaJson?: string | null;
+  contentText?: string | null;
+  filePath?: string | null;
+  sizeBytes?: number | null;
+}): SessionArtifact {
+  const { db } = getSessionDbForGuild(args.guildId);
+  const now = args.createdAtMs ?? Date.now();
+  const id = randomUUID();
+  const strategyKey = normalizeArtifactStrategy(args.strategy);
+
+  db.prepare(
+    `
+    INSERT INTO session_artifacts (
+      id,
+      session_id,
+      artifact_type,
+      created_at_ms,
+      engine,
+      source_hash,
+      strategy,
+      strategy_version,
+      meta_json,
+      content_text,
+      file_path,
+      size_bytes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(session_id, artifact_type)
+    DO UPDATE SET
+      created_at_ms = excluded.created_at_ms,
+      engine = excluded.engine,
+      source_hash = excluded.source_hash,
+      strategy = excluded.strategy,
+      strategy_version = excluded.strategy_version,
+      meta_json = excluded.meta_json,
+      content_text = excluded.content_text,
+      file_path = excluded.file_path,
+      size_bytes = excluded.size_bytes
+    `
+  ).run(
+    id,
+    args.sessionId,
+    args.artifactType,
+    now,
+    args.engine ?? null,
+    args.sourceHash ?? null,
+    strategyKey,
+    args.strategyVersion ?? null,
+    args.metaJson ?? null,
+    args.contentText ?? null,
+    args.filePath ?? null,
+    args.sizeBytes ?? null
+  );
+
+  const row = getSessionArtifact(args.guildId, args.sessionId, args.artifactType);
+  if (!row) {
+    throw new Error(`Failed to upsert session artifact: ${args.sessionId}/${args.artifactType}`);
+  }
+  return row;
 }
 
 /**

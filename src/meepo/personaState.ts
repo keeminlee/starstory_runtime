@@ -4,7 +4,11 @@
 
 import { getDbForCampaign } from "../db.js";
 import { resolveCampaignSlug } from "../campaign/guildConfig.js";
-import { getActiveSessionId } from "../sessions/sessionRuntime.js";
+import {
+  getActiveSessionId,
+  getConfiguredDiegeticPersonaId,
+  resolveEffectiveMode,
+} from "../sessions/sessionRuntime.js";
 import { getPersona } from "../personas/index.js";
 import { log } from "../utils/logger.js";
 import { cfg } from "../config/env.js";
@@ -13,6 +17,7 @@ import type { MeepoMode } from "../config/types.js";
 const personaLog = log.withScope("persona-state");
 
 const DEFAULT_PERSONA_ID = "meta_meepo";
+const DEFAULT_DIEGETIC_PERSONA_ID = "diegetic_meepo";
 
 function getPersonaDbForGuild(guildId: string) {
   const campaignSlug = resolveCampaignSlug({ guildId });
@@ -41,8 +46,12 @@ export function setActivePersonaId(guildId: string, personaId: string): void {
   const db = getPersonaDbForGuild(guildId);
   const now = Date.now();
   const existing = db
-    .prepare("SELECT active_session_id, active_mode FROM guild_runtime_state WHERE guild_id = ? LIMIT 1")
-    .get(guildId) as { active_session_id: string | null; active_mode: MeepoMode | null } | undefined;
+    .prepare("SELECT active_session_id, active_mode, diegetic_persona_id FROM guild_runtime_state WHERE guild_id = ? LIMIT 1")
+    .get(guildId) as {
+      active_session_id: string | null;
+      active_mode: MeepoMode | null;
+      diegetic_persona_id: string | null;
+    } | undefined;
 
   if (existing) {
     db.prepare(
@@ -50,13 +59,31 @@ export function setActivePersonaId(guildId: string, personaId: string): void {
     ).run(personaId, now, guildId);
   } else {
     const sessionId = getActiveSessionId(guildId);
-    const mode = cfg.mode;
+    const mode: MeepoMode | null = null;
     db.prepare(`
-      INSERT INTO guild_runtime_state (guild_id, active_session_id, active_persona_id, active_mode, updated_at_ms)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(guildId, sessionId, personaId, mode, now);
+      INSERT INTO guild_runtime_state (guild_id, active_session_id, active_persona_id, active_mode, diegetic_persona_id, updated_at_ms)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(guildId, sessionId, personaId, mode, null, now);
   }
   personaLog.debug(`Set active persona: guild=${guildId}, persona_id=${personaId}`);
+}
+
+export function getEffectivePersonaId(guildId: string): string {
+  const mode = resolveEffectiveMode(guildId);
+
+  if (mode === "canon") {
+    return getConfiguredDiegeticPersonaId(guildId) ?? DEFAULT_DIEGETIC_PERSONA_ID;
+  }
+
+  if (mode === "ambient") {
+    return DEFAULT_PERSONA_ID;
+  }
+
+  if (mode === "lab") {
+    return getActivePersonaId(guildId);
+  }
+
+  return DEFAULT_PERSONA_ID;
 }
 
 /**

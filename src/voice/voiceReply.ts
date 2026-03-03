@@ -12,7 +12,7 @@
  */
 
 import { getActiveMeepo } from "../meepo/state.js";
-import { getActivePersonaId, getMindspace } from "../meepo/personaState.js";
+import { getEffectivePersonaId, getMindspace } from "../meepo/personaState.js";
 import { log } from "../utils/logger.js";
 import { getVoiceState } from "./state.js";
 import { isMeepoSpeaking, speakInGuild } from "./speaker.js";
@@ -23,7 +23,6 @@ import { getLedgerInRange, getVoiceAwareContext } from "../ledger/ledger.js";
 import { getSanitizedSpeakerName } from "../ledger/speakerSanitizer.js";
 import { logSystemEvent } from "../ledger/system.js";
 import { applyPostTtsFx } from "./audioFx.js";
-import { getDiscordClient } from "../bot.js";
 import { getActiveSession } from "../sessions/sessions.js";
 import { logConvoTurn } from "../ledger/meepoConvo.js";
 import { buildConvoTailContext } from "../recall/buildConvoTailContext.js";
@@ -240,7 +239,7 @@ export async function respondToVoiceUtterance(
     const activeSession = getActiveSession(guildId);
     const { tailBlock } = buildConvoTailContext(activeSession?.session_id ?? null, guildId);
 
-    const personaId = getActivePersonaId(guildId);
+    const personaId = getEffectivePersonaId(guildId);
     const mindspace = getMindspace(guildId, personaId);
 
     if (mindspace === null) {
@@ -356,7 +355,7 @@ export async function respondToVoiceUtterance(
         session_id: activeSession.session_id,
         channel_id: channelId,
         message_id: null, // Voice has no Discord message_id
-        speaker_id: getDiscordClient().user?.id ?? null,
+        speaker_id: voiceState.guild.client.user?.id ?? null,
         speaker_name: "Meepo",
         role: "meepo",
         content_raw: responseText,
@@ -376,7 +375,7 @@ export async function respondToVoiceUtterance(
     if (sendAsText && targetTextChannelId) {
       // Send text reply to bound (text) channel
       try {
-        const client = getDiscordClient();
+        const client = voiceState.guild.client;
         const channel = await client.channels.fetch(targetTextChannelId) as TextChannel;
 
         if (channel?.isTextBased()) {

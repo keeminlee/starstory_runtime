@@ -16,7 +16,7 @@ afterEach(() => {
 test("evaluateClipGate rejects short static, rejects filler-only, and passes clean speech", async () => {
   configureEnv();
 
-  const { evaluateClipGate } = await import("../voice/receiver.js");
+  const { evaluateClipGate, shouldInterruptOnConsecutiveSpeechFrames } = await import("../voice/receiver.js");
 
   const staticReject = evaluateClipGate({
     audioMs: 180,
@@ -44,4 +44,8 @@ test("evaluateClipGate rejects short static, rejects filler-only, and passes cle
   });
   expect(cleanPass.accepted).toBe(true);
   expect(cleanPass.reasons).toHaveLength(0);
+
+  expect(shouldInterruptOnConsecutiveSpeechFrames(49)).toBe(false);
+  expect(shouldInterruptOnConsecutiveSpeechFrames(50)).toBe(true);
+  expect(shouldInterruptOnConsecutiveSpeechFrames(60)).toBe(true);
 });
