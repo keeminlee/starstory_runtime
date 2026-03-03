@@ -3,6 +3,7 @@
 Primary documentation entrypoints for active architecture lanes.
 
 - [README.md](README.md) — top-level docs navigation
+- [START_HERE.md](START_HERE.md) — first-time DM onboarding path
 - [MAP.md](MAP.md) — runtime and subsystem map
 - [CURRENT_STATE.md](CURRENT_STATE.md) — current implementation status
 

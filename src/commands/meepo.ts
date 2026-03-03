@@ -1,1445 +1,1159 @@
-import { SlashCommandBuilder, TextChannel, GuildMember } from "discord.js";
-import { getActiveMeepo, wakeMeepo, sleepMeepo, transformMeepo } from "../meepo/state.js";
-import { getActivePersonaId, getMindspace, setActivePersonaId } from "../meepo/personaState.js";
-import { getGuildDefaultPersonaId, resolveCampaignSlug, setGuildCampaignSlug, setGuildDefaultPersonaId } from "../campaign/guildConfig.js";
-import { getAvailableForms, getPersona } from "../personas/index.js";
-import { setBotNicknameForPersona } from "../meepo/nickname.js";
-import { autoJoinGeneralVoice } from "../meepo/autoJoinVoice.js";
-import { overlayEmitPresence } from "../overlay/server.js";
-import { appendLedgerEntry } from "../ledger/ledger.js";
-import { logSystemEvent } from "../ledger/system.js";
-import { joinVoice, leaveVoice } from "../voice/connection.js";
-import { getVoiceState, setVoiceState, clearVoiceState } from "../voice/state.js";
-import { startReceiver, stopReceiver } from "../voice/receiver.js";
-import { getSttProviderInfo } from "../voice/stt/provider.js";
-import { getTtsProvider } from "../voice/tts/provider.js";
-import { speakInGuild } from "../voice/speaker.js";
-import { voicePlaybackController } from "../voice/voicePlaybackController.js";
-import { applyPostTtsFx } from "../voice/audioFx.js";
-import { loadRegistry } from "../registry/loadRegistry.js";
-import { extractRegistryMatches } from "../registry/extractRegistryMatches.js";
-import { searchEventsByTitleScoped, type EventRow } from "../ledger/eventSearch.js";
-import { getTranscriptLinesDetailed, getTranscriptLines } from "../ledger/transcripts.js";
-import { loadGptcap } from "../ledger/gptcapProvider.js";
-import { findRelevantBeats, type ScoredBeat } from "../recall/findRelevantBeats.js";
-import { buildMemoryContext } from "../recall/buildMemoryContext.js";
+import fs from "node:fs";
+import { AttachmentBuilder, GuildMember, SlashCommandBuilder } from "discord.js";
 import {
-  findRelevantMeepoInteractions,
-  getInteractionSnippets,
-} from "../ledger/meepoInteractions.js";
-import { log } from "../utils/logger.js";
-import { getTodayAtNinePmEtUnixSeconds } from "../utils/timestamps.js";
-import { getNextSessionLabel } from "../sessions/sessionLabels.js";
+  getGuildCanonPersonaId,
+  getGuildCanonPersonaMode,
+  getGuildConfig,
+  getGuildDefaultRecapStyle,
+  getGuildHomeTextChannelId,
+  getGuildHomeVoiceChannelId,
+  getGuildSetupVersion,
+  resolveGuildHomeVoiceChannelId,
+  setGuildCanonPersonaId,
+  setGuildCanonPersonaMode,
+  setGuildDefaultRecapStyle,
+  setGuildHomeTextChannelId,
+  setGuildHomeVoiceChannelId,
+} from "../campaign/guildConfig.js";
+import { ensureGuildSetup, type SetupReport } from "../campaign/ensureGuildSetup.js";
 import { cfg } from "../config/env.js";
-import type { MeepoMode } from "../config/types.js";
-import { getGuildMode, sessionKindForMode, setGuildMode } from "../sessions/sessionRuntime.js";
-import { endSession, getActiveSession, startSession } from "../sessions/sessions.js";
-import { getLegacyFallbacksThisBoot } from "../dataPaths.js";
+import { getPersona } from "../personas/index.js";
+import { logSystemEvent } from "../ledger/system.js";
+import { wakeMeepo, getActiveMeepo, sleepMeepo } from "../meepo/state.js";
+import { getEffectivePersonaId } from "../meepo/personaState.js";
 import { isElevated } from "../security/isElevated.js";
+import {
+  endSession,
+  getActiveSession,
+  getSessionArtifact,
+  getSessionArtifactMap,
+  getSessionById,
+  getMostRecentSession,
+  listSessions,
+  startSession,
+} from "../sessions/sessions.js";
+import { generateSessionRecap } from "../sessions/recapEngine.js";
+import type { RecapStrategy } from "../sessions/recapEngine.js";
+import {
+  buildSessionArtifactStem,
+  getAllFinalStatuses,
+  getBaseStatus,
+  getFinalStatus,
+  type RecapPassStrategy,
+} from "../sessions/megameecapArtifactLocator.js";
+import { resolveEffectiveMode } from "../sessions/sessionRuntime.js";
+import { joinVoice, leaveVoice } from "../voice/connection.js";
+import { startReceiver, stopReceiver } from "../voice/receiver.js";
+import {
+  getVoiceState,
+  isVoiceHushEnabled,
+  setVoiceHushEnabled,
+  setVoiceState,
+} from "../voice/state.js";
+import { getSttProviderInfo } from "../voice/stt/provider.js";
+import { getTtsProviderInfo } from "../voice/tts/provider.js";
+import { voicePlaybackController } from "../voice/voicePlaybackController.js";
+import { metaMeepoVoice, type DoctorCheck } from "../ui/metaMeepoVoice.js";
 import type { CommandCtx } from "./index.js";
+import { PermissionFlagsBits } from "discord.js";
 
-const meepoLog = log.withScope("meepo");
+type SessionRow = {
+  session_id: string;
+  label: string | null;
+  kind: "canon" | "chat";
+  mode_at_start: "canon" | "ambient" | "lab" | "dormant";
+  started_at_ms: number;
+  ended_at_ms: number | null;
+};
 
-function getSessionLabelMap(sessionIds: string[], db: any): Map<string, string | null> {
-  const stmt = db.prepare("SELECT label FROM sessions WHERE session_id = ? LIMIT 1");
-  const out = new Map<string, string | null>();
+type SessionArtifactRow = {
+  id: string;
+  session_id: string;
+  artifact_type: string;
+  created_at_ms: number;
+  engine: string | null;
+  source_hash: string | null;
+  strategy: string | null;
+  strategy_version: string | null;
+  meta_json: string | null;
+  content_text: string | null;
+  file_path: string | null;
+  size_bytes: number | null;
+};
 
-  for (const sessionId of sessionIds) {
-    const row = stmt.get(sessionId) as { label: string | null } | undefined;
-    out.set(sessionId, row?.label ?? null);
-  }
+const DEFAULT_RECAP_STRATEGY: RecapStrategy = "balanced";
+const RECAP_STRATEGIES: RecapStrategy[] = ["detailed", "balanced", "concise"];
+const setupWarningDigestByGuild = new Map<string, string>();
 
-  return out;
+function setReplyMode(db: any, guildId: string, mode: "voice" | "text"): void {
+  db.prepare(
+    `
+      UPDATE npc_instances
+      SET reply_mode = ?
+      WHERE guild_id = ? AND is_active = 1
+    `
+  ).run(mode, guildId);
 }
 
-function buildDebugRecallResponse(args: {
-  queryText: string;
-  matches: Array<{ entity_id: string; canonical: string; matched_text: string }>;
-  eventsByMatch: Array<{ match: { entity_id: string; canonical: string; matched_text: string }; events: EventRow[] }>;
-  sessionLabelById: Map<string, string | null>;
-  uniqueLineCountBySession: Map<string, number>;
-  requestedLineCountBySession: Map<string, number>;
-  missingLinesBySession: Map<string, number[]>;
-  beatsBySession: Map<string, ScoredBeat[]>;
-  memoryContextPreview: string;
-}): string {
-  const {
-    queryText,
-    matches,
-    eventsByMatch,
-    sessionLabelById,
-    uniqueLineCountBySession,
-    requestedLineCountBySession,
-    missingLinesBySession,
-    beatsBySession,
-    memoryContextPreview,
-  } = args;
+function hasTtsAvailable(): boolean {
+  const info = getTtsProviderInfo();
+  return cfg.tts.enabled && info.name !== "noop";
+}
 
-  const allEvents = new Map<string, EventRow>();
-  for (const group of eventsByMatch) {
-    for (const event of group.events) {
-      allEvents.set(event.event_id, event);
+function formatChannel(channelId: string | null): string {
+  if (!channelId) return "(unset)";
+  return `<#${channelId}>`;
+}
+
+function summarizeSession(session: SessionRow): string {
+  const label = getSessionDisplayLabel(session);
+  const status = session.ended_at_ms ? "ended" : "active";
+  return `${label} (${status})`;
+}
+
+function getSessionDisplayLabel(session: Pick<SessionRow, "label">): string {
+  const label = session.label?.trim();
+  return label && label.length > 0 ? label : "Unlabeled Session";
+}
+
+function getSessionKindTag(session: Pick<SessionRow, "kind">): "CANON" | "AMBIENT" {
+  return session.kind === "canon" ? "CANON" : "AMBIENT";
+}
+
+function canGenerateRecap(session: Pick<SessionRow, "kind" | "mode_at_start">): boolean {
+  return session.kind === "canon" && session.mode_at_start !== "lab";
+}
+
+function shouldPrintSetupSummary(guildId: string, report: SetupReport): boolean {
+  if (report.applied.length > 0 || report.errors.length > 0 || report.setupVersionChanged) {
+    if (report.warnings.length > 0) {
+      const warningDigest = report.warnings.join(" | ");
+      setupWarningDigestByGuild.set(guildId, warningDigest);
     }
+    return true;
   }
 
-  const sessionsReferenced = Array.from(
-    new Set(Array.from(allEvents.values()).map((e) => e.session_id))
+  if (report.warnings.length === 0) {
+    return false;
+  }
+
+  const warningDigest = report.warnings.join(" | ");
+  const previousDigest = setupWarningDigestByGuild.get(guildId);
+  if (previousDigest === warningDigest) {
+    return false;
+  }
+  setupWarningDigestByGuild.set(guildId, warningDigest);
+  return true;
+}
+
+function renderSetupSummary(report: SetupReport): string[] {
+  return metaMeepoVoice.wake.setupSummaryLines(report.applied, report.warnings, report.errors);
+}
+
+async function runDoctorChecks(interaction: any, ctx: CommandCtx): Promise<DoctorCheck[]> {
+  const guildId = interaction.guildId as string;
+  const channel = interaction.channel;
+  const botMember = interaction.guild?.members?.me ?? null;
+  const checks: DoctorCheck[] = [];
+
+  const campaignSlug = ctx.campaignSlug;
+  checks.push(
+    campaignSlug
+      ? { icon: "✅", label: "Campaign slug resolved", action: "No action needed" }
+      : { icon: "❌", label: "Campaign slug missing", action: "Run /meepo wake to initialize guild setup" }
   );
 
-  const totalUniqueLines = Array.from(uniqueLineCountBySession.values()).reduce((acc, n) => acc + n, 0);
+  const textPerms = channel && botMember ? channel.permissionsFor(botMember) : null;
+  const canSend = Boolean(textPerms?.has(PermissionFlagsBits.SendMessages));
+  const canEmbed = Boolean(textPerms?.has(PermissionFlagsBits.EmbedLinks));
+  const canAttach = Boolean(textPerms?.has(PermissionFlagsBits.AttachFiles));
+  checks.push(
+    canSend
+      ? { icon: "✅", label: "Send messages in current channel", action: "No action needed" }
+      : { icon: "❌", label: "Cannot send messages in current channel", action: "Grant Send Messages for the bot in this channel" }
+  );
+  checks.push(
+    canEmbed
+      ? { icon: "✅", label: "Embed links in current channel", action: "No action needed" }
+      : { icon: "⚠️", label: "Embed links unavailable", action: "Grant Embed Links to improve rich status output" }
+  );
+  checks.push(
+    canAttach
+      ? { icon: "✅", label: "Attach files in current channel", action: "No action needed" }
+      : { icon: "⚠️", label: "Attach files unavailable", action: "Grant Attach Files so recap exports can upload" }
+  );
 
-  const lines: string[] = [];
-  lines.push("**Debug Recall (no LLM)**");
-  lines.push(`Query: ${queryText}`);
-  lines.push("");
-
-  lines.push("**Registry matches**");
-  if (matches.length === 0) {
-    lines.push("- none");
+  const homeVoice = getGuildHomeVoiceChannelId(guildId);
+  if (!homeVoice) {
+    checks.push({
+      icon: "⚠️",
+      label: "Home voice channel not configured",
+      action: "Set one with /meepo settings set home-voice:<channel>",
+    });
   } else {
-    for (const m of matches) {
-      lines.push(`- ${m.canonical} (${m.entity_id}) via \"${m.matched_text}\"`);
+    try {
+      const voiceChannel = await interaction.guild.channels.fetch(homeVoice);
+      if (!voiceChannel || !voiceChannel.isVoiceBased()) {
+        checks.push({
+          icon: "❌",
+          label: "Home voice channel invalid",
+          action: "Set a valid voice channel with /meepo settings set home-voice:<channel>",
+        });
+      } else {
+        const voicePerms = voiceChannel.permissionsFor(botMember);
+        const canConnect = Boolean(voicePerms?.has(PermissionFlagsBits.Connect));
+        const canSpeak = Boolean(voicePerms?.has(PermissionFlagsBits.Speak));
+        checks.push(
+          canConnect && canSpeak
+            ? { icon: "✅", label: "Voice connect/speak permissions", action: "No action needed" }
+            : {
+                icon: "❌",
+                label: "Voice connect/speak missing",
+                action: "Grant Connect and Speak in the configured home voice channel",
+              }
+        );
+      }
+    } catch {
+      checks.push({
+        icon: "❌",
+        label: "Home voice channel lookup failed",
+        action: "Re-set home voice with /meepo settings set home-voice:<channel>",
+      });
     }
   }
-  lines.push("");
 
-  lines.push("**Events found per match**");
-  if (eventsByMatch.length === 0 || allEvents.size === 0) {
-    lines.push("- none");
+  checks.push(
+    cfg.openai.apiKey
+      ? { icon: "✅", label: "OPENAI_API_KEY configured", action: "No action needed" }
+      : { icon: "❌", label: "OPENAI_API_KEY missing", action: "Set OPENAI_API_KEY in environment before starting the bot" }
+  );
+
+  checks.push(
+    hasTtsAvailable()
+      ? { icon: "✅", label: "TTS provider available", action: "No action needed" }
+      : { icon: "⚠️", label: "TTS unavailable (text-only mode)", action: "Set TTS_ENABLED=1 and non-noop TTS_PROVIDER to enable voice replies" }
+  );
+
+  const session = (getActiveSession(guildId) as SessionRow | null) ?? getMostRecentSession(guildId);
+  if (!session) {
+    checks.push({
+      icon: "⚠️",
+      label: "No session data yet",
+      action: "Run /meepo wake then start a session and generate a recap",
+    });
   } else {
-    for (const group of eventsByMatch) {
-      lines.push(`- ${group.match.canonical}: ${group.events.length}`);
+    const baseStatus = getBaseStatus(ctx.campaignSlug, session.session_id, session.label);
+    checks.push(
+      baseStatus.exists
+        ? { icon: "✅", label: "Base recap artifact present", action: "No action needed" }
+        : { icon: "⚠️", label: "Base recap artifact missing", action: "Run /meepo sessions recap to generate base + final artifacts" }
+    );
+  }
+
+  return checks;
+}
+
+function formatRecapStatusForList(session: SessionRow, recap: SessionArtifactRow | null): string {
+  if (!canGenerateRecap(session)) return "—";
+  return recap ? "✅" : "❌";
+}
+
+function formatSessionChoice(session: SessionRow, idx: number): { name: string; value: string } {
+  const label = session.label ?? "(unlabeled)";
+  const date = new Date(session.started_at_ms).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+  const idShort = String(session.session_id).slice(0, 8);
+  return {
+    name: `#${idx + 1} — ${label} (${date}, ${idShort})`.slice(0, 100),
+    value: String(session.session_id),
+  };
+}
+
+async function ensureVoiceConnection(interaction: any, guildId: string): Promise<{
+  joinedVoiceChannelId: string | null;
+  stayPutNotice: string | null;
+  notInVoiceNotice: string | null;
+}> {
+  const guild = interaction.guild;
+  const member = await guild.members.fetch(interaction.user.id);
+  const invokerVoiceChannelId = member.voice.channelId ?? null;
+  const currentVoiceState = getVoiceState(guildId);
+
+  if (currentVoiceState) {
+    startReceiver(guildId);
+    setVoiceHushEnabled(guildId, true);
+    return {
+      joinedVoiceChannelId: null,
+      stayPutNotice:
+        invokerVoiceChannelId && invokerVoiceChannelId !== currentVoiceState.channelId
+          ? metaMeepoVoice.wake.stayPutNotice(formatChannel(currentVoiceState.channelId))
+          : null,
+      notInVoiceNotice: null,
+    };
+  }
+
+  if (!invokerVoiceChannelId) {
+    return {
+      joinedVoiceChannelId: null,
+      stayPutNotice: null,
+      notInVoiceNotice: metaMeepoVoice.wake.notInVoiceNotice(),
+    };
+  }
+
+  const connection = await joinVoice({
+    guildId,
+    channelId: invokerVoiceChannelId,
+    adapterCreator: guild.voiceAdapterCreator,
+  });
+
+  setVoiceState(guildId, {
+    channelId: invokerVoiceChannelId,
+    connection,
+    guild,
+    sttEnabled: true,
+    hushEnabled: true,
+    connectedAt: Date.now(),
+  });
+
+  startReceiver(guildId);
+
+  if (!getGuildHomeVoiceChannelId(guildId)) {
+    setGuildHomeVoiceChannelId(guildId, invokerVoiceChannelId);
+  }
+
+  return {
+    joinedVoiceChannelId: invokerVoiceChannelId,
+    stayPutNotice: null,
+    notInVoiceNotice: null,
+  };
+}
+
+async function handleWake(interaction: any, ctx: CommandCtx): Promise<void> {
+  const guildId = interaction.guildId as string;
+  const invocationChannelId = interaction.channelId as string;
+  const requestedSessionLabel = interaction.options.getString("session")?.trim() ?? null;
+
+  const setupReport = await ensureGuildSetup({
+    guildId,
+    guildName: interaction.guild?.name ?? null,
+    interaction,
+  });
+
+  if (setupReport.errors.length > 0) {
+    const setupSummaryLines = renderSetupSummary(setupReport);
+    await interaction.reply({
+      content: metaMeepoVoice.wake.blockedDueToSetup(setupSummaryLines),
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (!getActiveMeepo(guildId)) {
+    wakeMeepo({ guildId, channelId: invocationChannelId });
+  }
+
+  let joinedVoiceChannelId: string | null = null;
+  let stayPutNotice: string | null = null;
+  let notInVoiceNotice: string | null = null;
+  if (setupReport.canAttemptVoice) {
+    const voiceResult = await ensureVoiceConnection(interaction, guildId);
+    joinedVoiceChannelId = voiceResult.joinedVoiceChannelId;
+    stayPutNotice = voiceResult.stayPutNotice;
+    notInVoiceNotice = voiceResult.notInVoiceNotice;
+  } else {
+    notInVoiceNotice = metaMeepoVoice.wake.voiceConnectSkipped();
+  }
+
+  setReplyMode(ctx.db, guildId, "text");
+  setVoiceHushEnabled(guildId, true);
+
+  const previousSession = getActiveSession(guildId);
+  let startedSession: SessionRow | null = null;
+  let endedPrevious = false;
+
+  if (previousSession) {
+    if (requestedSessionLabel) {
+      endSession(guildId, "session_switch");
+      endedPrevious = true;
+      logSystemEvent({
+        guildId,
+        channelId: invocationChannelId,
+        eventType: "SESSION_ENDED",
+        content: JSON.stringify({ id: previousSession.session_id }),
+        authorId: interaction.user.id,
+        authorName: interaction.user.username,
+        narrativeWeight: "secondary",
+      });
+    } else {
+      endSession(guildId, "wake_ambient");
+      endedPrevious = true;
+      logSystemEvent({
+        guildId,
+        channelId: invocationChannelId,
+        eventType: "SESSION_ENDED",
+        content: JSON.stringify({ id: previousSession.session_id }),
+        authorId: interaction.user.id,
+        authorName: interaction.user.username,
+        narrativeWeight: "secondary",
+      });
     }
   }
-  lines.push("");
 
-  lines.push("**Sessions referenced**");
-  if (sessionsReferenced.length === 0) {
-    lines.push("- none");
-  } else {
-    for (const sessionId of sessionsReferenced) {
-      const label = sessionLabelById.get(sessionId);
-      const fetched = uniqueLineCountBySession.get(sessionId) ?? 0;
-      const requested = requestedLineCountBySession.get(sessionId) ?? 0;
-      const missing = missingLinesBySession.get(sessionId) ?? [];
-      lines.push(`- ${label ?? "(unlabeled)"} [${sessionId.slice(0, 8)}…]: requested ${requested}, fetched ${fetched}, missing ${missing.length}`);
+  if (requestedSessionLabel) {
+    startedSession = startSession(guildId, interaction.user.id, interaction.user.username, {
+      label: requestedSessionLabel,
+      source: "live",
+      modeAtStart: "canon",
+      kind: "canon",
+    }) as SessionRow;
+
+    logSystemEvent({
+      guildId,
+      channelId: invocationChannelId,
+      eventType: "SESSION_STARTED",
+      content: JSON.stringify({ id: startedSession.session_id, label: startedSession.label }),
+      authorId: interaction.user.id,
+      authorName: interaction.user.username,
+      narrativeWeight: "secondary",
+    });
+  }
+
+  const activeSession = getActiveSession(guildId) as SessionRow | null;
+  const effectiveMode = resolveEffectiveMode(guildId);
+  const effectivePersonaId = getEffectivePersonaId(guildId);
+  const effectivePersona = getPersona(effectivePersonaId);
+  const homeText = getGuildHomeTextChannelId(guildId);
+  const homeVoice = resolveGuildHomeVoiceChannelId(guildId, cfg.overlay.homeVoiceChannelId ?? null);
+
+  const setupSummaryLines = shouldPrintSetupSummary(guildId, setupReport) ? renderSetupSummary(setupReport) : [];
+  const responseLines = metaMeepoVoice.wake.replyLines({
+    startedSessionLabel: startedSession?.label ?? null,
+    activeSessionLabel: activeSession ? getSessionDisplayLabel(activeSession) : null,
+    endedPrevious,
+    effectiveMode,
+    personaDisplayName: effectivePersona.displayName,
+    personaId: effectivePersonaId,
+    homeText: formatChannel(homeText),
+    homeVoice: formatChannel(homeVoice),
+    joinedVoice: joinedVoiceChannelId ? formatChannel(joinedVoiceChannelId) : null,
+    stayPutNotice,
+    notInVoiceNotice,
+    setupSummaryLines,
+  });
+
+  await interaction.reply({ content: responseLines.join("\n"), ephemeral: true });
+}
+
+async function handleSleep(interaction: any): Promise<void> {
+  const guildId = interaction.guildId as string;
+  const activeSession = getActiveSession(guildId) as SessionRow | null;
+
+  if (activeSession) {
+    endSession(guildId, "sleep");
+    logSystemEvent({
+      guildId,
+      channelId: interaction.channelId,
+      eventType: "SESSION_ENDED",
+      content: JSON.stringify({ id: activeSession.session_id }),
+      authorId: interaction.user.id,
+      authorName: interaction.user.username,
+      narrativeWeight: "secondary",
+    });
+  }
+
+  const currentVoiceState = getVoiceState(guildId);
+  if (currentVoiceState) {
+    stopReceiver(guildId);
+    leaveVoice(guildId);
+  }
+
+  const changed = sleepMeepo(guildId);
+
+  if (!changed && !activeSession) {
+    await interaction.reply({ content: metaMeepoVoice.sleep.alreadyAsleep(), ephemeral: true });
+    return;
+  }
+
+  if (activeSession) {
+    await interaction.reply({
+      content: metaMeepoVoice.sleep.sessionEnded(getSessionDisplayLabel(activeSession)),
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await interaction.reply({ content: metaMeepoVoice.sleep.asleep(), ephemeral: true });
+}
+
+async function handleTalk(interaction: any, ctx: CommandCtx): Promise<void> {
+  const guildId = interaction.guildId as string;
+  const active = getActiveMeepo(guildId);
+  if (!active) {
+    await interaction.reply({ content: metaMeepoVoice.talk.requiresWake(), ephemeral: true });
+    return;
+  }
+
+  const currentVoiceState = getVoiceState(guildId);
+  if (!currentVoiceState) {
+    await interaction.reply({
+      content: metaMeepoVoice.talk.requiresVoiceConnection(),
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (!hasTtsAvailable()) {
+    setReplyMode(ctx.db, guildId, "text");
+    setVoiceHushEnabled(guildId, true);
+    const ttsInfo = getTtsProviderInfo();
+    await interaction.reply({
+      content: metaMeepoVoice.talk.ttsUnavailable(ttsInfo.name),
+      ephemeral: true,
+    });
+    return;
+  }
+
+  setReplyMode(ctx.db, guildId, "voice");
+  setVoiceHushEnabled(guildId, false);
+
+  await interaction.reply({
+    content: metaMeepoVoice.talk.enabled(),
+    ephemeral: true,
+  });
+}
+
+async function handleHush(interaction: any, ctx: CommandCtx): Promise<void> {
+  const guildId = interaction.guildId as string;
+  const active = getActiveMeepo(guildId);
+  if (!active) {
+    await interaction.reply({ content: metaMeepoVoice.hush.requiresWake(), ephemeral: true });
+    return;
+  }
+
+  const voiceState = getVoiceState(guildId);
+  if (voiceState) {
+    setVoiceHushEnabled(guildId, true);
+    voicePlaybackController.abort(guildId, "hush_mode_enabled", {
+      channelId: voiceState.channelId,
+      authorId: interaction.user.id,
+      authorName: interaction.user.username,
+      source: "command",
+      logSystemEvent: true,
+    });
+  }
+
+  setReplyMode(ctx.db, guildId, "text");
+
+  await interaction.reply({
+    content: metaMeepoVoice.hush.enabled(),
+    ephemeral: true,
+  });
+}
+
+async function handleSessionsRecap(interaction: any): Promise<void> {
+  const guildId = interaction.guildId as string;
+  const sessionId = interaction.options.getString("session", true);
+  const force = interaction.options.getBoolean("force") ?? false;
+  const configuredDefaultStyle = getGuildDefaultRecapStyle(guildId);
+  const strategy =
+    (interaction.options.getString("style") ?? configuredDefaultStyle ?? DEFAULT_RECAP_STRATEGY) as RecapStrategy;
+
+  const session = getSessionById(guildId, sessionId) as SessionRow | null;
+  if (!session) {
+    await interaction.reply({ content: metaMeepoVoice.sessions.sessionNotFound(), ephemeral: true });
+    return;
+  }
+
+  if (!canGenerateRecap(session)) {
+    await interaction.reply({
+      content: metaMeepoVoice.sessions.recapMissingCanon(),
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  logSystemEvent({
+    guildId,
+    channelId: interaction.channelId,
+    eventType: "SESSION_RECAP_REQUESTED",
+    content: JSON.stringify({ id: session.session_id, force, strategy }),
+    authorId: interaction.user.id,
+    authorName: interaction.user.username,
+    narrativeWeight: "secondary",
+  });
+
+  const recap = await generateSessionRecap({
+    guildId,
+    sessionId: session.session_id,
+    force,
+    strategy,
+  });
+
+  const sessionLabel = getSessionDisplayLabel(session);
+  const previewText = recap.text.length > 700 ? `${recap.text.slice(0, 700)}…` : recap.text;
+  const fileStem = buildSessionArtifactStem(session.session_id, session.label);
+  const fileName = `${fileStem}-recap-${strategy}.md`;
+  const file = new AttachmentBuilder(Buffer.from(recap.text, "utf8"), { name: fileName });
+
+  await interaction.editReply({
+    content: metaMeepoVoice.sessions.recapResult({
+      cacheHit: recap.cacheHit,
+      sessionLabel,
+      strategy: recap.strategy,
+      finalVersion: recap.finalVersion,
+      baseVersion: recap.baseVersion,
+      sourceHashShort: recap.sourceTranscriptHash.slice(0, 12),
+      previewText,
+    }),
+    files: [file],
+  });
+}
+
+async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> {
+  const guildId = interaction.guildId as string;
+  const sub = interaction.options.getSubcommand();
+
+  if (sub === "list") {
+    const limit = interaction.options.getInteger("limit") ?? 10;
+    const rows = listSessions(guildId, limit) as SessionRow[];
+    if (rows.length === 0) {
+      await interaction.reply({ content: metaMeepoVoice.sessions.listEmpty(), ephemeral: true });
+      return;
     }
-  }
-  lines.push("");
 
-  lines.push("**How many transcript lines will be fetched**");
-  lines.push(`- ${totalUniqueLines} unique lines (deduped by session)`);
-  lines.push("");
+    const recapBySession = getSessionArtifactMap(
+      guildId,
+      rows.map((session) => session.session_id),
+      "recap_final"
+    );
 
-  lines.push("**Relevant GPTcap beats (if enabled)**");
-  let totalBeats = 0;
-  for (const [sessionId, beats] of beatsBySession.entries()) {
-    totalBeats += beats.length;
+    const lines = metaMeepoVoice.sessions.listLines(
+      rows.map((session, index) => {
+        const date = new Date(session.started_at_ms).toISOString().replace("T", " ").slice(0, 16);
+        const recap = recapBySession.get(session.session_id) as SessionArtifactRow | undefined;
+        return {
+          index,
+          date,
+          label: getSessionDisplayLabel(session),
+          kindTag: getSessionKindTag(session),
+          recapStatus: formatRecapStatusForList(session, recap ?? null),
+        };
+      })
+    );
+
+    await interaction.reply({ content: lines.join("\n"), ephemeral: true });
+    return;
   }
-  if (totalBeats === 0) {
-    lines.push("- none (GPTcaps disabled or no overlaps)");
-  } else {
-    for (const [sessionId, beats] of beatsBySession.entries()) {
-      const label = sessionLabelById.get(sessionId);
-      if (beats.length > 0) {
-        lines.push(`- ${label ?? "(unlabeled)"}: ${beats.length} beats`);
-        for (const scored of beats.slice(0, 3)) {
-          const preview = scored.beat.text.slice(0, 60);
-          lines.push(`  [${scored.beatIndex}] score=${scored.score}: ${preview}${scored.beat.text.length > 60 ? "..." : ""}`);
-        }
+
+  if (sub === "view") {
+    const sessionId = interaction.options.getString("session", true);
+    const session = getSessionById(guildId, sessionId) as SessionRow | null;
+
+    if (!session) {
+      await interaction.reply({ content: metaMeepoVoice.sessions.sessionNotFound(), ephemeral: true });
+      return;
+    }
+
+    const recap = getSessionArtifact(guildId, session.session_id, "recap_final") as SessionArtifactRow | null;
+    const transcriptArtifact = getSessionArtifact(
+      guildId,
+      session.session_id,
+      "transcript_export"
+    ) as SessionArtifactRow | null;
+    const effectiveCampaignSlug = ctx.campaignSlug;
+
+    const baseStatus = getBaseStatus(effectiveCampaignSlug, session.session_id, session.label);
+    const finalFileForDbStyle =
+      recap && recap.strategy && RECAP_STRATEGIES.includes(recap.strategy as RecapPassStrategy)
+        ? getFinalStatus(effectiveCampaignSlug, session.session_id, recap.strategy as RecapPassStrategy, session.label)
+        : getFinalStatus(effectiveCampaignSlug, session.session_id, undefined, session.label);
+    const allFinalFiles = getAllFinalStatuses(effectiveCampaignSlug, session.session_id, session.label);
+    const hasAnyFinalFiles = allFinalFiles.some((status) => status.exists);
+
+    const recapExists = Boolean(recap);
+    const transcriptStatus = transcriptArtifact ? "available" : "not cached yet";
+
+    let recapMeta: Record<string, unknown> = {};
+    try {
+      recapMeta = recap?.meta_json ? (JSON.parse(recap.meta_json) as Record<string, unknown>) : {};
+    } catch {
+      recapMeta = {};
+    }
+
+    const finalStyle = (recapMeta.final_style as string | undefined) ?? recap?.strategy ?? "(n/a)";
+    const finalVersion =
+      (recapMeta.final_version as string | undefined) ?? recap?.strategy_version ?? "(n/a)";
+    const baseVersion = (recapMeta.base_version as string | undefined) ?? "(n/a)";
+
+    let nextActionLine: string | null = null;
+    if (!baseStatus.exists && canGenerateRecap(session)) {
+      nextActionLine = metaMeepoVoice.sessions.nextActionGenerateBase(session.session_id, DEFAULT_RECAP_STRATEGY);
+    } else if (!recapExists && canGenerateRecap(session)) {
+      nextActionLine = metaMeepoVoice.sessions.nextActionGenerateFinal(session.session_id, DEFAULT_RECAP_STRATEGY);
+    } else if (recapExists) {
+      nextActionLine = metaMeepoVoice.sessions.nextActionRegenerate(session.session_id, DEFAULT_RECAP_STRATEGY);
+    }
+
+    const lines = metaMeepoVoice.sessions.viewLines({
+      sessionId: session.session_id,
+      label: getSessionDisplayLabel(session),
+      startedIso: new Date(session.started_at_ms).toISOString(),
+      endedIso: session.ended_at_ms ? new Date(session.ended_at_ms).toISOString() : "(active)",
+      kind: session.kind,
+      baseExists: baseStatus.exists,
+      baseHash: baseStatus.sourceHash ? `${baseStatus.sourceHash.slice(0, 12)}…` : "(n/a)",
+      baseVersion: baseStatus.baseVersion ?? "(n/a)",
+      recapExists,
+      finalStyle,
+      finalCreatedAt: recap?.created_at_ms ? new Date(recap.created_at_ms).toISOString() : "(n/a)",
+      finalHash: recap?.source_hash ? `${recap.source_hash.slice(0, 12)}…` : "(n/a)",
+      finalVersion,
+      linkedBaseVersion: baseVersion,
+      transcriptStatus,
+      dbRowMissingFileNotice: recapExists && !finalFileForDbStyle.exists,
+      hasUnindexedFilesNotice: !recapExists && hasAnyFinalFiles,
+      nextActionLine,
+      transcriptMissingNotice: !transcriptArtifact,
+    });
+
+    const files: AttachmentBuilder[] = [];
+    if (recap) {
+      const fileStem = buildSessionArtifactStem(session.session_id, session.label);
+      const fileName = `${fileStem}-recap-final-${recap.strategy ?? DEFAULT_RECAP_STRATEGY}.md`;
+      if (finalFileForDbStyle.exists && finalFileForDbStyle.paths?.recapPath && fs.existsSync(finalFileForDbStyle.paths.recapPath)) {
+        files.push(
+          new AttachmentBuilder(fs.readFileSync(finalFileForDbStyle.paths.recapPath), {
+            name: fileName,
+          })
+        );
+      } else if (recap.content_text) {
+        files.push(
+          new AttachmentBuilder(Buffer.from(recap.content_text, "utf8"), {
+            name: fileName,
+          })
+        );
       }
     }
-  }
-  lines.push("");
 
-  lines.push("**Memory Context Preview (formatted for LLM)**");
-  if (memoryContextPreview) {
-    const previewLines = memoryContextPreview.split("\n").slice(0, 15); // Limit preview for Discord
-    lines.push("```");
-    lines.push(...previewLines);
-    if (memoryContextPreview.split("\n").length > 15) {
-      lines.push("...(truncated for Discord)");
+    if (transcriptArtifact?.content_text) {
+      const fileStem = buildSessionArtifactStem(session.session_id, session.label);
+      files.push(
+        new AttachmentBuilder(Buffer.from(transcriptArtifact.content_text, "utf8"), {
+          name: `${fileStem}-transcript.txt`,
+        })
+      );
     }
-    lines.push("```");
-  } else {
-    lines.push("- none (no beats or transcript lines)");
+
+    await interaction.reply({
+      content: lines.join("\n"),
+      files,
+      ephemeral: true,
+    });
+    return;
   }
 
-  const content = lines.join("\n");
-  return content.length > 1900 ? `${content.slice(0, 1890)}\n…(truncated)` : content;
+  if (sub === "recap") {
+    await handleSessionsRecap(interaction);
+    return;
+  }
+
+  await interaction.reply({ content: metaMeepoVoice.sessions.unknownAction(), ephemeral: true });
+}
+
+async function handleSettings(interaction: any): Promise<void> {
+  const guildId = interaction.guildId as string;
+  const sub = interaction.options.getSubcommand();
+
+  if (sub === "view") {
+    const config = getGuildConfig(guildId);
+    const homeText = getGuildHomeTextChannelId(guildId);
+    const homeVoice = resolveGuildHomeVoiceChannelId(guildId, cfg.overlay.homeVoiceChannelId ?? null);
+    const canonMode = getGuildCanonPersonaMode(guildId) ?? "meta";
+    const canonPersonaId = getGuildCanonPersonaId(guildId) ?? "(auto)";
+    const recapStyle = getGuildDefaultRecapStyle(guildId) ?? DEFAULT_RECAP_STRATEGY;
+    const setupVersion = getGuildSetupVersion(guildId) ?? 0;
+    await interaction.reply({
+      content: metaMeepoVoice.settings.viewSummary({
+        setupVersion,
+        campaignSlug: config?.campaign_slug ?? "(unset)",
+        homeTextChannel: formatChannel(homeText),
+        homeVoiceChannel: formatChannel(homeVoice),
+        canonMode,
+        canonPersona: canonPersonaId,
+        defaultRecapStyle: recapStyle,
+      }),
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (sub === "set") {
+    const canonMode = interaction.options.getString("canon_mode") as "diegetic" | "meta" | null;
+    const canonPersona = interaction.options.getString("canon_persona");
+    const recapStyle = interaction.options.getString("recap_style") as RecapStrategy | null;
+    const homeVoice = interaction.options.getChannel("home_voice");
+
+    const providedCount = [canonMode, canonPersona, recapStyle, homeVoice].filter(Boolean).length;
+    if (providedCount !== 1) {
+      await interaction.reply({
+        content: metaMeepoVoice.settings.setExactlyOneOptionError(),
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (canonMode) {
+      setGuildCanonPersonaMode(guildId, canonMode);
+      await interaction.reply({ content: metaMeepoVoice.settings.updatedCanonMode(canonMode), ephemeral: true });
+      return;
+    }
+
+    if (canonPersona) {
+      try {
+        getPersona(canonPersona);
+      } catch {
+        await interaction.reply({ content: metaMeepoVoice.settings.unknownPersona(canonPersona), ephemeral: true });
+        return;
+      }
+      setGuildCanonPersonaId(guildId, canonPersona);
+      await interaction.reply({ content: metaMeepoVoice.settings.updatedCanonPersona(canonPersona), ephemeral: true });
+      return;
+    }
+
+    if (recapStyle) {
+      setGuildDefaultRecapStyle(guildId, recapStyle);
+      await interaction.reply({ content: metaMeepoVoice.settings.updatedRecapStyle(recapStyle), ephemeral: true });
+      return;
+    }
+
+    if (homeVoice) {
+      setGuildHomeVoiceChannelId(guildId, homeVoice.id);
+      await interaction.reply({ content: metaMeepoVoice.settings.updatedHomeVoice(formatChannel(homeVoice.id)), ephemeral: true });
+      return;
+    }
+  }
+
+  await interaction.reply({ content: metaMeepoVoice.settings.unknownAction(), ephemeral: true });
+}
+
+async function handleDoctor(interaction: any, ctx: CommandCtx): Promise<void> {
+  const checks = await runDoctorChecks(interaction, ctx);
+  await interaction.reply({ content: metaMeepoVoice.doctor.report(checks), ephemeral: true });
+}
+
+async function handleStatus(interaction: any, ctx: CommandCtx): Promise<void> {
+  const guildId = interaction.guildId as string;
+  const active = getActiveMeepo(guildId);
+  const voiceState = getVoiceState(guildId);
+  const homeText = getGuildHomeTextChannelId(guildId);
+  const homeVoice = resolveGuildHomeVoiceChannelId(guildId, cfg.overlay.homeVoiceChannelId ?? null);
+  const sttInfo = getSttProviderInfo();
+  const ttsInfo = getTtsProviderInfo();
+  const effectiveMode = resolveEffectiveMode(guildId);
+  const canonMode = getGuildCanonPersonaMode(guildId) ?? "meta";
+  const configuredCanonPersona = getGuildCanonPersonaId(guildId) ?? "(auto)";
+  const effectivePersonaId = getEffectivePersonaId(guildId);
+  const effectivePersona = getPersona(effectivePersonaId);
+  const setupVersion = getGuildSetupVersion(guildId) ?? 0;
+
+  const activeSession = getActiveSession(guildId) as SessionRow | null;
+  const statusSession = activeSession ?? getMostRecentSession(guildId);
+
+  const lastTranscriptionRow = ctx.db
+    .prepare(
+      `
+      SELECT MAX(timestamp_ms) AS ts
+      FROM ledger_entries
+      WHERE guild_id = ?
+        AND tags LIKE '%voice%'
+      `
+    )
+    .get(guildId) as { ts: number | null } | undefined;
+
+  const awake = Boolean(active);
+  const talkMode = awake && active?.reply_mode === "voice" && Boolean(voiceState) && !isVoiceHushEnabled(guildId);
+  const voiceMode = awake ? (talkMode ? "talk" : "hush") : "asleep";
+
+  const hints: string[] = [];
+  if (awake && !voiceState) {
+    hints.push(metaMeepoVoice.status.hintJoinVoice());
+  }
+  if (!hasTtsAvailable()) {
+    hints.push(metaMeepoVoice.status.hintEnableTts());
+  }
+  if (!homeText) {
+    hints.push(metaMeepoVoice.status.hintSetHomeText());
+  }
+
+  const baseStatus = statusSession
+    ? getBaseStatus(ctx.campaignSlug, statusSession.session_id, statusSession.label)
+    : null;
+  const recapFinal = statusSession
+    ? (getSessionArtifact(guildId, statusSession.session_id, "recap_final") as SessionArtifactRow | null)
+    : null;
+  let recapFinalMeta: Record<string, unknown> | null = null;
+  try {
+    recapFinalMeta = recapFinal?.meta_json ? (JSON.parse(recapFinal.meta_json) as Record<string, unknown>) : null;
+  } catch {
+    recapFinalMeta = null;
+  }
+  const finalStyle = ((recapFinalMeta?.final_style as string | undefined) ?? recapFinal?.strategy ?? "(none)");
+  const finalCreatedAt = recapFinal?.created_at_ms
+    ? new Date(recapFinal.created_at_ms).toISOString()
+    : "(none)";
+  const finalHash = recapFinal?.source_hash ? `${recapFinal.source_hash.slice(0, 12)}…` : "(none)";
+
+  await interaction.reply({
+    content: metaMeepoVoice.status.snapshot({
+      setupVersion,
+      awake,
+      voiceMode,
+      effectiveMode,
+      canonMode,
+      configuredCanonPersona,
+      effectivePersonaDisplayName: effectivePersona.displayName,
+      effectivePersonaId,
+      activeSessionId: activeSession?.session_id ?? null,
+      activeSessionSummary: activeSession ? summarizeSession(activeSession) : "(none)",
+      homeText: formatChannel(homeText),
+      homeVoice: formatChannel(homeVoice),
+      inVoice: Boolean(voiceState),
+      connectedVoice: formatChannel(voiceState?.channelId ?? null),
+      sttActive: Boolean(voiceState?.sttEnabled),
+      sttProviderName: sttInfo.name,
+      lastTranscription: lastTranscriptionRow?.ts ? new Date(lastTranscriptionRow.ts).toISOString() : "(none)",
+      baseRecapCached: Boolean(baseStatus?.exists),
+      finalStyle,
+      finalCreatedAt,
+      finalHash,
+      ttsAvailable: hasTtsAvailable(),
+      ttsProviderName: ttsInfo.name,
+      hints,
+    }),
+    ephemeral: false,
+  });
 }
 
 export const meepo = {
   data: new SlashCommandBuilder()
     .setName("meepo")
-    .setDescription("Manage Meepo (wake, sleep, status, hush).")
-    .addSubcommandGroup((group) =>
-      group
-        .setName("debug")
-        .setDescription("Debug utilities.")
-        .addSubcommand((sub) =>
-          sub
-            .setName("recall")
-            .setDescription("Debug naive recall pipeline (no LLM).")
-            .addStringOption((opt) =>
-              opt
-                .setName("query")
-                .setDescription("User query to test retrieval against")
-                .setRequired(true)
-            )
-        )
-    )
+    .setDescription("Minimal Meepo controls.")
     .addSubcommand((sub) =>
       sub
         .setName("wake")
-        .setDescription("Awaken Meepo and bind it to this channel.")
+        .setDescription("Wake Meepo; optionally start a canon session.")
         .addStringOption((opt) =>
           opt
-            .setName("persona")
-            .setDescription("Optional persona seed (short).")
+            .setName("session")
+            .setDescription("Optional session label to start canon mode.")
             .setRequired(false)
         )
     )
+    .addSubcommand((sub) => sub.setName("sleep").setDescription("Put Meepo to sleep and end active session."))
+    .addSubcommandGroup((group) =>
+      group
+        .setName("sessions")
+        .setDescription("Browse sessions.")
         .addSubcommand((sub) =>
-      sub
-        .setName("persona-set")
-        .setDescription("[DM-only] Switch persona (meta, diegetic, rei, xoblob). Campaign needs active session.")
-        .addStringOption((opt) =>
-          opt
-            .setName("persona")
-            .setDescription("Persona to switch to")
-            .setRequired(true)
-            .addChoices(
-              { name: "Meta (companion mode)", value: "meta_meepo" },
-              { name: "Diegetic (in-character Meepo)", value: "diegetic_meepo" },
-              { name: "Rei", value: "rei" },
-              { name: "Xoblob (echo)", value: "xoblob" }
+          sub
+            .setName("list")
+            .setDescription("List recent sessions.")
+            .addIntegerOption((opt) =>
+              opt
+                .setName("limit")
+                .setDescription("How many sessions to show (default 10, max 50).")
+                .setRequired(false)
+                .setMinValue(1)
+                .setMaxValue(50)
+            )
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("view")
+            .setDescription("View a session by id.")
+            .addStringOption((opt) =>
+              opt
+                .setName("session")
+                .setDescription("Session id")
+                .setAutocomplete(true)
+                .setRequired(true)
+            )
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("recap")
+            .setDescription("Generate or regenerate a recap for a canon session.")
+            .addStringOption((opt) =>
+              opt
+                .setName("session")
+                .setDescription("Session id")
+                .setAutocomplete(true)
+                .setRequired(true)
+            )
+            .addStringOption((opt) =>
+              opt
+                .setName("style")
+                .setDescription("Final recap style")
+                .setRequired(false)
+                .addChoices(
+                  { name: "detailed", value: "detailed" },
+                  { name: "balanced", value: "balanced" },
+                  { name: "concise", value: "concise" }
+                )
+            )
+            .addBooleanOption((opt) =>
+              opt
+                .setName("force")
+                .setDescription("Force regeneration even if a recap already exists.")
+                .setRequired(false)
             )
         )
     )
-    .addSubcommand((sub) =>
-      sub
-        .setName("guild-config")
-        .setDescription("[DM-only] Set guild default persona or campaign slug.")
-        .addStringOption((opt) =>
-          opt
-            .setName("key")
-            .setDescription("Setting to change")
-            .setRequired(true)
-            .addChoices(
-              { name: "Default persona (on wake)", value: "default-persona" },
-              { name: "Campaign slug (registry folder)", value: "campaign-slug" },
-              { name: "Gold memory enabled (0/1)", value: "gold-memory-enabled" }
+    .addSubcommand((sub) => sub.setName("talk").setDescription("Enable voice replies (requires awake)."))
+    .addSubcommand((sub) => sub.setName("hush").setDescription("Disable voice replies (requires awake)."))
+    .addSubcommand((sub) => sub.setName("status").setDescription("Show current Meepo state and diagnostics."))
+    .addSubcommand((sub) => sub.setName("doctor").setDescription("Run deterministic diagnostics with next actions."))
+    .addSubcommandGroup((group) =>
+      group
+        .setName("settings")
+        .setDescription("Show or edit Meepo home channels.")
+        .addSubcommand((sub) => sub.setName("show").setDescription("Show saved home channels."))
+        .addSubcommand((sub) =>
+          sub
+            .setName("set")
+            .setDescription("Set a home channel.")
+            .addStringOption((opt) =>
+              opt
+                .setName("key")
+                .setDescription("Setting key")
+                .setRequired(true)
+                .addChoices(
+                  { name: "home_text_channel", value: "home_text_channel" },
+                  { name: "home_voice_channel", value: "home_voice_channel" }
+                )
+            )
+            .addChannelOption((opt) =>
+              opt.setName("channel").setDescription("Channel value").setRequired(true)
             )
         )
-        .addStringOption((opt) =>
-          opt
-            .setName("value")
-            .setDescription("Value (e.g. rei, meta_meepo, pandas-dd-server)")
-            .setRequired(true)
-        )
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("debug-persona")
-        .setDescription("[DM-only] Show active persona, mindspace, and last memory refs.")
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("sleep")
-        .setDescription("Put Meepo to sleep.")
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("status")
-        .setDescription("Show Meepo's current state.")
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("mode")
-        .setDescription("Get or set global Meepo mode for this guild.")
-        .addStringOption((opt) =>
-          opt
-            .setName("value")
-            .setDescription("Optional: set mode (DM-only)")
-            .setRequired(false)
-            .addChoices(
-              { name: "canon", value: "canon" },
-              { name: "ambient", value: "ambient" },
-              { name: "lab", value: "lab" },
-              { name: "dormant", value: "dormant" }
+        .addSubcommand((sub) =>
+          sub
+            .setName("clear")
+            .setDescription("Clear a saved home channel.")
+            .addStringOption((opt) =>
+              opt
+                .setName("key")
+                .setDescription("Setting key")
+                .setRequired(true)
+                .addChoices(
+                  { name: "home_text_channel", value: "home_text_channel" },
+                  { name: "home_voice_channel", value: "home_voice_channel" }
+                )
             )
         )
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("transform")
-        .setDescription("[Deprecated] Use /meepo persona-set instead. Transform into a form (meepo, xoblob).")
-        .addStringOption((opt) =>
-          opt
-            .setName("character")
-            .setDescription("Character to mimic (meepo, xoblob)")
-            .setRequired(true)
-            .addChoices(
-              { name: "Meepo (default)", value: "meepo" },
-              { name: "Old Xoblob", value: "xoblob" }
-            )
-        )
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("join")
-        .setDescription("Join your voice channel (requires /meepo wake first).")
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("leave")
-        .setDescription("Leave voice channel.")
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("hush")
-        .setDescription("Stop Meepo voice playback immediately.")
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("stt")
-        .setDescription("Manage speech-to-text (STT) transcription.")
-        .addStringOption((opt) =>
-          opt
-            .setName("action")
-            .setDescription("Enable, disable, or check STT status")
-            .setRequired(true)
-            .addChoices(
-              { name: "on", value: "on" },
-              { name: "off", value: "off" },
-              { name: "status", value: "status" }
-            )
-        )
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("say")
-        .setDescription("[DM-only] Force Meepo to speak text aloud in voice channel.")
-        .addStringOption((opt) =>
-          opt
-            .setName("text")
-            .setDescription("Text for Meepo to speak")
-            .setRequired(true)
-        )
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("set-speaker-mask")
-        .setDescription("[DM-only] Set diegetic name for a user (prevents OOC name leakage).")
-        .addUserOption((opt) =>
-          opt
-            .setName("user")
-            .setDescription("User to mask")
-            .setRequired(true)
-        )
-        .addStringOption((opt) =>
-          opt
-            .setName("mask")
-            .setDescription("Diegetic name (e.g., 'Narrator', 'Dungeon Master')")
-            .setRequired(true)
-        )
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("clear-speaker-mask")
-        .setDescription("[DM-only] Remove speaker mask for a user.")
-        .addUserOption((opt) =>
-          opt
-            .setName("user")
-            .setDescription("User to unmask")
-            .setRequired(true)
-        )
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("reply")
-        .setDescription("Set how Meepo responds (voice or text).")
-        .addStringOption((opt) =>
-          opt
-            .setName("mode")
-            .setDescription("Reply mode")
-            .setRequired(true)
-            .addChoices(
-              { name: "text", value: "text" },
-              { name: "voice", value: "voice" }
-            )
-        )
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("announce")
-        .setDescription("[DM-only] Post a session reminder to the announcement channel")
-        .addIntegerOption((opt) =>
-          opt.setName("timestamp").setDescription("Unix seconds for reminder (optional)").setRequired(false)
-        )
-        .addStringOption((opt) =>
-          opt.setName("label").setDescription("Session label override (e.g., 'C2E15')").setRequired(false)
-        )
-        .addStringOption((opt) =>
-          opt
-            .setName("message")
-            .setDescription("Custom message prefix (default: 'Reminder that our D&D session')")
-            .setRequired(false)
-        )
-        .addBooleanOption((opt) =>
-          opt.setName("dry_run").setDescription("Preview without posting (default: false)").setRequired(false)
-        )
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("interactions")
-        .setDescription("[DM-only] Debug: list last 5 Tier S interactions for you; snippet resolution, persona, guild.")
     ),
 
-  async execute(interaction: any, ctx: CommandCtx | null) {
-    const subGroup = interaction.options.getSubcommandGroup(false);
-    const sub = interaction.options.getSubcommand();
+  async autocomplete(interaction: any) {
     const guildId = interaction.guildId as string | null;
-
-    if (!guildId || !ctx?.db) {
-      await interaction.reply({ content: "Meepo only works in a server (not DMs).", ephemeral: true });
+    if (!guildId) {
+      await interaction.respond([]);
       return;
     }
 
-    const db = ctx.db;
+    const focused = interaction.options.getFocused(true);
+    if (focused.name !== "session") {
+      await interaction.respond([]);
+      return;
+    }
 
-    if (subGroup === "debug" && sub === "recall") {
-      if (!isElevated(interaction.member as GuildMember | null)) {
-        await interaction.reply({ content: "Not authorized.", ephemeral: true });
-        return;
-      }
+    const subGroup = interaction.options.getSubcommandGroup(false);
+    const sub = interaction.options.getSubcommand(false);
+    const supportsAutocomplete =
+      subGroup === "sessions" && (sub === "view" || sub === "recap");
 
-      const queryText = interaction.options.getString("query", true).trim();
-      if (!queryText) {
-        await interaction.reply({ content: "Query cannot be empty.", ephemeral: true });
-        return;
-      }
+    if (!supportsAutocomplete) {
+      await interaction.respond([]);
+      return;
+    }
 
-      const campaignSlug = resolveCampaignSlug({
-        guildId,
-        guildName: interaction.guild?.name ?? undefined,
-      });
-      const registry = loadRegistry({ campaignSlug });
-      const matches = extractRegistryMatches(queryText, registry);
+    const query = String(focused.value ?? "").trim().toLowerCase();
+    const sessions = listSessions(guildId, 25) as SessionRow[];
 
-      const eventsByMatch = matches.map((match) => {
-        const terms = new Set([match.canonical, match.matched_text].filter(Boolean));
-        const dedup = new Map<string, EventRow>();
+    const options = sessions
+      .filter((session) => {
+        if (!query) return true;
+        const label = (session.label ?? "").toLowerCase();
+        return label.includes(query) || session.session_id.toLowerCase().includes(query);
+      })
+      .slice(0, 25)
+      .map((session, index) => formatSessionChoice(session, index));
 
-        for (const term of terms) {
-          for (const event of searchEventsByTitleScoped({ term, guildId })) {
-            dedup.set(event.event_id, event);
-          }
-        }
+    await interaction.respond(options);
+  },
 
-        return {
-          match,
-          events: Array.from(dedup.values()),
-        };
-      });
+  async execute(interaction: any, ctx: CommandCtx | null) {
+    const guildId = interaction.guildId as string | null;
+    const guild = interaction.guild;
+    if (!guildId || !guild || !ctx?.db) {
+      await interaction.reply({ content: metaMeepoVoice.errors.notInGuild(), ephemeral: true });
+      return;
+    }
 
-      const allEvents = new Map<string, EventRow>();
-      for (const group of eventsByMatch) {
-        for (const event of group.events) {
-          allEvents.set(event.event_id, event);
-        }
-      }
+    const subGroup = interaction.options.getSubcommandGroup(false);
+    const sub = interaction.options.getSubcommand();
+    const requiresElevated =
+      subGroup === "settings" || sub === "wake" || sub === "sleep" || sub === "talk" || sub === "hush" || sub === "doctor" ||
+      (subGroup === "sessions" && sub === "recap");
 
-      const sessionIds = Array.from(new Set(Array.from(allEvents.values()).map((e) => e.session_id)));
-      const sessionLabelById = getSessionLabelMap(sessionIds, db);
+    if (requiresElevated && !isElevated(interaction.member as GuildMember | null)) {
+      await interaction.reply({ content: metaMeepoVoice.errors.notAuthorized(), ephemeral: true });
+      return;
+    }
 
-      const requestedLineSetBySession = new Map<string, Set<number>>();
-      for (const event of allEvents.values()) {
-        const start = event.start_line;
-        const end = event.end_line;
-        if (typeof start !== "number" || typeof end !== "number") {
-          continue;
-        }
+    if (subGroup === "settings") {
+      await handleSettings(interaction);
+      return;
+    }
 
-        const min = Math.min(start, end);
-        const max = Math.max(start, end);
-        const lineSet = requestedLineSetBySession.get(event.session_id) ?? new Set<number>();
-        for (let line = min; line <= max; line++) {
-          lineSet.add(line);
-        }
-        requestedLineSetBySession.set(event.session_id, lineSet);
-      }
-
-      const uniqueLineCountBySession = new Map<string, number>();
-      const requestedLineCountBySession = new Map<string, number>();
-      const missingLinesBySession = new Map<string, number[]>();
-      const beatsBySession = new Map<string, ScoredBeat[]>();
-      for (const [sessionId, requestedLineSet] of requestedLineSetBySession.entries()) {
-        const requestedLines = Array.from(requestedLineSet.values()).sort((a, b) => a - b);
-        requestedLineCountBySession.set(sessionId, requestedLines.length);
-        try {
-          const fetched = getTranscriptLinesDetailed(sessionId, requestedLines, {
-            onMissing: "skip",
-          });
-          uniqueLineCountBySession.set(sessionId, fetched.lines.length);
-          missingLinesBySession.set(sessionId, fetched.missing);
-        } catch {
-          uniqueLineCountBySession.set(sessionId, 0);
-          missingLinesBySession.set(sessionId, requestedLines);
-        }
-
-        // Load GPTcap for this session (if enabled) and find relevant beats
-        const label = sessionLabelById.get(sessionId);
-        if (label) {
-          const gptcap = loadGptcap(label);
-          if (gptcap) {
-            const sessionEvents = Array.from(allEvents.values()).filter((e) => e.session_id === sessionId);
-            if (sessionEvents.length > 0) {
-              const relevantBeats = findRelevantBeats(gptcap, sessionEvents, { topK: 6 });
-              beatsBySession.set(sessionId, relevantBeats);
-            }
-          }
-        }
-      }
-
-      // Build memory context preview from all beats
-      let memoryContextPreview = "";
-      const allBeats: ScoredBeat[] = [];
-      for (const beats of beatsBySession.values()) {
-        allBeats.push(...beats);
-      }
-      if (allBeats.length > 0) {
-        // Collect all unique line numbers needed from beats
-        const neededLines = new Set<number>();
-        for (const scored of allBeats) {
-          for (const lineNum of scored.beat.lines) {
-            neededLines.add(lineNum);
-          }
-        }
-
-        // Fetch transcript lines for all beats (use first session with beats)
-        const firstSessionWithBeats = Array.from(beatsBySession.keys())[0];
-        if (firstSessionWithBeats && neededLines.size > 0) {
-          try {
-            const transcriptLines = getTranscriptLines(firstSessionWithBeats, Array.from(neededLines));
-            memoryContextPreview = buildMemoryContext(allBeats, transcriptLines, {
-              maxLinesPerBeat: 2,
-              maxTotalChars: 1600,
-            });
-          } catch (err) {
-            console.warn("Failed to build memory context preview:", err);
-          }
-        }
-      }
-
-      const response = buildDebugRecallResponse({
-        queryText,
-        matches,
-        eventsByMatch,
-        sessionLabelById,
-        uniqueLineCountBySession,
-        requestedLineCountBySession,
-        missingLinesBySession,
-        beatsBySession,
-        memoryContextPreview,
-      });
-
-      await interaction.reply({ content: response, ephemeral: true });
+    if (subGroup === "sessions") {
+      await handleSessions(interaction, ctx);
       return;
     }
 
     if (sub === "wake") {
-      const persona = interaction.options.getString("persona");
-      const channelId = interaction.channelId as string;
-
-      const inst = wakeMeepo({
-        guildId,
-        channelId,
-        personaSeed: persona,
-      });
-
-      const defaultPersonaId = getGuildDefaultPersonaId(guildId) ?? "meta_meepo";
-      setActivePersonaId(guildId, defaultPersonaId);
-
-      // Log system event (narrative secondary - state change)
-      logSystemEvent({
-        guildId,
-        channelId,
-        eventType: "npc_wake",
-        content: `Meepo awakens${persona ? ` with persona: ${persona}` : ""}.`,
-        authorId: interaction.user.id,
-        authorName: interaction.user.username,
-        narrativeWeight: "secondary",
-      });
-
-      // Reset nickname to default Meepo on wake
-      if (interaction.guild) {
-        await setBotNicknameForPersona(interaction.guild, "meepo");
-      }
-
-      // Auto-join General voice channel on wake
-      await autoJoinGeneralVoice({
-        client: interaction.client,
-        guildId,
-        channelId,
-      });
-
-      await interaction.reply({
-        content:
-          "Meepo awakens.\n" +
-          "Bound channel: <#" + inst.channel_id + ">\n" +
-          (inst.persona_seed ? ("Persona: " + inst.persona_seed) : "Persona: (none)"),
-        ephemeral: true,
-      });
-      return;
-    }
-
-    if (sub === "persona-set") {
-      if (!isElevated(interaction.member as GuildMember | null)) {
-        await interaction.reply({ content: "Not authorized.", ephemeral: true });
-        return;
-      }
-      const personaId = interaction.options.getString("persona", true);
-
-      const persona = getPersona(personaId);
-      if (persona.scope === "campaign") {
-        const { getActiveSessionId } = await import("../sessions/sessionRuntime.js");
-        if (!getActiveSessionId(guildId)) {
-          await interaction.reply({
-            content: "I don't feel anchored yet—start a session first.",
-            ephemeral: true,
-          });
-          return;
-        }
-      }
-
-      setActivePersonaId(guildId, personaId);
-      if (interaction.guild) {
-        await setBotNicknameForPersona(interaction.guild, personaId);
-      }
-      const ack = persona.switchAckEnter ?? persona.switchAckExit ?? (personaId === "meta_meepo" ? "Okay—back to companion mode." : "Okay—going in-character.");
-      await interaction.reply({
-        content: ack,
-        ephemeral: true,
-      });
-      return;
-    }
-
-    if (sub === "guild-config") {
-      if (!isElevated(interaction.member as GuildMember | null)) {
-        await interaction.reply({ content: "Not authorized.", ephemeral: true });
-        return;
-      }
-      const key = interaction.options.getString("key", true);
-      const value = interaction.options.getString("value", true).trim();
-      if (key === "default-persona") {
-        const valid = ["meta_meepo", "diegetic_meepo", "rei", "xoblob"];
-        if (!valid.includes(value)) {
-          await interaction.reply({
-            content: `Invalid persona. Use one of: ${valid.join(", ")}`,
-            ephemeral: true,
-          });
-          return;
-        }
-        setGuildDefaultPersonaId(guildId, value);
-        await interaction.reply({
-          content: `Default persona set to **${value}**. Future /meepo wake will use this.`,
-          ephemeral: true,
-        });
-        return;
-      }
-      if (key === "campaign-slug") {
-        setGuildCampaignSlug(guildId, value);
-        await interaction.reply({
-          content: `Campaign slug set to **${value}**. Registry folder: \`data/registry/${value}/\`.`,
-          ephemeral: true,
-        });
-        return;
-      }
-      if (key === "gold-memory-enabled") {
-        await interaction.reply({
-          content:
-            "Gold-memory toggle is currently environment-driven. Set `GOLD_MEMORY_ENABLED=1` in your runtime env and restart the bot.",
-          ephemeral: true,
-        });
-        return;
-      }
-      await interaction.reply({ content: "Unknown config key.", ephemeral: true });
-      return;
-    }
-
-    if (sub === "debug-persona") {
-      if (!isElevated(interaction.member as GuildMember | null)) {
-        await interaction.reply({ content: "Not authorized.", ephemeral: true });
-        return;
-      }
-      const personaId = getActivePersonaId(guildId);
-      const mindspace = getMindspace(guildId, personaId);
-      const campaignSlug = resolveCampaignSlug({
-        guildId,
-        guildName: interaction.guild?.name ?? undefined,
-      });
-      const lastUsages = db.prepare(`
-        SELECT persona_id, mindspace, used_memories
-        FROM meep_usages
-        WHERE guild_id = ?
-        ORDER BY triggered_at_ms DESC
-        LIMIT 5
-      `).all(guildId) as { persona_id: string | null; mindspace: string | null; used_memories: string | null }[];
-      const refsPreview = lastUsages.map((u, i) => {
-        const refs = u.used_memories ? (JSON.parse(u.used_memories) as string[]) : [];
-        return `#${i + 1} persona=${u.persona_id ?? "n/a"} mindspace=${u.mindspace ?? "n/a"} refs=[${refs.slice(0, 3).join(", ")}${refs.length > 3 ? "…" : ""}]`;
-      }).join("\n");
-      await interaction.reply({
-        content:
-          "**Debug Persona**\n" +
-          "- active_persona_id: " + personaId + "\n" +
-          "- mindspace: " + (mindspace ?? "(no session)") + "\n" +
-          "- campaign_slug: " + campaignSlug + "\n" +
-          "- last 5 meep_usages:\n" + (refsPreview || "(none)"),
-        ephemeral: true,
-      });
+      await handleWake(interaction, ctx);
       return;
     }
 
     if (sub === "sleep") {
-      const active = getActiveMeepo(guildId);
-      if (active) {
-        // Log system event (narrative secondary - state change)
-        logSystemEvent({
-          guildId,
-          channelId: active.channel_id,
-          eventType: "npc_sleep",
-          content: "Meepo goes dormant.",
-          authorId: interaction.user.id,
-          authorName: interaction.user.username,
-          narrativeWeight: "secondary",
-        });
-      }
-
-      const changes = sleepMeepo(guildId);
-
-      await interaction.reply({
-        content: changes > 0 ? "Meepo goes dormant." : "Meepo is already asleep.",
-        ephemeral: true,
-      });
-
-      // Reset nickname to default Meepo after replying (to avoid interaction timeout)
-      if (interaction.guild) {
-        setBotNicknameForPersona(interaction.guild, "meepo").catch(err => 
-          console.warn("Failed to reset nickname on sleep:", err.message)
-        );
-      }
-
+      await handleSleep(interaction);
       return;
     }
 
-    if (sub === "status") {
-      const inst = getActiveMeepo(guildId);
-      const mode = getGuildMode(guildId);
-      const activeSession = getActiveSession(guildId);
-      if (!inst) {
-        await interaction.reply({
-          content:
-            "Meepo status:\n" +
-            "- awake: no\n" +
-            "- guild mode: " + mode + "\n" +
-            "- campaignSlug: " + ctx.campaignSlug + "\n" +
-            "- dbPath: " + ctx.dbPath + "\n" +
-            "- dmRoleConfigured: " + String(Boolean(cfg.discord.dmRoleId)) + "\n" +
-            "- legacyFallbacksThisBoot: " + getLegacyFallbacksThisBoot() + "\n" +
-            "- active session: " + (activeSession ? `${activeSession.session_id} (kind=${activeSession.kind}, mode_at_start=${activeSession.mode_at_start})` : "(none)"),
-          ephemeral: true,
-        });
-        return;
-      }
-
-      const activePersonaId = getActivePersonaId(guildId);
-      const mindspace = getMindspace(guildId, activePersonaId);
-      const persona = getPersona(activePersonaId);
-      await interaction.reply({
-        content:
-          "Meepo status:\n" +
-          "- awake: yes\n" +
-          "- guild mode: " + mode + "\n" +
-          "- campaignSlug: " + ctx.campaignSlug + "\n" +
-          "- dbPath: " + ctx.dbPath + "\n" +
-          "- dmRoleConfigured: " + String(Boolean(cfg.discord.dmRoleId)) + "\n" +
-          "- legacyFallbacksThisBoot: " + getLegacyFallbacksThisBoot() + "\n" +
-          "- bound channel: <#" + inst.channel_id + ">\n" +
-          "- active persona: " + persona.displayName + " (" + activePersonaId + ")\n" +
-          "- mindspace: " + (mindspace ?? "(no session)") + "\n" +
-          "- active session: " + (activeSession ? `${activeSession.session_id} (kind=${activeSession.kind}, mode_at_start=${activeSession.mode_at_start})` : "(none)") + "\n" +
-          "- form (cosmetic): " + inst.form_id + "\n" +
-          "- persona seed: " + (inst.persona_seed ?? "(none)") + "\n" +
-          "- created_at_ms: " + inst.created_at_ms,
-        ephemeral: true,
-      });
-      return;
-    }
-
-    if (sub === "mode") {
-      const requested = interaction.options.getString("value") as MeepoMode | null;
-      const currentMode = getGuildMode(guildId);
-
-      if (!requested) {
-        await interaction.reply({
-          content: `Global mode is **${currentMode}**.`,
-          ephemeral: true,
-        });
-        return;
-      }
-
-      if (!isElevated(interaction.member as GuildMember | null)) {
-        await interaction.reply({ content: "Not authorized.", ephemeral: true });
-        return;
-      }
-
-      if (requested === currentMode) {
-        await interaction.reply({
-          content: `Global mode is already **${currentMode}**.`,
-          ephemeral: true,
-        });
-        return;
-      }
-
-      const activeSession = getActiveSession(guildId);
-      setGuildMode(guildId, requested);
-
-      if (!activeSession) {
-        await interaction.reply({
-          content: `Mode set to **${requested}**. No active session to rotate.`,
-          ephemeral: true,
-        });
-        return;
-      }
-
-      const endReason = requested === "dormant" ? "mode_change_to_dormant" : "mode_change";
-      endSession(guildId, endReason);
-
-      const transitionChannelId = getActiveMeepo(guildId)?.channel_id ?? interaction.channelId;
-
-      if (requested === "dormant") {
-        logSystemEvent({
-          guildId,
-          channelId: transitionChannelId,
-          eventType: "session_transition",
-          content: `Mode changed ${currentMode} → ${requested}. Ended session ${activeSession.session_id} (kind=${activeSession.kind}, reason=${endReason}).`,
-          authorId: interaction.user.id,
-          authorName: interaction.user.username,
-          narrativeWeight: "secondary",
-        });
-
-        await interaction.reply({
-          content:
-            `Mode set to **${requested}**.\n` +
-            `Ended current session (${activeSession.kind}). Meepo will not start new sessions until re-enabled.`,
-          ephemeral: true,
-        });
-        return;
-      }
-
-      const newKind = sessionKindForMode(requested);
-      const newSession = startSession(guildId, interaction.user.id, interaction.user.username, {
-        source: "live",
-        kind: newKind,
-        modeAtStart: requested,
-      });
-
-      logSystemEvent({
-        guildId,
-        channelId: transitionChannelId,
-        eventType: "session_transition",
-        content:
-          `Mode changed ${currentMode} → ${requested}. ` +
-          `Ended session ${activeSession.session_id} (kind=${activeSession.kind}, reason=${endReason}); ` +
-          `started session ${newSession.session_id} (kind=${newSession.kind}).`,
-        authorId: interaction.user.id,
-        authorName: interaction.user.username,
-        narrativeWeight: "secondary",
-      });
-
-      await interaction.reply({
-        content:
-          `Mode set to **${requested}**.\n` +
-          `Ended current session (${activeSession.kind}) and started a new session (${newSession.kind}) due to mode change.`,
-        ephemeral: true,
-      });
-      return;
-    }
-
-    if (sub === "transform") {
-      const character = interaction.options.getString("character", true);
-      
-      const active = getActiveMeepo(guildId);
-      if (!active) {
-        await interaction.reply({ content: "Meepo is asleep. Use /meepo wake first.", ephemeral: true });
-        return;
-      }
-
-      try {
-        const persona = getPersona(character); // Validate form exists
-        const result = transformMeepo(guildId, character);
-
-        if (!result.success) {
-          await interaction.reply({ content: result.error ?? "Transform failed.", ephemeral: true });
-          return;
-        }
-
-        const personaIdForForm = character === "xoblob" ? "xoblob" : "diegetic_meepo";
-        setActivePersonaId(guildId, personaIdForForm);
-
-        // Log system event (narrative primary)
-        logSystemEvent({
-          guildId,
-          channelId: active.channel_id,
-          eventType: "npc_transform",
-          content: `Meepo transforms into ${persona.displayName}.`,
-          authorId: interaction.user.id,
-          authorName: interaction.user.username,
-        });
-
-        // Update bot nickname to match persona
-        if (interaction.guild) {
-          await setBotNicknameForPersona(interaction.guild, character);
-        }
-
-        const deprecationNote = " *(Use /meepo persona-set to switch personas.)*";
-        if (character === "meepo") {
-          await interaction.reply({
-            content: "Meepo shimmers... and returns to itself." + deprecationNote,
-            ephemeral: true,
-          });
-        } else if (character === "xoblob") {
-          await interaction.reply({
-            content: "Meepo curls up... and becomes an echo of Old Xoblob." + deprecationNote,
-            ephemeral: true,
-          });
-        } else {
-          await interaction.reply({
-            content: `Meepo transforms into ${persona.displayName}.` + deprecationNote,
-            ephemeral: true,
-          });
-        }
-      } catch (err: any) {
-        await interaction.reply({ content: "Unknown character form: " + character, ephemeral: true });
-      }
-      return;
-    }
-
-    if (sub === "join") {
-      // Require Meepo to be awake before joining voice
-      const active = getActiveMeepo(guildId);
-      if (!active) {
-        await interaction.reply({
-          content: "Meepo is asleep. Use /meepo wake first.",
-          ephemeral: true,
-        });
-        return;
-      }
-
-      // Check if user is in a voice channel
-      // Fetch fresh member data to avoid cache issues
-      const guild = interaction.guild;
-      if (!guild) {
-        await interaction.reply({
-          content: "This command only works in a server.",
-          ephemeral: true,
-        });
-        return;
-      }
-
-      const member = await guild.members.fetch(interaction.user.id);
-      const userVoiceChannel = member.voice.channel;
-
-      if (!userVoiceChannel) {
-        await interaction.reply({
-          content: "Meep? Meepo can't find you! Join a voice channel first, friend!",
-          ephemeral: true,
-        });
-        return;
-      }
-
-      // Check if already connected
-      const currentState = getVoiceState(guildId);
-      if (currentState) {
-        if (currentState.channelId === userVoiceChannel.id) {
-          await interaction.reply({
-            content: "Meep! Meepo is already here with you!",
-            ephemeral: true,
-          });
-          return;
-        } else {
-          await interaction.reply({
-            content: `Meepo is already listening in <#${currentState.channelId}>! Ask Meepo to leave first, meep?`,
-            ephemeral: true,
-          });
-          return;
-        }
-      }
-
-      // Join voice channel
-      // Defer reply immediately to prevent timeout
-      await interaction.deferReply({ ephemeral: true });
-
-      try {
-        const connection = await joinVoice({
-          guildId,
-          channelId: userVoiceChannel.id,
-          adapterCreator: guild.voiceAdapterCreator,
-        });
-
-        // Store state
-        setVoiceState(guildId, {
-          channelId: userVoiceChannel.id,
-          connection,
-          guild,  // Store guild reference for member lookups
-          sttEnabled: true, // Always enabled when Meepo joins voice
-          connectedAt: Date.now(),
-        });
-
-        // Start receiver for STT
-        startReceiver(guildId);
-
-        // Set Meepo's overlay presence
-        overlayEmitPresence("meepo", true);
-        console.log(`[Overlay] Set Meepo presence on manual join`);
-
-        // Log system event (narrative secondary - state change)
-        logSystemEvent({
-          guildId,
-          channelId: active.channel_id,
-          eventType: "voice_join",
-          content: `Meepo joins voice channel: ${userVoiceChannel.name}`,
-          authorId: interaction.user.id,
-          authorName: interaction.user.username,
-          narrativeWeight: "secondary",
-        });
-
-        // Resolve deferred interaction with success message
-        await interaction.editReply({
-          content: `*poof!* Meepo is here! Listening in <#${userVoiceChannel.id}>! Meep meep! 🎧`,
-        }).catch((editErr: any) => {
-          console.error("[Voice] Failed to edit reply after join:", editErr);
-        });
-      } catch (err: any) {
-        console.error("[Voice] Failed to join:", err);
-        
-        // Ensure interaction is resolved even if join failed
-        await interaction.editReply({
-          content: `Meep meep... Meepo couldn't get there! (${err.message})`,
-        }).catch((editErr: any) => {
-          console.error("[Voice] Failed to edit reply after error:", editErr);
-        });
-      }
-      return;
-    }
-
-    if (sub === "leave") {
-      const currentState = getVoiceState(guildId);
-      if (!currentState) {
-        await interaction.reply({
-          content: "Meep? Meepo isn't in voice right now!",
-          ephemeral: true,
-        });
-        return;
-      }
-
-      const channelId = currentState.channelId;
-      
-      // Stop receiver if active
-      stopReceiver(guildId);
-      
-      leaveVoice(guildId);
-
-      // Log system event (narrative secondary - state change)
-      const active = getActiveMeepo(guildId);
-      if (active) {
-        logSystemEvent({
-          guildId,
-          channelId: active.channel_id,
-          eventType: "voice_leave",
-          content: "Meepo leaves voice channel.",
-          authorId: interaction.user.id,
-          authorName: interaction.user.username,
-          narrativeWeight: "secondary",
-        });
-      }
-
-      await interaction.reply({
-        content: `*poof!* Meepo leaves <#${channelId}>. Bye bye! Meep!`,
-        ephemeral: true,
-      });
+    if (sub === "talk") {
+      await handleTalk(interaction, ctx);
       return;
     }
 
     if (sub === "hush") {
-      const currentState = getVoiceState(guildId);
-      if (!currentState) {
-        await interaction.reply({
-          content: "Meep? Meepo isn't in voice right now!",
-          ephemeral: true,
-        });
-        return;
-      }
-
-      voicePlaybackController.abort(guildId, "explicit_hush_command", {
-        channelId: currentState.channelId,
-        authorId: interaction.user.id,
-        authorName: interaction.user.username,
-        source: "command",
-        logSystemEvent: true,
-      });
-
-      await interaction.reply({
-        content: "Shh! Meepo goes quiet.",
-        ephemeral: true,
-      });
+      await handleHush(interaction, ctx);
       return;
     }
 
-    if (sub === "stt") {
-      const action = interaction.options.getString("action", true);
-      const currentState = getVoiceState(guildId);
-
-      if (!currentState) {
-        await interaction.reply({
-          content: "Meep? Meepo needs to join voice first!",
-          ephemeral: true,
-        });
-        return;
-      }
-
-      if (action === "status") {
-        const active = getActiveMeepo(guildId);
-        await interaction.reply({
-          content:
-            "**Meepo's Voice Status** 🎧\n" +
-            `- Listening in: <#${currentState.channelId}>\n` +
-            `- Understanding words: yes! ✨ (always on)\n` +
-            `- Since: ${new Date(currentState.connectedAt).toLocaleString()}\n` +
-            `\n_Meep! (Meepo forgets this if bot restarts)_`,
-          ephemeral: true,
-        });
-        return;
-      }
-
-      if (action === "on") {
-        await interaction.reply({
-          content: "✨ STT is always enabled when Meepo is in voice! No need to toggle.",
-          ephemeral: true,
-        });
-        return;
-      }
-
-      if (action === "off") {
-        await interaction.reply({
-          content: "⚠️ STT is always enabled when Meepo is in voice. Use `/meepo leave` to stop listening.",
-          ephemeral: true,
-        });
-        return;
-      }
-
+    if (sub === "status") {
+      await handleStatus(interaction, ctx);
       return;
     }
 
-    if (sub === "say") {
-      if (!isElevated(interaction.member as GuildMember | null)) {
-        await interaction.reply({ content: "Not authorized.", ephemeral: true });
-        return;
-      }
-
-      // Preconditions
-      const active = getActiveMeepo(guildId);
-      if (!active) {
-        await interaction.reply({ content: "Meepo is asleep. Use /meepo wake first.", ephemeral: true });
-        return;
-      }
-
-      const voiceState = getVoiceState(guildId);
-      if (!voiceState) {
-        await interaction.reply({ content: "Meepo is not in a voice channel. Use /meepo join first.", ephemeral: true });
-        return;
-      }
-
-      const ttsEnabled = cfg.tts.enabled;
-      if (!ttsEnabled) {
-        await interaction.reply({ content: "TTS is not enabled (TTS_ENABLED=false).", ephemeral: true });
-        return;
-      }
-
-      const text = interaction.options.getString("text", true).trim();
-      if (!text) {
-        await interaction.reply({ content: "Text cannot be empty.", ephemeral: true });
-        return;
-      }
-
-      // Acknowledge immediately
-      await interaction.deferReply({ ephemeral: true });
-
-      try {
-        const replyMode = active.reply_mode; // Check active Meepo's reply mode
-
-        if (replyMode === "text") {
-          // Send as text message instead of voice
-          const channel = interaction.channel;
-          if (channel?.isTextBased()) {
-            const reply = await channel.send(text);
-            
-            // Log bot's reply to ledger
-            appendLedgerEntry({
-              guild_id: guildId,
-              channel_id: active.channel_id,
-              message_id: reply.id,
-              author_id: interaction.client.user.id,
-              author_name: interaction.client.user.username,
-              timestamp_ms: reply.createdTimestamp,
-              content: text,
-              tags: "npc,meepo,spoken",
-            });
-
-            await interaction.editReply({ content: `Sent as text (reply mode is text): "${text.substring(0, 100)}${text.length > 100 ? "..." : ""}"` });
-          } else {
-            await interaction.editReply({ content: "Cannot send text message in this channel." });
-          }
-          return;
-        }
-
-        // Voice reply enabled - use TTS
-        // Get TTS provider
-        const ttsProvider = await getTtsProvider();
-
-        // Synthesize text to audio
-        let mp3Buffer = await ttsProvider.synthesize(text);
-
-        if (mp3Buffer.length === 0) {
-          await interaction.editReply({ content: "TTS synthesis returned empty audio. Check provider configuration." });
-          return;
-        }
-
-        // Apply post-TTS audio effects (if enabled)
-        mp3Buffer = await applyPostTtsFx(mp3Buffer, "mp3");
-
-        // Queue playback
-        speakInGuild(guildId, mp3Buffer, {
-          userDisplayName: "[/meepo say]",
-        });
-
-        // Log system event (tags: system,tts_say)
-        logSystemEvent({
-          guildId,
-          channelId: active.channel_id,
-          eventType: "tts_say",
-          content: text,
-          authorId: interaction.user.id,
-          authorName: interaction.user.username,
-        });
-
-        await interaction.editReply({ content: `Speaking: "${text.substring(0, 100)}${text.length > 100 ? "..." : ""}"` });
-      } catch (err: any) {
-        console.error("[TTS] /meepo say error:", err);
-        await interaction.editReply({ content: `TTS error: ${err.message}` });
-      }
+    if (sub === "doctor") {
+      await handleDoctor(interaction, ctx);
       return;
     }
 
-    if (sub === "set-speaker-mask") {
-      if (!isElevated(interaction.member as GuildMember | null)) {
-        await interaction.reply({ content: "Not authorized.", ephemeral: true });
-        return;
-      }
-
-      const user = interaction.options.getUser("user");
-      const mask = interaction.options.getString("mask");
-
-      if (!user || !mask) {
-        await interaction.reply({ content: "Missing user or mask parameter.", ephemeral: true });
-        return;
-      }
-
-      const now = Date.now();
-
-      // Upsert speaker mask
-      db.prepare(`
-        INSERT INTO speaker_masks (guild_id, discord_user_id, speaker_mask, created_at_ms, updated_at_ms)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(guild_id, discord_user_id) DO UPDATE SET
-          speaker_mask = excluded.speaker_mask,
-          updated_at_ms = excluded.updated_at_ms
-      `).run(guildId, user.id, mask, now, now);
-
-      await interaction.reply({
-        content: `Speaker mask set: ${user.username} → "${mask}"`,
-        ephemeral: true,
-      });
-      return;
-    }
-
-    if (sub === "clear-speaker-mask") {
-      if (!isElevated(interaction.member as GuildMember | null)) {
-        await interaction.reply({ content: "Not authorized.", ephemeral: true });
-        return;
-      }
-
-      const user = interaction.options.getUser("user");
-
-      if (!user) {
-        await interaction.reply({ content: "Missing user parameter.", ephemeral: true });
-        return;
-      }
-
-      const result = db.prepare(`
-        DELETE FROM speaker_masks
-        WHERE guild_id = ? AND discord_user_id = ?
-      `).run(guildId, user.id);
-
-      if (result.changes > 0) {
-        await interaction.reply({
-          content: `Speaker mask cleared for ${user.username}`,
-          ephemeral: true,
-        });
-      } else {
-        await interaction.reply({
-          content: `No speaker mask found for ${user.username}`,
-          ephemeral: true,
-        });
-      }
-      return;
-    }
-
-    if (sub === "reply") {
-      const active = getActiveMeepo(guildId);
-      if (!active) {
-        await interaction.reply({ content: "Meep! Meepo is asleep. Use `/meepo wake` first.", ephemeral: true });
-        return;
-      }
-
-      const mode = interaction.options.getString("mode", true) as "voice" | "text";
-
-      db.prepare(`
-        UPDATE npc_instances
-        SET reply_mode = ?
-        WHERE guild_id = ? AND is_active = 1
-      `).run(mode, guildId);
-
-      await interaction.reply({
-        content: `Meepo reply mode set to: **${mode}**`,
-        ephemeral: true,
-      });
-      return;
-    }
-
-    if (sub === "announce") {
-      if (!isElevated(interaction.member as GuildMember | null)) {
-        await interaction.reply({
-          content: "Not authorized.",
-          ephemeral: true,
-        });
-        return;
-      }
-
-      // Get env-configured announcement channel
-      const channelId = cfg.session.announcementChannelId;
-      if (!channelId) {
-        await interaction.reply({
-          content: "Announcement channel not configured. Ask the admin to set `ANNOUNCEMENT_CHANNEL_ID`.",
-          ephemeral: true,
-        });
-        return;
-      }
-
-      // Get parameters
-      const override_ts = interaction.options.getInteger("timestamp");
-      const override_label = interaction.options.getString("label");
-      const override_message = interaction.options.getString("message");
-      const dry_run = interaction.options.getBoolean("dry_run") ?? false;
-
-      // Compute timestamp
-      const ts = override_ts ?? getTodayAtNinePmEtUnixSeconds();
-
-      // Compute label (auto-increment next episode number)
-      const label = override_label ?? getNextSessionLabel();
-
-      // Compute message
-      const messagePrefix = override_message ?? "Reminder that our D&D session";
-      const finalMessage = `**@everyone ${messagePrefix} begins <t:${ts}:R> (${label}).**`;
-
-      if (dry_run) {
-        meepoLog.info(`[DRY RUN] Announcement preview: ${finalMessage}`);
-        await interaction.reply({
-          content: `**[DRY RUN] Preview:**\n${finalMessage}`,
-          ephemeral: true,
-        });
-        return;
-      }
-
-      // Resolve channel
-      try {
-        const channel = await interaction.guild?.channels.fetch(channelId);
-        if (!channel || !(channel instanceof TextChannel)) {
-          await interaction.reply({
-            content: "Announcement channel is not a text channel or not found.",
-            ephemeral: true,
-          });
-          return;
-        }
-
-        // Post to channel
-        await channel.send(finalMessage);
-        meepoLog.info(`Announcement posted: ${label} at <t:${ts}:R>`);
-
-        await interaction.reply({
-          content: `✅ Announced: **${label}** begins <t:${ts}:R>.`,
-          ephemeral: true,
-        });
-      } catch (err: any) {
-        meepoLog.warn(`Failed to post announcement: ${err.message ?? err}`);
-        await interaction.reply({
-          content: `Error posting announcement: ${err.message ?? "Unknown error"}`,
-          ephemeral: true,
-        });
-      }
-      return;
-    }
-
-    if (sub === "interactions") {
-      if (!isElevated(interaction.member as GuildMember | null)) {
-        await interaction.reply({ content: "Not authorized.", ephemeral: true });
-        return;
-      }
-      const personaId = getActivePersonaId(guildId) ?? "meepo";
-      const rows = findRelevantMeepoInteractions({
-        guildId,
-        personaId,
-        speakerId: interaction.user.id,
-        limitS: 5,
-        limitA: 0,
-      });
-      const snippets = getInteractionSnippets(rows, guildId);
-      const lines: string[] = [
-        "**Meepo interactions (last 5 Tier S for you)**",
-        `Guild: \`${guildId}\` | Persona: \`${personaId}\``,
-        "",
-      ];
-      if (rows.length === 0) {
-        lines.push("No Tier S interactions found for you in this server.");
-      } else {
-        rows.forEach((row, i) => {
-          const sn = snippets[i];
-          const resolution = sn?.resolution ?? "fallback";
-          const triggerPreview = sn?.triggerContent ? `"${sn.triggerContent.slice(0, 60)}${sn.triggerContent.length > 60 ? "…" : ""}"` : "(no snippet)";
-          const replyPreview = sn?.replyContent ? ` → "${sn.replyContent.slice(0, 40)}…"` : "";
-          lines.push(`**${i + 1}.** Tier ${row.tier} | trigger: \`${row.trigger}\` | resolution: \`${resolution}\``);
-          lines.push(`   Guild: \`${row.guild_id}\` Persona: \`${row.persona_id}\` Speaker: \`${row.speaker_id}\``);
-          lines.push(`   ${triggerPreview}${replyPreview}`);
-          lines.push("");
-        });
-      }
-      await interaction.reply({ content: lines.join("\n"), ephemeral: true });
-      return;
-    }
-
-    await interaction.reply({ content: "Unknown subcommand.", ephemeral: true });
+    await interaction.reply({ content: metaMeepoVoice.errors.unknownSubcommand(), ephemeral: true });
   },
 };

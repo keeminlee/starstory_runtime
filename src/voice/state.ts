@@ -10,6 +10,7 @@ export type VoiceState = {
   connection: VoiceConnection;
   guild: Guild;  // Discord guild reference for member lookups
   sttEnabled: boolean;
+  hushEnabled: boolean;
   connectedAt: number;
 };
 
@@ -38,6 +39,23 @@ export function setVoiceState(guildId: string, state: VoiceState): void {
  */
 export function clearVoiceState(guildId: string): void {
   voiceStates.delete(guildId);
+}
+
+/**
+ * Get hush/listen-only mode for a guild voice state
+ */
+export function isVoiceHushEnabled(guildId: string): boolean {
+  return voiceStates.get(guildId)?.hushEnabled ?? false;
+}
+
+/**
+ * Set hush/listen-only mode for a guild voice state
+ */
+export function setVoiceHushEnabled(guildId: string, enabled: boolean): boolean {
+  const state = voiceStates.get(guildId);
+  if (!state) return false;
+  state.hushEnabled = enabled;
+  return true;
 }
 
 /**

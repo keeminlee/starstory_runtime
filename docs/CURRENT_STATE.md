@@ -1,9 +1,9 @@
-# Meepo Bot - Current State (February 22, 2026)
+# Meepo Bot - Current State (March 3, 2026)
 
 For documentation navigation, start at [README.md](README.md).
 
 **Status:** V0 complete, MeepoMind (V0.1) Phase 2-3 in progress + Tier S/A interaction memory  
-**Last Updated:** February 22, 2026
+**Last Updated:** March 3, 2026
 
 ---
 
@@ -18,15 +18,14 @@ npx tsc --noEmit      # Type-check code
 ### Test in Discord
 
 ```
-/meepo wake                              # Start session + auto-join General voice (STT enabled)
-/session new --label C2E20               # Start new session with label (DM-only)
-/meepo announce --dry_run true           # Preview session announcement (DM-only)
+/meepo wake                              # Wake + bind home channels (hush default)
+/meepo status                            # Public status + fix hints
+/meepo doctor                            # Deterministic diagnostics + next actions
+/meepo settings view                     # Show persisted setup/persona/recap defaults
+/meepo sessions list                      # List recent sessions with recap status
+/meepo sessions view session:<id>         # Session hub + artifact availability
+/meepo sessions recap session:<id> style:balanced  # Generate canon recap final pass (elevated)
 meepo: hello                             # Auto-latch responds
-/session transcript range=since_start    # View all text+voice from session
-/session meecap                          # Generate Meecap (4-8 scenes, 1-4 beats)
-/session recap                           # DM summary (default: style=dm, source=primary)
-/session recap style=narrative           # Meecap-structured prose with detail
-/meepo join                              # Join your voice channel (STT auto-enabled)
 <speak: "meepo, help me">               # STT → LLM → TTS closed loop
 ```
 
@@ -176,22 +175,30 @@ Recap      Emotion Beats         LLM Response
 - **Disk Export:** JSON files for git diffing and Discord review
 
 #### Commands
-- `/meepo wake|sleep|status|hush|transform|join|leave|stt|say` — Instance management
-- `/meepo interactions` — [DM-only] Debug: last 5 Tier S interactions for you (snippet resolution, persona, guild)
-- `/meepo reply mode:voice|text` — Set response mode (voice TTS or text messages)
-- `/meepo announce [--dry_run] [--timestamp] [--label] [--message]` — [DM-only] Post session reminder to announcement channel
-- `/meepo set-speaker-mask user:@User mask:"Name"` — [DM-only] Set diegetic speaker name
-- `/meepo clear-speaker-mask user:@User` — [DM-only] Remove speaker mask
+- `/meepo wake|sleep|talk|hush|status` — Phase 1A clean Meepo surface
+- `/meepo settings show|set|clear` — Persisted home channel config (`home_text_channel_id`, `home_voice_channel_id`)
+- `/meepo sessions list|view|recap` — Session hub + canon-gated recap generation under one surface
+  - Recap styles: `detailed | balanced | concise`
+  - Base cache (`megameecap_base`) is file-canonical and valid only when files exist and `source_hash + base_version` match
+  - Final recap (`recap_final`) is DB-canonical with exactly one row per session (most recent style overwrites prior style)
+  - Drift rules:
+    - final DB row + missing file => regenerate final (cheap)
+    - final file + missing DB row => shown as unindexed; regenerate to canonicalize
+  - Storage: `session_artifacts` metadata + file outputs under `data/campaigns/{slug}/exports/meecaps`
 - `/session new [--label C2E20]` — [DM-only] Start a new session (ends active session first)
 - `/session label [label] [--session_id]` — [DM-only] Set label for session
 - `/session view scope:all|unlabeled` — [DM-only] List sessions
 - `/session meecap [--force] [--source primary|full]` — Generate/regenerate Meecap
-- `/session recap [range] [style=dm|narrative|party] [source=primary|full] [--force_meecap]` — View recap
 - `/session transcript [range]` — Raw transcript view
 - `/session label [session_id]` — Assign or view session labels
 - `/session view [scope=all|unlabeled]` — List sessions with metadata
 - `/deploy-dev` — Register commands in Discord
 - `/ping` — Health check
+
+#### Dev-only Commands
+- `/lab ...` is development-only and normally hidden from production users.
+- Registration gate: `ENABLE_LAB_COMMANDS=true`
+- Runtime allowlist gate: `DEV_USER_IDS=<comma-separated-user-ids>` (optional `DEV_GUILD_IDS=<comma-separated-guild-ids>`)
 
 #### Tools (CLI)
 - `tools/ingest-media.ts` — Offline media ingestion (extract audio, transcribe, generate session)
@@ -353,6 +360,10 @@ VOICE_CHUNK_SIZE_MS=60000           # Audio chunk size
 VOICE_SILENCE_THRESHOLD_DB=-40      # Noise gate (-40 = aggressive)
 VOICE_END_SILENCE_MS=700            # End utterance after silence
 VOICE_REPLY_COOLDOWN_MS=5000        # Prevent spam
+VOICE_INTERRUPT_ACTIVE_MS=1000      # Sustained speech required before TTS barge-in
+VOICE_HUSH_DEFAULT=false            # Start in listen-only mode when true
+# Barge-in behavior: normal voice interruption requires ~1s sustained speech;
+# explicit stop phrases ("meepo stop", etc.) still interrupt immediately.
 
 # STT/TTS
 STT_PROVIDER=openai                 # or 'noop'|'debug'
@@ -445,7 +456,9 @@ src/
 │   └── prompts.ts                  # System prompt builder
 │
 ├── commands/
-│   ├── meepo.ts                    # /meepo subcommands
+│   ├── meepo.ts                    # Clean /meepo Phase 1A command surface
+│   ├── meepoLegacy.ts              # Legacy meepo command surface (used by /lab)
+│   ├── lab.ts                      # /lab legacy quarantine namespace
 │   ├── session.ts                  # /session subcommands
 │   ├── ping.ts                     # /ping
 │   ├── deploy-dev.ts               # /deploy-dev

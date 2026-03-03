@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.1-rc1 - 2026-03-03
+
+### Added
+
+- Centralized `/meepo` app-facing reply strings under [src/ui/metaMeepoVoice.ts](src/ui/metaMeepoVoice.ts) with domain namespaces: `wake`, `sleep`, `talk`, `hush`, `status`, `doctor`, `sessions`, `settings`, `errors`.
+- Added tone rail version export: `META_VOICE_VERSION = 1`.
+- Added string-boundary regression guard test: `src/tests/test-meepo-voice-boundary.ts`.
+- Added voice contract structure test: `src/tests/test-meta-meepo-voice-contract.ts`.
+
+### Changed
+
+- Routed remaining `/meepo` and shared command fallback user-facing errors through `metaMeepoVoice`.
+- Updated meepo-facing tests to anchor-token assertions to reduce prose brittleness.
+- Documented explicit v1.1 deferral for legacy lab meepo surface in `src/commands/lab.ts`.
+
 ## v1.0.0 - 2026-02-26
 
 ### Added

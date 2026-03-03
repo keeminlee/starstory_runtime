@@ -9,7 +9,7 @@ import { appendLedgerEntry } from "../ledger/ledger.js";
 import { isLatchAnchor, hasMeepoInLine } from "./wakeword.js";
 import { respondToVoiceUtterance } from "./voiceReply.js";
 import { getActiveMeepo } from "../meepo/state.js";
-import { getActivePersonaId } from "../meepo/personaState.js";
+import { getEffectivePersonaId } from "../meepo/personaState.js";
 import {
   setLatch,
   isLatchActive,
@@ -57,6 +57,8 @@ const AUDIO_SILENCE_THRESHOLD_MS = 150; // emit speaking=false after 150ms with 
 const FRAME_MS = 20;
 const FRAME_BYTES = Math.round(BYTES_PER_SEC * (FRAME_MS / 1000)); // 3840 bytes for 20ms
 const FRAME_RMS_THRESH = 700;    // permissive
+const INTERRUPT_ACTIVE_MS = cfg.voice.interruptActiveMs;
+const INTERRUPT_ACTIVE_FRAMES = Math.max(1, Math.ceil(INTERRUPT_ACTIVE_MS / FRAME_MS));
 const MIN_MEANINGFUL_TOKENS = 3;
 const MIN_SINGLE_MEANINGFUL_TOKEN_LEN = 4;
 const AVG_LOGPROB_MIN = -1.0;
@@ -141,8 +143,10 @@ type PcmCapture = {
   // Activity tracking (for click/noise filtering)
   remainder: Buffer;     // leftover bytes < FRAME_BYTES between chunks
   activeFrames: number;
+  consecutiveActiveFrames: number;
   totalFrames: number;
   peak: number;
+  hasTriggeredSpeechInterrupt: boolean;
 };
 
 // Map<guildId, Map<userId, SpeakingSubscription>>
@@ -170,6 +174,10 @@ export type ClipGateResult = {
   reasons: string[];
   ratio: number;
 };
+
+export function shouldInterruptOnConsecutiveSpeechFrames(consecutiveActiveFrames: number): boolean {
+  return consecutiveActiveFrames >= INTERRUPT_ACTIVE_FRAMES;
+}
 
 function pickSnippet(text?: string): string {
   if (!text) return "";
@@ -541,6 +549,11 @@ export async function processTranscribedVoiceText(opts: {
       `📝 Ledger: ${displayName}, text="${text}"${confidence ? `, confidence=${confidence.toFixed(2)}` : ""}`
     );
 
+    if (getVoiceState(guildId)?.hushEnabled) {
+      voiceLog.debug(`🎧 VOICE GATE: hush mode enabled → listen-only (no replies)`);
+      return clipGate;
+    }
+
     // Tier S/A: Per-user latch. S = voice reply, A = text reply.
     const meepo = getActiveMeepo(guildId);
     if (!meepo) return clipGate;
@@ -552,7 +565,7 @@ export async function processTranscribedVoiceText(opts: {
     }
 
     const boundChannelId = meepo.channel_id;
-    const personaId = getActivePersonaId(guildId);
+    const personaId = getEffectivePersonaId(guildId);
     const hasMeepo = hasMeepoInLine(contentNorm, personaId);
 
     if (isLatchAnchor(contentNorm, personaId)) {
@@ -662,13 +675,6 @@ export function startReceiver(guildId: string): void {
       return;
     }
 
-    const bargeInTriggered = voicePlaybackController.onUserSpeechStart(guildId, {
-      channelId,
-      authorId: userId,
-      source: "voice",
-      logSystemEvent: true,
-    });
-
     // Fetch fresh member data for display name
     let displayName = `User_${userId.slice(0, 8)}`;
     try {
@@ -695,11 +701,13 @@ export function startReceiver(guildId: string): void {
       pcmChunks: [],
       totalBytes: 0,
       startedAt,
-      isBargeIn: bargeInTriggered,
+      isBargeIn: false,
       remainder: Buffer.alloc(0),
       activeFrames: 0,
+      consecutiveActiveFrames: 0,
       totalFrames: 0,
       peak: 0,
+      hasTriggeredSpeechInterrupt: false,
     });
 
     const audioStream = connection.receiver.subscribe(userId, {
@@ -748,6 +756,26 @@ export function startReceiver(guildId: string): void {
         if (peak > cap.peak) cap.peak = peak;
 
         if (rms >= FRAME_RMS_THRESH) cap.activeFrames++;
+
+        if (rms >= FRAME_RMS_THRESH) {
+          cap.consecutiveActiveFrames++;
+        } else {
+          cap.consecutiveActiveFrames = 0;
+        }
+
+        if (
+          !cap.hasTriggeredSpeechInterrupt
+          && shouldInterruptOnConsecutiveSpeechFrames(cap.consecutiveActiveFrames)
+        ) {
+          const bargeInTriggered = voicePlaybackController.onUserSpeechStart(guildId, {
+            channelId,
+            authorId: userId,
+            source: "voice",
+            logSystemEvent: true,
+          });
+          cap.hasTriggeredSpeechInterrupt = true;
+          cap.isBargeIn = bargeInTriggered;
+        }
       }
     });
 

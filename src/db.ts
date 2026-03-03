@@ -5,11 +5,13 @@ import Database from "better-sqlite3";
 import { cfg } from "./config/env.js";
 import { getEnv } from "./config/rawEnv.js";
 import { resolveCampaignDbPath } from "./dataPaths.js";
+import { log } from "./utils/logger.js";
 
 let dbSingleton: Database.Database | null = null;
 const dbByPath = new Map<string, Database.Database>();
 let schemaSqlCache: string | null = null;
 let warnedDeprecatedGetDb = false;
+const dbLog = log.withScope("db");
 
 function getControlDbPath(): string {
   return path.resolve(cfg.data.root, "control", "control.sqlite");
@@ -80,13 +82,13 @@ export function getControlDb(): Database.Database {
   const dbPath = getControlDbPath();
   const existing = dbByPath.get(dbPath);
   if (existing) {
-    console.log(`[db-route] ${JSON.stringify({ type: "control", dbPath, status: "cache-hit" })}`);
+    dbLog.debug("route", { type: "control", dbPath, status: "cache-hit" });
     return existing;
   }
 
   const db = bootstrapDbAtPath(dbPath);
   dbByPath.set(dbPath, db);
-  console.log(`[db-route] ${JSON.stringify({ type: "control", dbPath, status: "opened-new" })}`);
+  dbLog.debug("route", { type: "control", dbPath, status: "opened-new" });
   return db;
 }
 
@@ -113,13 +115,23 @@ export function getDbForCampaign(campaignSlug: string): Database.Database {
   const dbPath = path.resolve(resolveCampaignDbPath(campaignSlug));
   const existing = dbByPath.get(dbPath);
   if (existing) {
-    console.log(`[db-route] ${JSON.stringify({ type: "campaign", slug: campaignSlug, dbPath, status: "cache-hit" })}`);
+    dbLog.debug("route", {
+      type: "campaign",
+      slug: campaignSlug,
+      dbPath,
+      status: "cache-hit",
+    });
     return existing;
   }
 
   const db = bootstrapDbAtPath(dbPath);
   dbByPath.set(dbPath, db);
-  console.log(`[db-route] ${JSON.stringify({ type: "campaign", slug: campaignSlug, dbPath, status: "opened-new" })}`);
+  dbLog.debug("route", {
+    type: "campaign",
+    slug: campaignSlug,
+    dbPath,
+    status: "opened-new",
+  });
   return db;
 }
 
@@ -546,6 +558,201 @@ function applyMigrations(db: Database.Database) {
       SET mode_at_start = ?
       WHERE mode_at_start IS NULL
     `).run(cfg.mode);
+  }
+
+  // Migration: Create session_artifacts table for recap/transcript metadata
+  const tablesForSessionArtifacts = db.pragma("table_list") as any[];
+  const hasSessionArtifactsTable = tablesForSessionArtifacts.some((t: any) => t.name === "session_artifacts");
+
+  if (!hasSessionArtifactsTable) {
+    console.log("Migrating: Creating session_artifacts table");
+    db.exec(`
+      CREATE TABLE session_artifacts (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        artifact_type TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL,
+        engine TEXT,
+        source_hash TEXT,
+        strategy TEXT NOT NULL DEFAULT 'default',
+        strategy_version TEXT,
+        meta_json TEXT,
+        content_text TEXT,
+        file_path TEXT,
+        size_bytes INTEGER,
+
+        UNIQUE(session_id, artifact_type)
+      );
+
+      CREATE INDEX idx_session_artifacts_session
+      ON session_artifacts(session_id);
+
+      CREATE INDEX idx_session_artifacts_type
+      ON session_artifacts(artifact_type);
+    `);
+  } else {
+    const hasLegacyUniqueWithStrategy = Boolean(
+      db
+        .prepare(
+          `
+          SELECT name
+          FROM sqlite_master
+          WHERE type = 'index'
+            AND tbl_name = 'session_artifacts'
+            AND sql LIKE '%UNIQUE%session_id, artifact_type, strategy)%'
+          LIMIT 1
+          `
+        )
+        .get()
+    );
+
+    const hasLegacyRecapRows = Boolean(
+      db
+        .prepare(
+          `
+          SELECT 1
+          FROM session_artifacts
+          WHERE artifact_type = 'recap'
+          LIMIT 1
+          `
+        )
+        .get()
+    );
+
+    if (hasLegacyUniqueWithStrategy || hasLegacyRecapRows) {
+      console.log("Migrating: Rebuilding session_artifacts for single-final recap semantics");
+      db.exec(`
+        CREATE TABLE session_artifacts_new (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          artifact_type TEXT NOT NULL,
+          created_at_ms INTEGER NOT NULL,
+          engine TEXT,
+          source_hash TEXT,
+          strategy TEXT NOT NULL DEFAULT 'default',
+          strategy_version TEXT,
+          meta_json TEXT,
+          content_text TEXT,
+          file_path TEXT,
+          size_bytes INTEGER,
+          UNIQUE(session_id, artifact_type)
+        );
+
+        WITH normalized AS (
+          SELECT
+            id,
+            session_id,
+            CASE
+              WHEN artifact_type IN ('recap', 'recap_final') THEN 'recap_final'
+              ELSE artifact_type
+            END AS artifact_type,
+            created_at_ms,
+            engine,
+            source_hash,
+            COALESCE(NULLIF(strategy, ''), CASE WHEN artifact_type IN ('recap', 'recap_final') THEN 'balanced' ELSE 'default' END) AS strategy,
+            strategy_version,
+            meta_json,
+            content_text,
+            file_path,
+            size_bytes
+          FROM session_artifacts
+        ),
+        ranked AS (
+          SELECT
+            *,
+            ROW_NUMBER() OVER (
+              PARTITION BY session_id, artifact_type
+              ORDER BY created_at_ms DESC, id DESC
+            ) AS row_num
+          FROM normalized
+        )
+        INSERT INTO session_artifacts_new (
+          id,
+          session_id,
+          artifact_type,
+          created_at_ms,
+          engine,
+          source_hash,
+          strategy,
+          strategy_version,
+          meta_json,
+          content_text,
+          file_path,
+          size_bytes
+        )
+        SELECT
+          id,
+          session_id,
+          artifact_type,
+          created_at_ms,
+          engine,
+          source_hash,
+          strategy,
+          strategy_version,
+          meta_json,
+          content_text,
+          file_path,
+          size_bytes
+        FROM ranked
+        WHERE row_num = 1;
+
+        DROP TABLE session_artifacts;
+        ALTER TABLE session_artifacts_new RENAME TO session_artifacts;
+      `);
+    }
+
+    const sessionArtifactColumns = db.pragma("table_info(session_artifacts)") as any[];
+    const hasEngine = sessionArtifactColumns.some((col: any) => col.name === "engine");
+    const hasStrategyVersion = sessionArtifactColumns.some((col: any) => col.name === "strategy_version");
+    const hasMetaJson = sessionArtifactColumns.some((col: any) => col.name === "meta_json");
+    const hasContentText = sessionArtifactColumns.some((col: any) => col.name === "content_text");
+    const hasFilePath = sessionArtifactColumns.some((col: any) => col.name === "file_path");
+    const hasSizeBytes = sessionArtifactColumns.some((col: any) => col.name === "size_bytes");
+
+    if (!hasEngine) {
+      console.log("Migrating: Adding engine to session_artifacts");
+      db.exec("ALTER TABLE session_artifacts ADD COLUMN engine TEXT;");
+    }
+
+    if (!hasStrategyVersion) {
+      console.log("Migrating: Adding strategy_version to session_artifacts");
+      db.exec("ALTER TABLE session_artifacts ADD COLUMN strategy_version TEXT;");
+    }
+
+    if (!hasMetaJson) {
+      console.log("Migrating: Adding meta_json to session_artifacts");
+      db.exec("ALTER TABLE session_artifacts ADD COLUMN meta_json TEXT;");
+    }
+
+    if (!hasContentText) {
+      console.log("Migrating: Adding content_text to session_artifacts");
+      db.exec("ALTER TABLE session_artifacts ADD COLUMN content_text TEXT;");
+    }
+
+    if (!hasFilePath) {
+      console.log("Migrating: Adding file_path to session_artifacts");
+      db.exec("ALTER TABLE session_artifacts ADD COLUMN file_path TEXT;");
+    }
+
+    if (!hasSizeBytes) {
+      console.log("Migrating: Adding size_bytes to session_artifacts");
+      db.exec("ALTER TABLE session_artifacts ADD COLUMN size_bytes INTEGER;");
+    }
+
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_session_artifacts_unique
+      ON session_artifacts(session_id, artifact_type);
+      CREATE INDEX IF NOT EXISTS idx_session_artifacts_session
+      ON session_artifacts(session_id);
+      CREATE INDEX IF NOT EXISTS idx_session_artifacts_type
+      ON session_artifacts(artifact_type);
+    `);
+
+    db.exec(`
+      UPDATE session_artifacts
+      SET strategy = CASE WHEN artifact_type = 'recap_final' THEN 'balanced' ELSE 'default' END
+      WHERE strategy IS NULL OR TRIM(strategy) = '';
+    `);
   }
 
   // Migration: Create meepo_mind table (Knowledge Base v1)
@@ -1060,6 +1267,13 @@ function applyMigrations(db: Database.Database) {
     db.prepare("UPDATE guild_runtime_state SET active_mode = ? WHERE active_mode IS NULL").run(cfg.mode);
   }
 
+  const grsColumnsAfterMode = db.pragma("table_info(guild_runtime_state)") as any[];
+  const hasDiegeticPersonaId = grsColumnsAfterMode.some((col: any) => col.name === "diegetic_persona_id");
+  if (!hasDiegeticPersonaId) {
+    console.log("Migrating: Adding diegetic_persona_id to guild_runtime_state (Phase 1B)");
+    db.exec("ALTER TABLE guild_runtime_state ADD COLUMN diegetic_persona_id TEXT");
+  }
+
   // Migration: Persona Overhaul v1 - meepo_mind.mindspace
   const mindColsAfter = db.pragma("table_info(meepo_mind)") as any[];
   const hasMindspace = mindColsAfter.some((col: any) => col.name === "mindspace");
@@ -1142,10 +1356,59 @@ function applyMigrations(db: Database.Database) {
         guild_id TEXT PRIMARY KEY,
         campaign_slug TEXT NOT NULL,
         dm_role_id TEXT,
-        default_persona_id TEXT
+        default_persona_id TEXT,
+        setup_version INTEGER,
+        home_text_channel_id TEXT,
+        home_voice_channel_id TEXT,
+        canon_persona_mode TEXT,
+        canon_persona_id TEXT,
+        default_recap_style TEXT
       );
     `);
   }
+
+  const guildConfigColumns = db.pragma("table_info(guild_config)") as any[];
+  const hasSetupVersion = guildConfigColumns.some((c: any) => c.name === "setup_version");
+  if (!hasSetupVersion) {
+    console.log("Migrating: Adding setup_version to guild_config");
+    db.exec("ALTER TABLE guild_config ADD COLUMN setup_version INTEGER");
+  }
+
+  const hasHomeTextChannel = guildConfigColumns.some((c: any) => c.name === "home_text_channel_id");
+  if (!hasHomeTextChannel) {
+    console.log("Migrating: Adding home_text_channel_id to guild_config");
+    db.exec("ALTER TABLE guild_config ADD COLUMN home_text_channel_id TEXT");
+  }
+
+  const hasHomeVoiceChannel = guildConfigColumns.some((c: any) => c.name === "home_voice_channel_id");
+  if (!hasHomeVoiceChannel) {
+    console.log("Migrating: Adding home_voice_channel_id to guild_config");
+    db.exec("ALTER TABLE guild_config ADD COLUMN home_voice_channel_id TEXT");
+  }
+
+  const hasCanonPersonaMode = guildConfigColumns.some((c: any) => c.name === "canon_persona_mode");
+  if (!hasCanonPersonaMode) {
+    console.log("Migrating: Adding canon_persona_mode to guild_config");
+    db.exec("ALTER TABLE guild_config ADD COLUMN canon_persona_mode TEXT");
+  }
+
+  const hasCanonPersonaId = guildConfigColumns.some((c: any) => c.name === "canon_persona_id");
+  if (!hasCanonPersonaId) {
+    console.log("Migrating: Adding canon_persona_id to guild_config");
+    db.exec("ALTER TABLE guild_config ADD COLUMN canon_persona_id TEXT");
+  }
+
+  const hasDefaultRecapStyle = guildConfigColumns.some((c: any) => c.name === "default_recap_style");
+  if (!hasDefaultRecapStyle) {
+    console.log("Migrating: Adding default_recap_style to guild_config");
+    db.exec("ALTER TABLE guild_config ADD COLUMN default_recap_style TEXT");
+  }
+
+  db.exec(`
+    UPDATE guild_config
+    SET default_recap_style = 'balanced'
+    WHERE default_recap_style IS NULL OR TRIM(default_recap_style) = ''
+  `);
 
   // Migration: Latches per (guild, channel, user) — drop old key-based table if present
   const tableListForLatches = db.pragma("table_list") as any[];
