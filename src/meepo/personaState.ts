@@ -3,7 +3,12 @@
  */
 
 import { getDbForCampaign } from "../db.js";
-import { resolveCampaignSlug } from "../campaign/guildConfig.js";
+import {
+  getGuildCanonPersonaId,
+  getGuildCanonPersonaMode,
+  getGuildSetupVersion,
+  resolveCampaignSlug,
+} from "../campaign/guildConfig.js";
 import {
   getActiveSessionId,
   getConfiguredDiegeticPersonaId,
@@ -72,7 +77,22 @@ export function getEffectivePersonaId(guildId: string): string {
   const mode = resolveEffectiveMode(guildId);
 
   if (mode === "canon") {
-    return getConfiguredDiegeticPersonaId(guildId) ?? DEFAULT_DIEGETIC_PERSONA_ID;
+    const canonMode = getGuildCanonPersonaMode(guildId) ?? "meta";
+    if (canonMode === "meta") {
+      return DEFAULT_PERSONA_ID;
+    }
+
+    const configuredFromGuild = getGuildCanonPersonaId(guildId);
+    if (configuredFromGuild) {
+      return configuredFromGuild;
+    }
+
+    const setupVersion = getGuildSetupVersion(guildId) ?? 0;
+    if (setupVersion < 1) {
+      return getConfiguredDiegeticPersonaId(guildId) ?? DEFAULT_DIEGETIC_PERSONA_ID;
+    }
+
+    return DEFAULT_DIEGETIC_PERSONA_ID;
   }
 
   if (mode === "ambient") {

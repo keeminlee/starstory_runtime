@@ -72,6 +72,7 @@ export type LlmCallInput = {
   systemPrompt: string;
   userPrompt: string;
   model: string;
+  maxTokens?: number;
 };
 
 export type LlmCall = (input: LlmCallInput) => Promise<string>;

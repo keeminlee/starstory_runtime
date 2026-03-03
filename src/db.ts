@@ -1357,13 +1357,23 @@ function applyMigrations(db: Database.Database) {
         campaign_slug TEXT NOT NULL,
         dm_role_id TEXT,
         default_persona_id TEXT,
+        setup_version INTEGER,
         home_text_channel_id TEXT,
-        home_voice_channel_id TEXT
+        home_voice_channel_id TEXT,
+        canon_persona_mode TEXT,
+        canon_persona_id TEXT,
+        default_recap_style TEXT
       );
     `);
   }
 
   const guildConfigColumns = db.pragma("table_info(guild_config)") as any[];
+  const hasSetupVersion = guildConfigColumns.some((c: any) => c.name === "setup_version");
+  if (!hasSetupVersion) {
+    console.log("Migrating: Adding setup_version to guild_config");
+    db.exec("ALTER TABLE guild_config ADD COLUMN setup_version INTEGER");
+  }
+
   const hasHomeTextChannel = guildConfigColumns.some((c: any) => c.name === "home_text_channel_id");
   if (!hasHomeTextChannel) {
     console.log("Migrating: Adding home_text_channel_id to guild_config");
@@ -1375,6 +1385,30 @@ function applyMigrations(db: Database.Database) {
     console.log("Migrating: Adding home_voice_channel_id to guild_config");
     db.exec("ALTER TABLE guild_config ADD COLUMN home_voice_channel_id TEXT");
   }
+
+  const hasCanonPersonaMode = guildConfigColumns.some((c: any) => c.name === "canon_persona_mode");
+  if (!hasCanonPersonaMode) {
+    console.log("Migrating: Adding canon_persona_mode to guild_config");
+    db.exec("ALTER TABLE guild_config ADD COLUMN canon_persona_mode TEXT");
+  }
+
+  const hasCanonPersonaId = guildConfigColumns.some((c: any) => c.name === "canon_persona_id");
+  if (!hasCanonPersonaId) {
+    console.log("Migrating: Adding canon_persona_id to guild_config");
+    db.exec("ALTER TABLE guild_config ADD COLUMN canon_persona_id TEXT");
+  }
+
+  const hasDefaultRecapStyle = guildConfigColumns.some((c: any) => c.name === "default_recap_style");
+  if (!hasDefaultRecapStyle) {
+    console.log("Migrating: Adding default_recap_style to guild_config");
+    db.exec("ALTER TABLE guild_config ADD COLUMN default_recap_style TEXT");
+  }
+
+  db.exec(`
+    UPDATE guild_config
+    SET default_recap_style = 'balanced'
+    WHERE default_recap_style IS NULL OR TRIM(default_recap_style) = ''
+  `);
 
   // Migration: Latches per (guild, channel, user) — drop old key-based table if present
   const tableListForLatches = db.pragma("table_list") as any[];

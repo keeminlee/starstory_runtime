@@ -22,6 +22,8 @@ import {
 const MEGAMEECAP_ENGINE = "megameecap";
 const MEGAMEECAP_BASE_VERSION = "megameecap-base-v1";
 const MEGAMEECAP_FINAL_VERSION = "megameecap-final-v1";
+const RECAP_LLM_MAX_TOKENS = 1600;
+const RECAP_CONTINUATION_MAX_TOKENS = 1000;
 
 export type RecapStrategy = RecapPassStrategy;
 
@@ -86,6 +88,13 @@ function hashTranscript(lines: TranscriptLine[]): string {
   return createHash("sha256").update(JSON.stringify(stablePayload), "utf8").digest("hex");
 }
 
+function looksLikeIncompleteRecap(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  if (trimmed.length < 120) return false;
+  return !/[.!?)]$/.test(trimmed);
+}
+
 export async function generateSessionRecap(
   args: GenerateSessionRecapArgs,
   deps?: { callLlm?: LlmCall; now?: () => number }
@@ -117,6 +126,7 @@ export async function generateSessionRecap(
         systemPrompt: input.systemPrompt,
         userMessage: input.userPrompt,
         model: input.model,
+        maxTokens: input.maxTokens ?? RECAP_LLM_MAX_TOKENS,
       }));
 
   const now = deps?.now ?? Date.now;
@@ -148,6 +158,7 @@ export async function generateSessionRecap(
       baseSourceHash: base.baseSourceHash,
       baseVersion: base.baseVersion,
       campaignSlug,
+      sessionLabel: session.label ?? args.sessionId,
       callLlm: llmCall,
       now,
     }
@@ -217,8 +228,8 @@ export async function ensureMegameecapBase(
   }
 ): Promise<BaseEnsureResult> {
   const sourceHash = hashTranscript(deps.lines);
-  const paths = resolveMegameecapBasePaths(deps.campaignSlug, args.sessionId);
-  const baseStatus = getBaseStatus(deps.campaignSlug, args.sessionId);
+  const paths = resolveMegameecapBasePaths(deps.campaignSlug, args.sessionId, deps.sessionLabel);
+  const baseStatus = getBaseStatus(deps.campaignSlug, args.sessionId, deps.sessionLabel);
   const hashMatches = baseStatus.sourceHash === sourceHash;
   const versionMatches = baseStatus.baseVersion === MEGAMEECAP_BASE_VERSION;
   const baseDbArtifact = getSessionArtifact(args.guildId, args.sessionId, "megameecap_base");
@@ -333,13 +344,24 @@ export async function generateFinalRecapFromBase(
     baseSourceHash: string;
     baseVersion: string;
     campaignSlug: string;
+    sessionLabel: string;
     callLlm: LlmCall;
     now: () => number;
   }
 ): Promise<FinalFromBaseResult> {
   const existingFinal = getSessionArtifact(args.guildId, args.sessionId, "recap_final");
-  const expectedPaths = resolveMegameecapFinalPaths(deps.campaignSlug, args.sessionId, args.style);
-  const finalFileStatus = getFinalStatus(deps.campaignSlug, args.sessionId, args.style);
+  const expectedPaths = resolveMegameecapFinalPaths(
+    deps.campaignSlug,
+    args.sessionId,
+    args.style,
+    deps.sessionLabel
+  );
+  const finalFileStatus = getFinalStatus(
+    deps.campaignSlug,
+    args.sessionId,
+    args.style,
+    deps.sessionLabel
+  );
   const hashMatches = existingFinal?.source_hash === deps.baseSourceHash;
   const styleMatches = (existingFinal?.strategy ?? "") === args.style;
   const versionMatches = existingFinal?.strategy_version === MEGAMEECAP_FINAL_VERSION;
@@ -354,7 +376,7 @@ export async function generateFinalRecapFromBase(
 
   if (useCache) {
     const cachedText = readMegameecapFinalText(expectedPaths) ?? existingFinal?.content_text ?? "";
-    if (cachedText.length > 0) {
+    if (cachedText.length > 0 && !looksLikeIncompleteRecap(cachedText)) {
       return {
         text: cachedText,
         createdAtMs: existingFinal?.created_at_ms ?? deps.now(),
@@ -375,6 +397,26 @@ export async function generateFinalRecapFromBase(
     callLlm: deps.callLlm,
   });
 
+  let finalMarkdown = final.finalMarkdown;
+  if (looksLikeIncompleteRecap(finalMarkdown)) {
+    const continuation = await deps.callLlm({
+      systemPrompt:
+        "Continue the recap from exactly where it stops. Keep the same style/tone and do not repeat prior text.",
+      userPrompt: [
+        "Current partial recap:",
+        finalMarkdown,
+        "",
+        "Write ONLY the continuation text, starting immediately after the final words above.",
+      ].join("\n"),
+      model: cfg.llm.model,
+      maxTokens: RECAP_CONTINUATION_MAX_TOKENS,
+    });
+    const continuationTrimmed = continuation.trim();
+    if (continuationTrimmed.length > 0) {
+      finalMarkdown = `${finalMarkdown.trimEnd()} ${continuationTrimmed}`;
+    }
+  }
+
   const createdAtMs = deps.now();
   const finalMeta = {
     engine: MEGAMEECAP_ENGINE,
@@ -387,11 +429,11 @@ export async function generateFinalRecapFromBase(
     artifact_path_meta_json: expectedPaths.metaPath,
   };
 
-  fs.writeFileSync(expectedPaths.recapPath, final.finalMarkdown, "utf8");
+  fs.writeFileSync(expectedPaths.recapPath, finalMarkdown, "utf8");
   fs.writeFileSync(expectedPaths.metaPath, JSON.stringify(finalMeta, null, 2), "utf8");
 
   return {
-    text: final.finalMarkdown,
+    text: finalMarkdown,
     createdAtMs,
     finalStyle: args.style,
     sourceHash: deps.baseSourceHash,

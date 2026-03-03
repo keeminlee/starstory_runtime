@@ -140,13 +140,13 @@ test("generateSessionRecap returns non-empty text and stable metadata fields", a
   expect(result.sourceRange?.lineCount).toBeGreaterThan(0);
   expect(result.cacheHit).toBe(false);
 
-  const basePaths = resolveMegameecapBasePaths("default", sessionId);
-  expect(fs.existsSync(basePaths.basePath)).toBe(true);
-  expect(fs.existsSync(basePaths.metaPath)).toBe(true);
+  const basePathsByLabel = resolveMegameecapBasePaths("default", sessionId, "Arc Test");
+  expect(fs.existsSync(basePathsByLabel.basePath)).toBe(true);
+  expect(fs.existsSync(basePathsByLabel.metaPath)).toBe(true);
 
-  const finalPaths = resolveMegameecapFinalPaths("default", sessionId, "balanced");
-  expect(fs.existsSync(finalPaths.recapPath)).toBe(true);
-  expect(fs.existsSync(finalPaths.metaPath)).toBe(true);
+  const finalPathsByLabel = resolveMegameecapFinalPaths("default", sessionId, "balanced", "Arc Test");
+  expect(fs.existsSync(finalPathsByLabel.recapPath)).toBe(true);
+  expect(fs.existsSync(finalPathsByLabel.metaPath)).toBe(true);
 });
 
 test("final style regeneration reuses base cache and avoids base rerun", async () => {

@@ -20,13 +20,12 @@ npx tsc --noEmit      # Type-check code
 ```
 /meepo wake                              # Wake + bind home channels (hush default)
 /meepo status                            # Public status + fix hints
-/meepo settings show                     # Show persisted home text/voice channels
+/meepo doctor                            # Deterministic diagnostics + next actions
+/meepo settings view                     # Show persisted setup/persona/recap defaults
 /meepo sessions list                      # List recent sessions with recap status
 /meepo sessions view session:<id>         # Session hub + artifact availability
 /meepo sessions recap session:<id> style:balanced  # Generate canon recap final pass (elevated)
 meepo: hello                             # Auto-latch responds
-/session transcript range=since_start    # View all text+voice from session
-/session meecap                          # Generate Meecap (4-8 scenes, 1-4 beats)
 <speak: "meepo, help me">               # STT → LLM → TTS closed loop
 ```
 

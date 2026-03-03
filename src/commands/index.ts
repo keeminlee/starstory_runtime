@@ -11,6 +11,7 @@ import { getDbForCampaign } from "../db.js";
 import { resolveCampaignDbPath } from "../dataPaths.js";
 import { getGuildMode } from "../sessions/sessionRuntime.js";
 import { logRuntimeContextBanner } from "../runtime/runtimeContextBanner.js";
+import { metaMeepoVoice } from "../ui/metaMeepoVoice.js";
 
 export type CommandCtx = {
   guildId: string;
@@ -75,7 +76,7 @@ export function registerHandlers(client: Client) {
       await cmd.execute(interaction, commandCtx);
     } catch (err) {
       console.error("Command error", interaction.commandName, err);
-      const msg = "Something went wrong.";
+      const msg = metaMeepoVoice.errors.genericCommandFailure();
       if (interaction.deferred || interaction.replied) {
         await interaction.followUp({ content: msg, ephemeral: true }).catch(() => {});
       } else {

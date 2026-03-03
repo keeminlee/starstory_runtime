@@ -36,6 +36,21 @@ export type FinalStatus = {
   paths: RecapArtifactPaths | null;
 };
 
+function sanitizeSessionLabelForFilename(sessionLabel: string): string {
+  const trimmed = sessionLabel.trim();
+  if (!trimmed) return "";
+  return trimmed
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+export function buildSessionArtifactStem(sessionId: string, sessionLabel?: string | null): string {
+  const safeLabel = sessionLabel ? sanitizeSessionLabelForFilename(sessionLabel) : "";
+  const identity = safeLabel.length > 0 ? safeLabel : sessionId;
+  return `session-${identity}`;
+}
+
 function readJsonFile(filePath: string): Record<string, unknown> | null {
   if (!fs.existsSync(filePath)) return null;
   const raw = fs.readFileSync(filePath, "utf8");
@@ -48,10 +63,11 @@ function readJsonFile(filePath: string): Record<string, unknown> | null {
 
 export function resolveMegameecapBasePaths(
   campaignSlug: string,
-  sessionId: string
+  sessionId: string,
+  sessionLabel?: string | null
 ): BaseArtifactPaths {
   const outputDir = resolveMegameecapOutputDir(campaignSlug);
-  const baseName = `session-${sessionId}-megameecap-base`;
+  const baseName = `${buildSessionArtifactStem(sessionId, sessionLabel)}-megameecap-base`;
   return {
     outputDir,
     basePath: path.join(outputDir, `${baseName}.md`),
@@ -62,11 +78,12 @@ export function resolveMegameecapBasePaths(
 export function resolveMegameecapFinalPaths(
   campaignSlug: string,
   sessionId: string,
-  strategy: RecapPassStrategy
+  strategy: RecapPassStrategy,
+  sessionLabel?: string | null
 ): RecapArtifactPaths {
   const outputDir = resolveMegameecapOutputDir(campaignSlug);
 
-  const baseName = `session-${sessionId}-recap-final-${strategy}`;
+  const baseName = `${buildSessionArtifactStem(sessionId, sessionLabel)}-recap-final-${strategy}`;
   return {
     outputDir,
     recapPath: path.join(outputDir, `${baseName}.md`),
@@ -77,14 +94,19 @@ export function resolveMegameecapFinalPaths(
 export function resolveMegameecapRecapPaths(
   campaignSlug: string,
   sessionId: string,
-  strategy: RecapPassStrategy
+  strategy: RecapPassStrategy,
+  sessionLabel?: string | null
 ): RecapArtifactPaths {
-  return resolveMegameecapFinalPaths(campaignSlug, sessionId, strategy);
+  return resolveMegameecapFinalPaths(campaignSlug, sessionId, strategy, sessionLabel);
 }
 
-export function getBaseStatus(campaignSlug: string, sessionId: string): BaseStatus {
-  const paths = resolveMegameecapBasePaths(campaignSlug, sessionId);
-  const hasBase = fs.existsSync(paths.basePath) && fs.existsSync(paths.metaPath);
+export function getBaseStatus(campaignSlug: string, sessionId: string, sessionLabel?: string | null): BaseStatus {
+  const primaryPaths = resolveMegameecapBasePaths(campaignSlug, sessionId, sessionLabel);
+  const legacyPaths = resolveMegameecapBasePaths(campaignSlug, sessionId);
+  const primaryExists = fs.existsSync(primaryPaths.basePath) && fs.existsSync(primaryPaths.metaPath);
+  const legacyExists = fs.existsSync(legacyPaths.basePath) && fs.existsSync(legacyPaths.metaPath);
+  const paths = primaryExists ? primaryPaths : legacyExists ? legacyPaths : primaryPaths;
+  const hasBase = primaryExists || legacyExists;
   const meta = readJsonFile(paths.metaPath);
 
   return {
@@ -99,11 +121,16 @@ export function getBaseStatus(campaignSlug: string, sessionId: string): BaseStat
 export function getFinalStatus(
   campaignSlug: string,
   sessionId: string,
-  strategy?: RecapPassStrategy
+  strategy?: RecapPassStrategy,
+  sessionLabel?: string | null
 ): FinalStatus {
   if (strategy) {
-    const paths = resolveMegameecapFinalPaths(campaignSlug, sessionId, strategy);
-    const exists = fs.existsSync(paths.recapPath) && fs.existsSync(paths.metaPath);
+    const primaryPaths = resolveMegameecapFinalPaths(campaignSlug, sessionId, strategy, sessionLabel);
+    const legacyPaths = resolveMegameecapFinalPaths(campaignSlug, sessionId, strategy);
+    const primaryExists = fs.existsSync(primaryPaths.recapPath) && fs.existsSync(primaryPaths.metaPath);
+    const legacyExists = fs.existsSync(legacyPaths.recapPath) && fs.existsSync(legacyPaths.metaPath);
+    const paths = primaryExists ? primaryPaths : legacyExists ? legacyPaths : primaryPaths;
+    const exists = primaryExists || legacyExists;
     const meta = readJsonFile(paths.metaPath);
     return {
       exists,
@@ -119,7 +146,7 @@ export function getFinalStatus(
   let best: FinalStatus | null = null;
 
   for (const style of KNOWN_FINAL_STRATEGIES) {
-    const status = getFinalStatus(campaignSlug, sessionId, style);
+    const status = getFinalStatus(campaignSlug, sessionId, style, sessionLabel);
     if (!status.exists) continue;
     if (!best || (status.createdAtMs ?? 0) > (best.createdAtMs ?? 0)) {
       best = status;
@@ -139,8 +166,8 @@ export function getFinalStatus(
   );
 }
 
-export function getAllFinalStatuses(campaignSlug: string, sessionId: string): FinalStatus[] {
-  return KNOWN_FINAL_STRATEGIES.map((style) => getFinalStatus(campaignSlug, sessionId, style));
+export function getAllFinalStatuses(campaignSlug: string, sessionId: string, sessionLabel?: string | null): FinalStatus[] {
+  return KNOWN_FINAL_STRATEGIES.map((style) => getFinalStatus(campaignSlug, sessionId, style, sessionLabel));
 }
 
 export function readMegameecapBaseText(paths: BaseArtifactPaths): string | null {

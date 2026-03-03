@@ -4,6 +4,8 @@ Meepo is a diegetic Discord companion for D&D campaigns: it listens in-session, 
 
 ## Quick Start
 
+For first-time setup, use [docs/START_HERE.md](docs/START_HERE.md).
+
 ### Prerequisites
 - Node.js 18+
 - Discord bot token (Message Content intent enabled)
@@ -33,9 +35,9 @@ npm run dev:bot      # start bot
 
 ## Core Command Groups
 
-- `meepo`: wake/sleep/status/voice + persona controls
-- `session`: lifecycle, transcript, meecap, recap
-- `missions` / `meeps`: mission economy and balances
+- `meepo wake|sleep|status|doctor|talk|hush`
+- `meepo settings view|set`
+- `meepo sessions list|view|recap`
 
 See [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) for command details and readiness status.
 

@@ -1,12 +1,21 @@
 import fs from "node:fs";
 import { AttachmentBuilder, GuildMember, SlashCommandBuilder } from "discord.js";
 import {
+  getGuildCanonPersonaId,
+  getGuildCanonPersonaMode,
+  getGuildConfig,
+  getGuildDefaultRecapStyle,
   getGuildHomeTextChannelId,
   getGuildHomeVoiceChannelId,
+  getGuildSetupVersion,
   resolveGuildHomeVoiceChannelId,
+  setGuildCanonPersonaId,
+  setGuildCanonPersonaMode,
+  setGuildDefaultRecapStyle,
   setGuildHomeTextChannelId,
   setGuildHomeVoiceChannelId,
 } from "../campaign/guildConfig.js";
+import { ensureGuildSetup, type SetupReport } from "../campaign/ensureGuildSetup.js";
 import { cfg } from "../config/env.js";
 import { getPersona } from "../personas/index.js";
 import { logSystemEvent } from "../ledger/system.js";
@@ -19,12 +28,14 @@ import {
   getSessionArtifact,
   getSessionArtifactMap,
   getSessionById,
+  getMostRecentSession,
   listSessions,
   startSession,
 } from "../sessions/sessions.js";
 import { generateSessionRecap } from "../sessions/recapEngine.js";
 import type { RecapStrategy } from "../sessions/recapEngine.js";
 import {
+  buildSessionArtifactStem,
   getAllFinalStatuses,
   getBaseStatus,
   getFinalStatus,
@@ -42,7 +53,9 @@ import {
 import { getSttProviderInfo } from "../voice/stt/provider.js";
 import { getTtsProviderInfo } from "../voice/tts/provider.js";
 import { voicePlaybackController } from "../voice/voicePlaybackController.js";
+import { metaMeepoVoice, type DoctorCheck } from "../ui/metaMeepoVoice.js";
 import type { CommandCtx } from "./index.js";
+import { PermissionFlagsBits } from "discord.js";
 
 type SessionRow = {
   session_id: string;
@@ -70,6 +83,7 @@ type SessionArtifactRow = {
 
 const DEFAULT_RECAP_STRATEGY: RecapStrategy = "balanced";
 const RECAP_STRATEGIES: RecapStrategy[] = ["detailed", "balanced", "concise"];
+const setupWarningDigestByGuild = new Map<string, string>();
 
 function setReplyMode(db: any, guildId: string, mode: "voice" | "text"): void {
   db.prepare(
@@ -110,6 +124,135 @@ function canGenerateRecap(session: Pick<SessionRow, "kind" | "mode_at_start">): 
   return session.kind === "canon" && session.mode_at_start !== "lab";
 }
 
+function shouldPrintSetupSummary(guildId: string, report: SetupReport): boolean {
+  if (report.applied.length > 0 || report.errors.length > 0 || report.setupVersionChanged) {
+    if (report.warnings.length > 0) {
+      const warningDigest = report.warnings.join(" | ");
+      setupWarningDigestByGuild.set(guildId, warningDigest);
+    }
+    return true;
+  }
+
+  if (report.warnings.length === 0) {
+    return false;
+  }
+
+  const warningDigest = report.warnings.join(" | ");
+  const previousDigest = setupWarningDigestByGuild.get(guildId);
+  if (previousDigest === warningDigest) {
+    return false;
+  }
+  setupWarningDigestByGuild.set(guildId, warningDigest);
+  return true;
+}
+
+function renderSetupSummary(report: SetupReport): string[] {
+  return metaMeepoVoice.wake.setupSummaryLines(report.applied, report.warnings, report.errors);
+}
+
+async function runDoctorChecks(interaction: any, ctx: CommandCtx): Promise<DoctorCheck[]> {
+  const guildId = interaction.guildId as string;
+  const channel = interaction.channel;
+  const botMember = interaction.guild?.members?.me ?? null;
+  const checks: DoctorCheck[] = [];
+
+  const campaignSlug = ctx.campaignSlug;
+  checks.push(
+    campaignSlug
+      ? { icon: "✅", label: "Campaign slug resolved", action: "No action needed" }
+      : { icon: "❌", label: "Campaign slug missing", action: "Run /meepo wake to initialize guild setup" }
+  );
+
+  const textPerms = channel && botMember ? channel.permissionsFor(botMember) : null;
+  const canSend = Boolean(textPerms?.has(PermissionFlagsBits.SendMessages));
+  const canEmbed = Boolean(textPerms?.has(PermissionFlagsBits.EmbedLinks));
+  const canAttach = Boolean(textPerms?.has(PermissionFlagsBits.AttachFiles));
+  checks.push(
+    canSend
+      ? { icon: "✅", label: "Send messages in current channel", action: "No action needed" }
+      : { icon: "❌", label: "Cannot send messages in current channel", action: "Grant Send Messages for the bot in this channel" }
+  );
+  checks.push(
+    canEmbed
+      ? { icon: "✅", label: "Embed links in current channel", action: "No action needed" }
+      : { icon: "⚠️", label: "Embed links unavailable", action: "Grant Embed Links to improve rich status output" }
+  );
+  checks.push(
+    canAttach
+      ? { icon: "✅", label: "Attach files in current channel", action: "No action needed" }
+      : { icon: "⚠️", label: "Attach files unavailable", action: "Grant Attach Files so recap exports can upload" }
+  );
+
+  const homeVoice = getGuildHomeVoiceChannelId(guildId);
+  if (!homeVoice) {
+    checks.push({
+      icon: "⚠️",
+      label: "Home voice channel not configured",
+      action: "Set one with /meepo settings set home-voice:<channel>",
+    });
+  } else {
+    try {
+      const voiceChannel = await interaction.guild.channels.fetch(homeVoice);
+      if (!voiceChannel || !voiceChannel.isVoiceBased()) {
+        checks.push({
+          icon: "❌",
+          label: "Home voice channel invalid",
+          action: "Set a valid voice channel with /meepo settings set home-voice:<channel>",
+        });
+      } else {
+        const voicePerms = voiceChannel.permissionsFor(botMember);
+        const canConnect = Boolean(voicePerms?.has(PermissionFlagsBits.Connect));
+        const canSpeak = Boolean(voicePerms?.has(PermissionFlagsBits.Speak));
+        checks.push(
+          canConnect && canSpeak
+            ? { icon: "✅", label: "Voice connect/speak permissions", action: "No action needed" }
+            : {
+                icon: "❌",
+                label: "Voice connect/speak missing",
+                action: "Grant Connect and Speak in the configured home voice channel",
+              }
+        );
+      }
+    } catch {
+      checks.push({
+        icon: "❌",
+        label: "Home voice channel lookup failed",
+        action: "Re-set home voice with /meepo settings set home-voice:<channel>",
+      });
+    }
+  }
+
+  checks.push(
+    cfg.openai.apiKey
+      ? { icon: "✅", label: "OPENAI_API_KEY configured", action: "No action needed" }
+      : { icon: "❌", label: "OPENAI_API_KEY missing", action: "Set OPENAI_API_KEY in environment before starting the bot" }
+  );
+
+  checks.push(
+    hasTtsAvailable()
+      ? { icon: "✅", label: "TTS provider available", action: "No action needed" }
+      : { icon: "⚠️", label: "TTS unavailable (text-only mode)", action: "Set TTS_ENABLED=1 and non-noop TTS_PROVIDER to enable voice replies" }
+  );
+
+  const session = (getActiveSession(guildId) as SessionRow | null) ?? getMostRecentSession(guildId);
+  if (!session) {
+    checks.push({
+      icon: "⚠️",
+      label: "No session data yet",
+      action: "Run /meepo wake then start a session and generate a recap",
+    });
+  } else {
+    const baseStatus = getBaseStatus(ctx.campaignSlug, session.session_id, session.label);
+    checks.push(
+      baseStatus.exists
+        ? { icon: "✅", label: "Base recap artifact present", action: "No action needed" }
+        : { icon: "⚠️", label: "Base recap artifact missing", action: "Run /meepo sessions recap to generate base + final artifacts" }
+    );
+  }
+
+  return checks;
+}
+
 function formatRecapStatusForList(session: SessionRow, recap: SessionArtifactRow | null): string {
   if (!canGenerateRecap(session)) return "—";
   return recap ? "✅" : "❌";
@@ -145,7 +288,7 @@ async function ensureVoiceConnection(interaction: any, guildId: string): Promise
       joinedVoiceChannelId: null,
       stayPutNotice:
         invokerVoiceChannelId && invokerVoiceChannelId !== currentVoiceState.channelId
-          ? `I am already in ${formatChannel(currentVoiceState.channelId)} and will stay put. Change home voice via /meepo settings set.`
+          ? metaMeepoVoice.wake.stayPutNotice(formatChannel(currentVoiceState.channelId))
           : null,
       notInVoiceNotice: null,
     };
@@ -155,7 +298,7 @@ async function ensureVoiceConnection(interaction: any, guildId: string): Promise
     return {
       joinedVoiceChannelId: null,
       stayPutNotice: null,
-      notInVoiceNotice: "Join a voice channel and run /meepo wake again if you want me to connect.",
+      notInVoiceNotice: metaMeepoVoice.wake.notInVoiceNotice(),
     };
   }
 
@@ -192,18 +335,36 @@ async function handleWake(interaction: any, ctx: CommandCtx): Promise<void> {
   const invocationChannelId = interaction.channelId as string;
   const requestedSessionLabel = interaction.options.getString("session")?.trim() ?? null;
 
-  if (!getGuildHomeTextChannelId(guildId)) {
-    setGuildHomeTextChannelId(guildId, invocationChannelId);
+  const setupReport = await ensureGuildSetup({
+    guildId,
+    guildName: interaction.guild?.name ?? null,
+    interaction,
+  });
+
+  if (setupReport.errors.length > 0) {
+    const setupSummaryLines = renderSetupSummary(setupReport);
+    await interaction.reply({
+      content: metaMeepoVoice.wake.blockedDueToSetup(setupSummaryLines),
+      ephemeral: true,
+    });
+    return;
   }
 
   if (!getActiveMeepo(guildId)) {
     wakeMeepo({ guildId, channelId: invocationChannelId });
   }
 
-  const { joinedVoiceChannelId, stayPutNotice, notInVoiceNotice } = await ensureVoiceConnection(
-    interaction,
-    guildId
-  );
+  let joinedVoiceChannelId: string | null = null;
+  let stayPutNotice: string | null = null;
+  let notInVoiceNotice: string | null = null;
+  if (setupReport.canAttemptVoice) {
+    const voiceResult = await ensureVoiceConnection(interaction, guildId);
+    joinedVoiceChannelId = voiceResult.joinedVoiceChannelId;
+    stayPutNotice = voiceResult.stayPutNotice;
+    notInVoiceNotice = voiceResult.notInVoiceNotice;
+  } else {
+    notInVoiceNotice = metaMeepoVoice.wake.voiceConnectSkipped();
+  }
 
   setReplyMode(ctx.db, guildId, "text");
   setVoiceHushEnabled(guildId, true);
@@ -266,33 +427,21 @@ async function handleWake(interaction: any, ctx: CommandCtx): Promise<void> {
   const homeText = getGuildHomeTextChannelId(guildId);
   const homeVoice = resolveGuildHomeVoiceChannelId(guildId, cfg.overlay.homeVoiceChannelId ?? null);
 
-  const responseLines: string[] = [];
-
-  if (startedSession) {
-    if (endedPrevious) {
-      responseLines.push("🧾 Previous session ended.");
-    }
-    responseLines.push(`🎬 Session started: "${startedSession.label}"`);
-    responseLines.push(`Mode: ${effectiveMode === "canon" ? "Canon" : effectiveMode} (listening only)`);
-  } else if (activeSession) {
-    responseLines.push("🧠 Meepo is awake.");
-    responseLines.push(`Mode: Canon (active session: ${getSessionDisplayLabel(activeSession)})`);
-  } else {
-    responseLines.push("🧠 Meepo is awake.");
-    if (endedPrevious) {
-      responseLines.push("🧾 Previous session ended.");
-    }
-    responseLines.push("Mode: Ambient");
-  }
-
-  responseLines.push(`Persona: ${effectivePersona.displayName} (${effectivePersonaId})`);
-  responseLines.push(`Home text: ${formatChannel(homeText)}`);
-  responseLines.push(`Home voice: ${formatChannel(homeVoice)}`);
-  if (joinedVoiceChannelId) {
-    responseLines.push(`Joined voice: ${formatChannel(joinedVoiceChannelId)}`);
-  }
-  if (stayPutNotice) responseLines.push(stayPutNotice);
-  if (notInVoiceNotice) responseLines.push(notInVoiceNotice);
+  const setupSummaryLines = shouldPrintSetupSummary(guildId, setupReport) ? renderSetupSummary(setupReport) : [];
+  const responseLines = metaMeepoVoice.wake.replyLines({
+    startedSessionLabel: startedSession?.label ?? null,
+    activeSessionLabel: activeSession ? getSessionDisplayLabel(activeSession) : null,
+    endedPrevious,
+    effectiveMode,
+    personaDisplayName: effectivePersona.displayName,
+    personaId: effectivePersonaId,
+    homeText: formatChannel(homeText),
+    homeVoice: formatChannel(homeVoice),
+    joinedVoice: joinedVoiceChannelId ? formatChannel(joinedVoiceChannelId) : null,
+    stayPutNotice,
+    notInVoiceNotice,
+    setupSummaryLines,
+  });
 
   await interaction.reply({ content: responseLines.join("\n"), ephemeral: true });
 }
@@ -323,33 +472,33 @@ async function handleSleep(interaction: any): Promise<void> {
   const changed = sleepMeepo(guildId);
 
   if (!changed && !activeSession) {
-    await interaction.reply({ content: "Meepo is already asleep.", ephemeral: true });
+    await interaction.reply({ content: metaMeepoVoice.sleep.alreadyAsleep(), ephemeral: true });
     return;
   }
 
   if (activeSession) {
     await interaction.reply({
-      content: `🧾 Session ended: "${getSessionDisplayLabel(activeSession)}"\nTranscript saved.`,
+      content: metaMeepoVoice.sleep.sessionEnded(getSessionDisplayLabel(activeSession)),
       ephemeral: true,
     });
     return;
   }
 
-  await interaction.reply({ content: "😴 Meepo is asleep.", ephemeral: true });
+  await interaction.reply({ content: metaMeepoVoice.sleep.asleep(), ephemeral: true });
 }
 
 async function handleTalk(interaction: any, ctx: CommandCtx): Promise<void> {
   const guildId = interaction.guildId as string;
   const active = getActiveMeepo(guildId);
   if (!active) {
-    await interaction.reply({ content: "Meepo is asleep. Use /meepo wake first.", ephemeral: true });
+    await interaction.reply({ content: metaMeepoVoice.talk.requiresWake(), ephemeral: true });
     return;
   }
 
   const currentVoiceState = getVoiceState(guildId);
   if (!currentVoiceState) {
     await interaction.reply({
-      content: "Meepo is not connected to voice. Use /meepo wake while you are in voice.",
+      content: metaMeepoVoice.talk.requiresVoiceConnection(),
       ephemeral: true,
     });
     return;
@@ -360,9 +509,7 @@ async function handleTalk(interaction: any, ctx: CommandCtx): Promise<void> {
     setVoiceHushEnabled(guildId, true);
     const ttsInfo = getTtsProviderInfo();
     await interaction.reply({
-      content:
-        "TTS is unavailable, staying in hush mode. " +
-        `Current provider: ${ttsInfo.name}. Configure TTS_ENABLED=1 and a non-noop TTS_PROVIDER.`,
+      content: metaMeepoVoice.talk.ttsUnavailable(ttsInfo.name),
       ephemeral: true,
     });
     return;
@@ -372,7 +519,7 @@ async function handleTalk(interaction: any, ctx: CommandCtx): Promise<void> {
   setVoiceHushEnabled(guildId, false);
 
   await interaction.reply({
-    content: "Talk mode enabled. Meepo can now reply in voice.",
+    content: metaMeepoVoice.talk.enabled(),
     ephemeral: true,
   });
 }
@@ -381,7 +528,7 @@ async function handleHush(interaction: any, ctx: CommandCtx): Promise<void> {
   const guildId = interaction.guildId as string;
   const active = getActiveMeepo(guildId);
   if (!active) {
-    await interaction.reply({ content: "Meepo is asleep. Use /meepo wake first.", ephemeral: true });
+    await interaction.reply({ content: metaMeepoVoice.hush.requiresWake(), ephemeral: true });
     return;
   }
 
@@ -400,7 +547,7 @@ async function handleHush(interaction: any, ctx: CommandCtx): Promise<void> {
   setReplyMode(ctx.db, guildId, "text");
 
   await interaction.reply({
-    content: "Hush mode enabled. Meepo will stay listen-only.",
+    content: metaMeepoVoice.hush.enabled(),
     ephemeral: true,
   });
 }
@@ -409,17 +556,19 @@ async function handleSessionsRecap(interaction: any): Promise<void> {
   const guildId = interaction.guildId as string;
   const sessionId = interaction.options.getString("session", true);
   const force = interaction.options.getBoolean("force") ?? false;
-  const strategy = (interaction.options.getString("style") ?? DEFAULT_RECAP_STRATEGY) as RecapStrategy;
+  const configuredDefaultStyle = getGuildDefaultRecapStyle(guildId);
+  const strategy =
+    (interaction.options.getString("style") ?? configuredDefaultStyle ?? DEFAULT_RECAP_STRATEGY) as RecapStrategy;
 
   const session = getSessionById(guildId, sessionId) as SessionRow | null;
   if (!session) {
-    await interaction.reply({ content: "Session not found.", ephemeral: true });
+    await interaction.reply({ content: metaMeepoVoice.sessions.sessionNotFound(), ephemeral: true });
     return;
   }
 
   if (!canGenerateRecap(session)) {
     await interaction.reply({
-      content: "Recaps are available only for canon sessions (non-lab).",
+      content: metaMeepoVoice.sessions.recapMissingCanon(),
       ephemeral: true,
     });
     return;
@@ -446,19 +595,20 @@ async function handleSessionsRecap(interaction: any): Promise<void> {
 
   const sessionLabel = getSessionDisplayLabel(session);
   const previewText = recap.text.length > 700 ? `${recap.text.slice(0, 700)}…` : recap.text;
-  const fileName = `session-${session.session_id}-recap-${strategy}.md`;
+  const fileStem = buildSessionArtifactStem(session.session_id, session.label);
+  const fileName = `${fileStem}-recap-${strategy}.md`;
   const file = new AttachmentBuilder(Buffer.from(recap.text, "utf8"), { name: fileName });
 
   await interaction.editReply({
-    content: [
-      `${recap.cacheHit ? "📦 Cached" : "📜 Generated"} recap for \"${sessionLabel}\".`,
-      `Style: ${recap.strategy} (${recap.finalVersion})`,
-      `Base version: ${recap.baseVersion}`,
-      `Source hash: ${recap.sourceTranscriptHash.slice(0, 12)}…`,
-      "",
-      "Preview:",
+    content: metaMeepoVoice.sessions.recapResult({
+      cacheHit: recap.cacheHit,
+      sessionLabel,
+      strategy: recap.strategy,
+      finalVersion: recap.finalVersion,
+      baseVersion: recap.baseVersion,
+      sourceHashShort: recap.sourceTranscriptHash.slice(0, 12),
       previewText,
-    ].join("\n"),
+    }),
     files: [file],
   });
 }
@@ -471,7 +621,7 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
     const limit = interaction.options.getInteger("limit") ?? 10;
     const rows = listSessions(guildId, limit) as SessionRow[];
     if (rows.length === 0) {
-      await interaction.reply({ content: "No sessions found.", ephemeral: true });
+      await interaction.reply({ content: metaMeepoVoice.sessions.listEmpty(), ephemeral: true });
       return;
     }
 
@@ -481,11 +631,19 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
       "recap_final"
     );
 
-    const lines = rows.map((session, index) => {
-      const date = new Date(session.started_at_ms).toISOString().replace("T", " ").slice(0, 16);
-      const recap = recapBySession.get(session.session_id) as SessionArtifactRow | undefined;
-      return `#${index + 1} ${date} \"${getSessionDisplayLabel(session)}\" [${getSessionKindTag(session)}] recap: ${formatRecapStatusForList(session, recap ?? null)}`;
-    });
+    const lines = metaMeepoVoice.sessions.listLines(
+      rows.map((session, index) => {
+        const date = new Date(session.started_at_ms).toISOString().replace("T", " ").slice(0, 16);
+        const recap = recapBySession.get(session.session_id) as SessionArtifactRow | undefined;
+        return {
+          index,
+          date,
+          label: getSessionDisplayLabel(session),
+          kindTag: getSessionKindTag(session),
+          recapStatus: formatRecapStatusForList(session, recap ?? null),
+        };
+      })
+    );
 
     await interaction.reply({ content: lines.join("\n"), ephemeral: true });
     return;
@@ -496,7 +654,7 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
     const session = getSessionById(guildId, sessionId) as SessionRow | null;
 
     if (!session) {
-      await interaction.reply({ content: "Session not found.", ephemeral: true });
+      await interaction.reply({ content: metaMeepoVoice.sessions.sessionNotFound(), ephemeral: true });
       return;
     }
 
@@ -508,12 +666,12 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
     ) as SessionArtifactRow | null;
     const effectiveCampaignSlug = ctx.campaignSlug;
 
-    const baseStatus = getBaseStatus(effectiveCampaignSlug, session.session_id);
+    const baseStatus = getBaseStatus(effectiveCampaignSlug, session.session_id, session.label);
     const finalFileForDbStyle =
       recap && recap.strategy && RECAP_STRATEGIES.includes(recap.strategy as RecapPassStrategy)
-        ? getFinalStatus(effectiveCampaignSlug, session.session_id, recap.strategy as RecapPassStrategy)
-        : getFinalStatus(effectiveCampaignSlug, session.session_id);
-    const allFinalFiles = getAllFinalStatuses(effectiveCampaignSlug, session.session_id);
+        ? getFinalStatus(effectiveCampaignSlug, session.session_id, recap.strategy as RecapPassStrategy, session.label)
+        : getFinalStatus(effectiveCampaignSlug, session.session_id, undefined, session.label);
+    const allFinalFiles = getAllFinalStatuses(effectiveCampaignSlug, session.session_id, session.label);
     const hasAnyFinalFiles = allFinalFiles.some((status) => status.exists);
 
     const recapExists = Boolean(recap);
@@ -531,47 +689,41 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
       (recapMeta.final_version as string | undefined) ?? recap?.strategy_version ?? "(n/a)";
     const baseVersion = (recapMeta.base_version as string | undefined) ?? "(n/a)";
 
-    const lines = [
-      `Session: ${session.session_id}`,
-      `Label: ${getSessionDisplayLabel(session)}`,
-      `Started: ${new Date(session.started_at_ms).toISOString()}`,
-      `Ended: ${session.ended_at_ms ? new Date(session.ended_at_ms).toISOString() : "(active)"}`,
-      `Kind: ${session.kind}`,
-      `Base cache: ${baseStatus.exists ? "✅" : "❌"}`,
-      `Base hash: ${baseStatus.sourceHash ? `${baseStatus.sourceHash.slice(0, 12)}…` : "(n/a)"}`,
-      `Base version: ${baseStatus.baseVersion ?? "(n/a)"}`,
-      `Most recent final: ${recapExists ? "✅" : "❌"}`,
-      `Final style: ${finalStyle}`,
-      `Final created_at: ${recap?.created_at_ms ? new Date(recap.created_at_ms).toISOString() : "(n/a)"}`,
-      `Final hash: ${recap?.source_hash ? `${recap.source_hash.slice(0, 12)}…` : "(n/a)"}`,
-      `Final version: ${finalVersion}`,
-      `Linked base version: ${baseVersion}`,
-      `Transcript export: ${transcriptStatus}`,
-    ];
-
-    if (recapExists && !finalFileForDbStyle.exists) {
-      lines.push("Final DB row exists but final file is missing; regenerate to repair index + files.");
-    }
-
-    if (!recapExists && hasAnyFinalFiles) {
-      lines.push("Final file(s) present but unindexed in DB (not canonical most recent). Regenerate to index canonically.");
-    }
-
+    let nextActionLine: string | null = null;
     if (!baseStatus.exists && canGenerateRecap(session)) {
-      lines.push(`Next: Generate recap (builds base) via /meepo sessions recap session:${session.session_id} style:${DEFAULT_RECAP_STRATEGY}`);
+      nextActionLine = metaMeepoVoice.sessions.nextActionGenerateBase(session.session_id, DEFAULT_RECAP_STRATEGY);
     } else if (!recapExists && canGenerateRecap(session)) {
-      lines.push(`Next: Generate final recap (cheap) via /meepo sessions recap session:${session.session_id} style:${DEFAULT_RECAP_STRATEGY}`);
+      nextActionLine = metaMeepoVoice.sessions.nextActionGenerateFinal(session.session_id, DEFAULT_RECAP_STRATEGY);
     } else if (recapExists) {
-      lines.push(`Next: Regenerate via /meepo sessions recap session:${session.session_id} style:${DEFAULT_RECAP_STRATEGY} force:true`);
+      nextActionLine = metaMeepoVoice.sessions.nextActionRegenerate(session.session_id, DEFAULT_RECAP_STRATEGY);
     }
 
-    if (!transcriptArtifact) {
-      lines.push("Transcript export not cached yet.");
-    }
+    const lines = metaMeepoVoice.sessions.viewLines({
+      sessionId: session.session_id,
+      label: getSessionDisplayLabel(session),
+      startedIso: new Date(session.started_at_ms).toISOString(),
+      endedIso: session.ended_at_ms ? new Date(session.ended_at_ms).toISOString() : "(active)",
+      kind: session.kind,
+      baseExists: baseStatus.exists,
+      baseHash: baseStatus.sourceHash ? `${baseStatus.sourceHash.slice(0, 12)}…` : "(n/a)",
+      baseVersion: baseStatus.baseVersion ?? "(n/a)",
+      recapExists,
+      finalStyle,
+      finalCreatedAt: recap?.created_at_ms ? new Date(recap.created_at_ms).toISOString() : "(n/a)",
+      finalHash: recap?.source_hash ? `${recap.source_hash.slice(0, 12)}…` : "(n/a)",
+      finalVersion,
+      linkedBaseVersion: baseVersion,
+      transcriptStatus,
+      dbRowMissingFileNotice: recapExists && !finalFileForDbStyle.exists,
+      hasUnindexedFilesNotice: !recapExists && hasAnyFinalFiles,
+      nextActionLine,
+      transcriptMissingNotice: !transcriptArtifact,
+    });
 
     const files: AttachmentBuilder[] = [];
     if (recap) {
-      const fileName = `session-${session.session_id}-recap-final-${recap.strategy ?? DEFAULT_RECAP_STRATEGY}.md`;
+      const fileStem = buildSessionArtifactStem(session.session_id, session.label);
+      const fileName = `${fileStem}-recap-final-${recap.strategy ?? DEFAULT_RECAP_STRATEGY}.md`;
       if (finalFileForDbStyle.exists && finalFileForDbStyle.paths?.recapPath && fs.existsSync(finalFileForDbStyle.paths.recapPath)) {
         files.push(
           new AttachmentBuilder(fs.readFileSync(finalFileForDbStyle.paths.recapPath), {
@@ -588,9 +740,10 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
     }
 
     if (transcriptArtifact?.content_text) {
+      const fileStem = buildSessionArtifactStem(session.session_id, session.label);
       files.push(
         new AttachmentBuilder(Buffer.from(transcriptArtifact.content_text, "utf8"), {
-          name: `session-${session.session_id}-transcript.txt`,
+          name: `${fileStem}-transcript.txt`,
         })
       );
     }
@@ -608,61 +761,88 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
     return;
   }
 
-  await interaction.reply({ content: "Unknown sessions action.", ephemeral: true });
+  await interaction.reply({ content: metaMeepoVoice.sessions.unknownAction(), ephemeral: true });
 }
 
 async function handleSettings(interaction: any): Promise<void> {
   const guildId = interaction.guildId as string;
   const sub = interaction.options.getSubcommand();
 
-  if (sub === "show") {
+  if (sub === "view") {
+    const config = getGuildConfig(guildId);
     const homeText = getGuildHomeTextChannelId(guildId);
     const homeVoice = resolveGuildHomeVoiceChannelId(guildId, cfg.overlay.homeVoiceChannelId ?? null);
+    const canonMode = getGuildCanonPersonaMode(guildId) ?? "meta";
+    const canonPersonaId = getGuildCanonPersonaId(guildId) ?? "(auto)";
+    const recapStyle = getGuildDefaultRecapStyle(guildId) ?? DEFAULT_RECAP_STRATEGY;
+    const setupVersion = getGuildSetupVersion(guildId) ?? 0;
     await interaction.reply({
-      content: [
-        "Meepo settings:",
-        `- home_text_channel: ${formatChannel(homeText)}`,
-        `- home_voice_channel: ${formatChannel(homeVoice)}`,
-      ].join("\n"),
+      content: metaMeepoVoice.settings.viewSummary({
+        setupVersion,
+        campaignSlug: config?.campaign_slug ?? "(unset)",
+        homeTextChannel: formatChannel(homeText),
+        homeVoiceChannel: formatChannel(homeVoice),
+        canonMode,
+        canonPersona: canonPersonaId,
+        defaultRecapStyle: recapStyle,
+      }),
       ephemeral: true,
     });
     return;
   }
 
   if (sub === "set") {
-    const key = interaction.options.getString("key", true);
-    const channel = interaction.options.getChannel("channel", true);
+    const canonMode = interaction.options.getString("canon_mode") as "diegetic" | "meta" | null;
+    const canonPersona = interaction.options.getString("canon_persona");
+    const recapStyle = interaction.options.getString("recap_style") as RecapStrategy | null;
+    const homeVoice = interaction.options.getChannel("home_voice");
 
-    if (key === "home_text_channel") {
-      setGuildHomeTextChannelId(guildId, channel.id);
-      await interaction.reply({ content: `Set home text channel to ${formatChannel(channel.id)}.`, ephemeral: true });
+    const providedCount = [canonMode, canonPersona, recapStyle, homeVoice].filter(Boolean).length;
+    if (providedCount !== 1) {
+      await interaction.reply({
+        content: metaMeepoVoice.settings.setExactlyOneOptionError(),
+        ephemeral: true,
+      });
       return;
     }
 
-    if (key === "home_voice_channel") {
-      setGuildHomeVoiceChannelId(guildId, channel.id);
-      await interaction.reply({ content: `Set home voice channel to ${formatChannel(channel.id)}.`, ephemeral: true });
+    if (canonMode) {
+      setGuildCanonPersonaMode(guildId, canonMode);
+      await interaction.reply({ content: metaMeepoVoice.settings.updatedCanonMode(canonMode), ephemeral: true });
+      return;
+    }
+
+    if (canonPersona) {
+      try {
+        getPersona(canonPersona);
+      } catch {
+        await interaction.reply({ content: metaMeepoVoice.settings.unknownPersona(canonPersona), ephemeral: true });
+        return;
+      }
+      setGuildCanonPersonaId(guildId, canonPersona);
+      await interaction.reply({ content: metaMeepoVoice.settings.updatedCanonPersona(canonPersona), ephemeral: true });
+      return;
+    }
+
+    if (recapStyle) {
+      setGuildDefaultRecapStyle(guildId, recapStyle);
+      await interaction.reply({ content: metaMeepoVoice.settings.updatedRecapStyle(recapStyle), ephemeral: true });
+      return;
+    }
+
+    if (homeVoice) {
+      setGuildHomeVoiceChannelId(guildId, homeVoice.id);
+      await interaction.reply({ content: metaMeepoVoice.settings.updatedHomeVoice(formatChannel(homeVoice.id)), ephemeral: true });
       return;
     }
   }
 
-  if (sub === "clear") {
-    const key = interaction.options.getString("key", true);
+  await interaction.reply({ content: metaMeepoVoice.settings.unknownAction(), ephemeral: true });
+}
 
-    if (key === "home_text_channel") {
-      setGuildHomeTextChannelId(guildId, null);
-      await interaction.reply({ content: "Cleared home text channel.", ephemeral: true });
-      return;
-    }
-
-    if (key === "home_voice_channel") {
-      setGuildHomeVoiceChannelId(guildId, null);
-      await interaction.reply({ content: "Cleared home voice channel.", ephemeral: true });
-      return;
-    }
-  }
-
-  await interaction.reply({ content: "Unknown settings action.", ephemeral: true });
+async function handleDoctor(interaction: any, ctx: CommandCtx): Promise<void> {
+  const checks = await runDoctorChecks(interaction, ctx);
+  await interaction.reply({ content: metaMeepoVoice.doctor.report(checks), ephemeral: true });
 }
 
 async function handleStatus(interaction: any, ctx: CommandCtx): Promise<void> {
@@ -674,10 +854,14 @@ async function handleStatus(interaction: any, ctx: CommandCtx): Promise<void> {
   const sttInfo = getSttProviderInfo();
   const ttsInfo = getTtsProviderInfo();
   const effectiveMode = resolveEffectiveMode(guildId);
+  const canonMode = getGuildCanonPersonaMode(guildId) ?? "meta";
+  const configuredCanonPersona = getGuildCanonPersonaId(guildId) ?? "(auto)";
   const effectivePersonaId = getEffectivePersonaId(guildId);
   const effectivePersona = getPersona(effectivePersonaId);
+  const setupVersion = getGuildSetupVersion(guildId) ?? 0;
 
   const activeSession = getActiveSession(guildId) as SessionRow | null;
+  const statusSession = activeSession ?? getMostRecentSession(guildId);
 
   const lastTranscriptionRow = ctx.db
     .prepare(
@@ -696,29 +880,60 @@ async function handleStatus(interaction: any, ctx: CommandCtx): Promise<void> {
 
   const hints: string[] = [];
   if (awake && !voiceState) {
-    hints.push("Join voice and run /meepo wake to connect voice.");
+    hints.push(metaMeepoVoice.status.hintJoinVoice());
   }
   if (!hasTtsAvailable()) {
-    hints.push("Configure TTS_ENABLED=1 and a non-noop TTS_PROVIDER for /meepo talk.");
+    hints.push(metaMeepoVoice.status.hintEnableTts());
   }
   if (!homeText) {
-    hints.push("Set home text with /meepo settings set key:home_text_channel.");
+    hints.push(metaMeepoVoice.status.hintSetHomeText());
   }
 
+  const baseStatus = statusSession
+    ? getBaseStatus(ctx.campaignSlug, statusSession.session_id, statusSession.label)
+    : null;
+  const recapFinal = statusSession
+    ? (getSessionArtifact(guildId, statusSession.session_id, "recap_final") as SessionArtifactRow | null)
+    : null;
+  let recapFinalMeta: Record<string, unknown> | null = null;
+  try {
+    recapFinalMeta = recapFinal?.meta_json ? (JSON.parse(recapFinal.meta_json) as Record<string, unknown>) : null;
+  } catch {
+    recapFinalMeta = null;
+  }
+  const finalStyle = ((recapFinalMeta?.final_style as string | undefined) ?? recapFinal?.strategy ?? "(none)");
+  const finalCreatedAt = recapFinal?.created_at_ms
+    ? new Date(recapFinal.created_at_ms).toISOString()
+    : "(none)";
+  const finalHash = recapFinal?.source_hash ? `${recapFinal.source_hash.slice(0, 12)}…` : "(none)";
+
   await interaction.reply({
-    content: [
-      `State: ${awake ? "awake" : "asleep"} (${voiceMode})`,
-      `Effective mode: ${effectiveMode}`,
-      `Effective persona: ${effectivePersona.displayName} (${effectivePersonaId})`,
-      `Active session: ${activeSession ? summarizeSession(activeSession) : "(none)"}`,
-      `Home text: ${formatChannel(homeText)}`,
-      `Home voice: ${formatChannel(homeVoice)}`,
-      `Connected voice: ${formatChannel(voiceState?.channelId ?? null)}`,
-      `STT active: ${voiceState?.sttEnabled ? "yes" : "no"} (${sttInfo.name})`,
-      `Last transcription: ${lastTranscriptionRow?.ts ? new Date(lastTranscriptionRow.ts).toISOString() : "(none)"}`,
-      `TTS available: ${hasTtsAvailable() ? "yes" : "no"} (${ttsInfo.name})`,
-      hints.length > 0 ? `Fix hints: ${hints.join(" | ")}` : "Fix hints: none",
-    ].join("\n"),
+    content: metaMeepoVoice.status.snapshot({
+      setupVersion,
+      awake,
+      voiceMode,
+      effectiveMode,
+      canonMode,
+      configuredCanonPersona,
+      effectivePersonaDisplayName: effectivePersona.displayName,
+      effectivePersonaId,
+      activeSessionId: activeSession?.session_id ?? null,
+      activeSessionSummary: activeSession ? summarizeSession(activeSession) : "(none)",
+      homeText: formatChannel(homeText),
+      homeVoice: formatChannel(homeVoice),
+      inVoice: Boolean(voiceState),
+      connectedVoice: formatChannel(voiceState?.channelId ?? null),
+      sttActive: Boolean(voiceState?.sttEnabled),
+      sttProviderName: sttInfo.name,
+      lastTranscription: lastTranscriptionRow?.ts ? new Date(lastTranscriptionRow.ts).toISOString() : "(none)",
+      baseRecapCached: Boolean(baseStatus?.exists),
+      finalStyle,
+      finalCreatedAt,
+      finalHash,
+      ttsAvailable: hasTtsAvailable(),
+      ttsProviderName: ttsInfo.name,
+      hints,
+    }),
     ephemeral: false,
   });
 }
@@ -801,6 +1016,7 @@ export const meepo = {
     .addSubcommand((sub) => sub.setName("talk").setDescription("Enable voice replies (requires awake)."))
     .addSubcommand((sub) => sub.setName("hush").setDescription("Disable voice replies (requires awake)."))
     .addSubcommand((sub) => sub.setName("status").setDescription("Show current Meepo state and diagnostics."))
+    .addSubcommand((sub) => sub.setName("doctor").setDescription("Run deterministic diagnostics with next actions."))
     .addSubcommandGroup((group) =>
       group
         .setName("settings")
@@ -883,18 +1099,18 @@ export const meepo = {
     const guildId = interaction.guildId as string | null;
     const guild = interaction.guild;
     if (!guildId || !guild || !ctx?.db) {
-      await interaction.reply({ content: "Meepo only works in a server (not DMs).", ephemeral: true });
+      await interaction.reply({ content: metaMeepoVoice.errors.notInGuild(), ephemeral: true });
       return;
     }
 
     const subGroup = interaction.options.getSubcommandGroup(false);
     const sub = interaction.options.getSubcommand();
     const requiresElevated =
-      subGroup === "settings" || sub === "wake" || sub === "sleep" || sub === "talk" || sub === "hush" ||
+      subGroup === "settings" || sub === "wake" || sub === "sleep" || sub === "talk" || sub === "hush" || sub === "doctor" ||
       (subGroup === "sessions" && sub === "recap");
 
     if (requiresElevated && !isElevated(interaction.member as GuildMember | null)) {
-      await interaction.reply({ content: "Not authorized.", ephemeral: true });
+      await interaction.reply({ content: metaMeepoVoice.errors.notAuthorized(), ephemeral: true });
       return;
     }
 
@@ -933,6 +1149,11 @@ export const meepo = {
       return;
     }
 
-    await interaction.reply({ content: "Unknown subcommand.", ephemeral: true });
+    if (sub === "doctor") {
+      await handleDoctor(interaction, ctx);
+      return;
+    }
+
+    await interaction.reply({ content: metaMeepoVoice.errors.unknownSubcommand(), ephemeral: true });
   },
 };

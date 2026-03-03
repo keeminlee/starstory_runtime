@@ -13,11 +13,29 @@ let sessionById: typeof baseSession | null = { ...baseSession };
 let recapArtifact: any | null = null;
 
 vi.mock("../campaign/guildConfig.js", () => ({
+  getGuildCanonPersonaId: vi.fn(() => null),
+  getGuildCanonPersonaMode: vi.fn(() => "meta"),
+  getGuildConfig: vi.fn(() => ({ campaign_slug: "default" })),
+  getGuildDefaultRecapStyle: vi.fn(() => "balanced"),
   getGuildHomeTextChannelId: vi.fn(() => "text-1"),
   setGuildHomeTextChannelId: vi.fn(),
   getGuildHomeVoiceChannelId: vi.fn(() => null),
+  getGuildSetupVersion: vi.fn(() => 1),
   setGuildHomeVoiceChannelId: vi.fn(),
   resolveGuildHomeVoiceChannelId: vi.fn(() => null),
+  setGuildCanonPersonaId: vi.fn(),
+  setGuildCanonPersonaMode: vi.fn(),
+  setGuildDefaultRecapStyle: vi.fn(),
+}));
+
+vi.mock("../campaign/ensureGuildSetup.js", () => ({
+  ensureGuildSetup: vi.fn(async () => ({
+    applied: [],
+    warnings: [],
+    errors: [],
+    setupVersionChanged: false,
+    canAttemptVoice: false,
+  })),
 }));
 
 vi.mock("../config/env.js", () => ({
@@ -173,7 +191,8 @@ describe("/meepo sessions recap contract", () => {
 
     expect(reply).toHaveBeenCalledTimes(1);
     const payload = reply.mock.calls.at(0)?.[0];
-    expect(payload?.content).toContain("canon sessions");
+    expect(payload?.content).toContain("canon");
+    expect(payload?.content).toContain("/meepo sessions list");
   });
 
   test("sessions recap persists recap artifact for canon session", async () => {
@@ -208,7 +227,9 @@ describe("/meepo sessions recap contract", () => {
     expect(deferReply).toHaveBeenCalledTimes(1);
     expect(editReply).toHaveBeenCalledTimes(1);
     const payload = editReply.mock.calls.at(0)?.[0];
-    expect(payload?.content).toContain("Generated recap");
+    expect(payload?.content).toContain("Recap");
+    expect(payload?.content).toContain("Style:");
+    expect(payload?.content).toContain("Preview");
     expect(Array.isArray(payload?.files)).toBe(true);
   });
 
@@ -257,7 +278,8 @@ describe("/meepo sessions recap contract", () => {
     });
 
     const payload = reply.mock.calls.at(0)?.[0];
-    expect(payload?.content).toContain("Most recent final: ✅");
-    expect(payload?.content).toContain("Final style: concise");
+    expect(payload?.content).toContain("Recap");
+    expect(payload?.content).toContain("Final:");
+    expect(payload?.content).toContain("concise");
   });
 });

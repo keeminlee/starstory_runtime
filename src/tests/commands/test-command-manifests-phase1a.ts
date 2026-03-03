@@ -18,14 +18,14 @@ describe("Phase 1A command manifests", () => {
 
     const options = (data.options ?? []) as any[];
     const optionNames = options.map((option) => option.name).sort();
-    expect(optionNames).toEqual(["hush", "settings", "sleep", "status", "talk", "wake"]);
+    expect(optionNames).toEqual(["doctor", "hush", "sessions", "settings", "sleep", "status", "talk", "wake"]);
 
     const settingsGroup = options.find((option) => option.name === "settings") as any;
     expect(settingsGroup).toBeTruthy();
     expect(settingsGroup.type).toBe(2);
 
     const settingsSubcommands = (settingsGroup.options ?? []).map((option: any) => option.name).sort();
-    expect(settingsSubcommands).toEqual(["clear", "set", "show"]);
+    expect(settingsSubcommands).toEqual(["set", "view"]);
   });
 
   test("/lab exists and contains legacy families", async () => {
