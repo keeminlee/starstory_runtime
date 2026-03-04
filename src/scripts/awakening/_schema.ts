@@ -77,7 +77,12 @@ function validateBeat(value: unknown, path: string): Beat {
   if (value.visibility !== undefined && value.visibility !== "public" && value.visibility !== "ephemeral") {
     throw new Error(`${path}.visibility must be one of public|ephemeral`);
   }
-  return value as Beat;
+  return {
+    text: value.text,
+    delay_ms: value.delay_ms as number | undefined,
+    kind: value.kind as BeatKind | undefined,
+    visibility: value.visibility as BeatVisibility | undefined,
+  };
 }
 
 function validateTypeObject(value: unknown, path: string): Record<string, unknown> {

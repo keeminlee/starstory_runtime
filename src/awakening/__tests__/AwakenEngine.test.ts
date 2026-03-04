@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { AwakenEngine } from "../AwakenEngine.js";
+import { AwakenEngine, MAX_DELAY_MS } from "../AwakenEngine.js";
 import type { AwakenScript } from "../../scripts/awakening/_schema.js";
 
 const tempDirs: string[] = [];
@@ -75,9 +75,10 @@ describe("AwakenEngine", () => {
     expect(result.status).toBe("completed");
     expect(result.emittedBeatCount).toBe(3);
     expect(interaction.followUp).toHaveBeenCalledTimes(3);
-    expect(interaction.followUp.mock.calls[0][0].content).toBe("beat-1");
-    expect(interaction.followUp.mock.calls[1][0].content).toBe("beat-2");
-    expect(interaction.followUp.mock.calls[2][0].content).toBe("scene-two");
+    const followUpCalls = interaction.followUp.mock.calls as unknown as Array<[{ content: string }]>;
+    expect(followUpCalls.at(0)?.[0]?.content).toBe("beat-1");
+    expect(followUpCalls.at(1)?.[0]?.content).toBe("beat-2");
+    expect(followUpCalls.at(2)?.[0]?.content).toBe("scene-two");
 
     const state = loadState("guild-awaken-1", script.id, { db });
     expect(state?.completed).toBe(true);
@@ -118,7 +119,8 @@ describe("AwakenEngine", () => {
 
     expect(result.status).toBe("completed");
     expect(interaction.followUp).toHaveBeenCalledTimes(2);
-    expect(interaction.followUp.mock.calls[0][0].content).toBe("beat-2");
+    const followUpCalls = interaction.followUp.mock.calls as unknown as Array<[{ content: string }]>;
+    expect(followUpCalls.at(0)?.[0]?.content).toBe("beat-2");
 
     const state = loadState("guild-awaken-1", script.id, { db });
     expect(state?.beat_index).toBe(0);
@@ -232,6 +234,135 @@ describe("AwakenEngine", () => {
 
     const state = loadState("guild-awaken-1", script.id, { db });
     expect(state?.beat_index).toBe(3);
+    expect(state?.completed).toBe(false);
+    db.close();
+  });
+
+  test("respects per-beat delay order via injected sleepFn", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-awaken-engine-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const { getDbForCampaign } = await import("../../db.js");
+    const { initState } = await import("../../ledger/awakeningStateRepo.js");
+
+    const script: AwakenScript = {
+      id: "meepo_awaken",
+      version: 1,
+      start_scene: "cold_open",
+      scenes: {
+        cold_open: {
+          say: [
+            { text: "beat-1", delay_ms: 1000 },
+            { text: "beat-2", delay_ms: 2000 },
+          ],
+        },
+      },
+    };
+
+    const db = getDbForCampaign("default");
+    initState("guild-awaken-1", script.id, script.version, script.start_scene, { db });
+
+    const sleepCalls: number[] = [];
+    const interaction = buildInteraction();
+    const result = await AwakenEngine.runWake(interaction, {
+      db,
+      script,
+      sleepFn: async (ms: number) => {
+        sleepCalls.push(ms);
+      },
+    });
+
+    expect(result.status).toBe("completed");
+    expect(sleepCalls).toEqual([1000, 2000]);
+    db.close();
+  });
+
+  test("clamps oversized delay to MAX_DELAY_MS", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-awaken-engine-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const { getDbForCampaign } = await import("../../db.js");
+    const { initState } = await import("../../ledger/awakeningStateRepo.js");
+
+    const script: AwakenScript = {
+      id: "meepo_awaken",
+      version: 1,
+      start_scene: "cold_open",
+      scenes: {
+        cold_open: {
+          say: [{ text: "beat-1", delay_ms: 999999 }],
+        },
+      },
+    };
+
+    const db = getDbForCampaign("default");
+    initState("guild-awaken-1", script.id, script.version, script.start_scene, { db });
+
+    const sleepCalls: number[] = [];
+    const interaction = buildInteraction();
+    const result = await AwakenEngine.runWake(interaction, {
+      db,
+      script,
+      sleepFn: async (ms: number) => {
+        sleepCalls.push(ms);
+      },
+    });
+
+    expect(result.status).toBe("completed");
+    expect(sleepCalls).toEqual([MAX_DELAY_MS]);
+    db.close();
+  });
+
+  test("total delay budget blocks before oversleep and preserves resumable state", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-awaken-engine-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const { getDbForCampaign } = await import("../../db.js");
+    const { initState, loadState } = await import("../../ledger/awakeningStateRepo.js");
+
+    const script: AwakenScript = {
+      id: "meepo_awaken",
+      version: 1,
+      start_scene: "cold_open",
+      scenes: {
+        cold_open: {
+          say: [
+            { text: "beat-1", delay_ms: 1000 },
+            { text: "beat-2", delay_ms: 1200 },
+            { text: "beat-3", delay_ms: 1200 },
+          ],
+        },
+      },
+    };
+
+    const db = getDbForCampaign("default");
+    initState("guild-awaken-1", script.id, script.version, script.start_scene, { db });
+
+    const sleepCalls: number[] = [];
+    const interaction = buildInteraction();
+    const result = await AwakenEngine.runWake(interaction, {
+      db,
+      script,
+      maxTotalDelayMsPerRun: 2000,
+      sleepFn: async (ms: number) => {
+        sleepCalls.push(ms);
+      },
+    });
+
+    expect(result.status).toBe("blocked");
+    if (result.status === "blocked") {
+      expect(result.reason).toBe("budget_delay");
+      expect(result.emittedBeatCount).toBe(2);
+    }
+
+    expect(sleepCalls).toEqual([1000]);
+
+    const state = loadState("guild-awaken-1", script.id, { db });
+    expect(state?.current_scene).toBe("cold_open");
+    expect(state?.beat_index).toBe(2);
     expect(state?.completed).toBe(false);
     db.close();
   });

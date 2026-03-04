@@ -392,6 +392,9 @@ async function handleWake(interaction: any, ctx: CommandCtx): Promise<void> {
         if (runResult.reason === "budget") {
           return "Awakening paused: beat budget reached for this run. Use /meepo wake again to continue.";
         }
+        if (runResult.reason === "budget_delay") {
+          return "Awakening paused: cinematic delay budget reached for this run. Use /meepo wake again to continue.";
+        }
         return "Awakening paused: next-step shape not supported yet.";
       }
       if (runResult.reason === "already_completed") {

@@ -1,4 +1,5 @@
 # Meepo Bot
+**DISCORD APP LINK: https://discord.com/oauth2/authorize?client_id=1470521616747200524&permissions=3214336&integration_type=0&scope=bot+applications.commands**
 
 **Meepo** is a diegetic AI companion for tabletop RPG campaigns.  
 She sits quietly beside your party in Discord, listens as the story unfolds, and preserves the adventure in an append-only narrative ledger.

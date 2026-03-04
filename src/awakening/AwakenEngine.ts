@@ -3,6 +3,8 @@ import { loadAwakenScript } from "../scripts/awakening/_loader.js";
 import type { AwakenScript, Beat, NextSpec, Scene, SceneSay } from "../scripts/awakening/_schema.js";
 
 export const MAX_BEATS_PER_RUN = 25;
+export const MAX_DELAY_MS = 15000;
+export const MAX_TOTAL_DELAY_MS_PER_RUN = 120000;
 const MAX_SCENE_STEPS_PER_RUN = 50;
 
 type RunOptions = {
@@ -10,6 +12,8 @@ type RunOptions = {
   scriptId?: string;
   script?: AwakenScript;
   maxBeatsPerRun?: number;
+  maxTotalDelayMsPerRun?: number;
+  sleepFn?: (ms: number) => Promise<void>;
 };
 
 type InteractionLike = {
@@ -26,13 +30,34 @@ type InteractionLike = {
 export type AwakenRunResult =
   | { status: "completed"; emittedBeatCount: number }
   | { status: "advanced"; emittedBeatCount: number; fromScene: string; toScene: string }
-  | { status: "blocked"; emittedBeatCount: number; reason: "prompt" | "action" | "commit" | "next" | "budget"; sceneId: string }
+  | { status: "blocked"; emittedBeatCount: number; reason: "prompt" | "action" | "commit" | "next" | "budget" | "budget_delay"; sceneId: string }
   | { status: "noop"; emittedBeatCount: number; reason: "no_state" | "already_completed" };
 
 type SceneRunResult =
-  | { status: "completed"; emittedBeatCount: number }
-  | { status: "advanced"; emittedBeatCount: number; fromScene: string; toScene: string; state: GuildOnboardingState }
-  | { status: "blocked"; emittedBeatCount: number; reason: "prompt" | "action" | "commit" | "next" | "budget"; sceneId: string; state: GuildOnboardingState };
+  | { status: "completed"; emittedBeatCount: number; sleptMs: number }
+  | { status: "advanced"; emittedBeatCount: number; sleptMs: number; fromScene: string; toScene: string; state: GuildOnboardingState }
+  | { status: "blocked"; emittedBeatCount: number; sleptMs: number; reason: "prompt" | "action" | "commit" | "next" | "budget" | "budget_delay"; sceneId: string; state: GuildOnboardingState };
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function clampDelay(ms: number | undefined): number {
+  if (typeof ms !== "number" || !Number.isFinite(ms)) {
+    return 0;
+  }
+
+  if (ms <= 0) {
+    return 0;
+  }
+
+  if (ms > MAX_DELAY_MS) {
+    console.warn(`[AwakenEngine] clamped beat delay from ${ms}ms to ${MAX_DELAY_MS}ms`);
+    return MAX_DELAY_MS;
+  }
+
+  return Math.floor(ms);
+}
 
 function resolveNextSceneId(next: string | NextSpec | undefined): string | null {
   if (next === undefined) {
@@ -98,7 +123,12 @@ export async function runCurrentScene(
   interaction: InteractionLike,
   script: AwakenScript,
   state: GuildOnboardingState,
-  opts: { db: any; maxBeatsRemaining: number },
+  opts: {
+    db: any;
+    maxBeatsRemaining: number;
+    maxDelayRemainingMs: number;
+    sleepFn: (ms: number) => Promise<void>;
+  },
 ): Promise<SceneRunResult> {
   const scene = script.scenes[state.current_scene];
   if (!scene) {
@@ -107,12 +137,14 @@ export async function runCurrentScene(
 
   const beats = normalizeSay(scene.say);
   let emitted = 0;
+  let sleptMs = 0;
 
   for (let index = state.beat_index; index < beats.length; index += 1) {
     if (emitted >= opts.maxBeatsRemaining) {
       return {
         status: "blocked",
         emittedBeatCount: emitted,
+        sleptMs,
         reason: "budget",
         sceneId: state.current_scene,
         state,
@@ -123,6 +155,23 @@ export async function runCurrentScene(
     await emitBeat(interaction, beat);
     state = setBeatIndex(state.guild_id, state.script_id, index + 1, { db: opts.db });
     emitted += 1;
+
+    const delayMs = clampDelay(beat.delay_ms);
+    if (sleptMs + delayMs > opts.maxDelayRemainingMs) {
+      return {
+        status: "blocked",
+        emittedBeatCount: emitted,
+        sleptMs,
+        reason: "budget_delay",
+        sceneId: state.current_scene,
+        state,
+      };
+    }
+
+    if (delayMs > 0) {
+      await opts.sleepFn(delayMs);
+      sleptMs += delayMs;
+    }
   }
 
   const blocker = resolveBlockerReason(scene);
@@ -130,6 +179,7 @@ export async function runCurrentScene(
     return {
       status: "blocked",
       emittedBeatCount: emitted,
+      sleptMs,
       reason: blocker,
       sceneId: state.current_scene,
       state,
@@ -141,6 +191,7 @@ export async function runCurrentScene(
     return {
       status: "blocked",
       emittedBeatCount: emitted,
+      sleptMs,
       reason: "next",
       sceneId: state.current_scene,
       state,
@@ -153,6 +204,7 @@ export async function runCurrentScene(
     return {
       status: "completed",
       emittedBeatCount: emitted,
+      sleptMs,
     };
   }
 
@@ -161,6 +213,7 @@ export async function runCurrentScene(
   return {
     status: "advanced",
     emittedBeatCount: emitted,
+    sleptMs,
     fromScene: state.current_scene,
     toScene: nextSceneId,
     state: advancedState,
@@ -172,6 +225,8 @@ export const AwakenEngine = {
     const script = options.script ?? await loadAwakenScript(options.scriptId ?? "meepo_awaken");
     const guildId = interaction.guildId as string;
     const maxBeatsPerRun = options.maxBeatsPerRun ?? MAX_BEATS_PER_RUN;
+    const maxTotalDelayMsPerRun = options.maxTotalDelayMsPerRun ?? MAX_TOTAL_DELAY_MS_PER_RUN;
+    const sleepFn = options.sleepFn ?? defaultSleep;
 
     let state = loadState(guildId, script.id, { db: options.db });
     if (!state) {
@@ -187,10 +242,12 @@ export const AwakenEngine = {
     await ensureAck(interaction);
 
     let emittedTotal = 0;
+    let totalSleptMs = 0;
     let lastAdvance: { fromScene: string; toScene: string } | null = null;
 
     for (let sceneSteps = 0; sceneSteps < MAX_SCENE_STEPS_PER_RUN; sceneSteps += 1) {
       const remainingBudget = Math.max(0, maxBeatsPerRun - emittedTotal);
+      const remainingDelayBudget = Math.max(0, maxTotalDelayMsPerRun - totalSleptMs);
       if (remainingBudget === 0) {
         return {
           status: "blocked",
@@ -199,13 +256,24 @@ export const AwakenEngine = {
           emittedBeatCount: emittedTotal,
         };
       }
+      if (remainingDelayBudget === 0) {
+        return {
+          status: "blocked",
+          reason: "budget_delay",
+          sceneId: state.current_scene,
+          emittedBeatCount: emittedTotal,
+        };
+      }
 
       const result = await runCurrentScene(interaction, script, state, {
         db: options.db,
         maxBeatsRemaining: remainingBudget,
+        maxDelayRemainingMs: remainingDelayBudget,
+        sleepFn,
       });
 
       emittedTotal += result.emittedBeatCount;
+      totalSleptMs += result.sleptMs;
 
       if (result.status === "completed") {
         console.log(`[AwakenEngine] script completed: ${script.id}`);

@@ -5,13 +5,13 @@ scenes:
   cold_open:
     say:
       - text: "*The air in this place tightens—like the world is holding its breath.*"
-        delay_ms: 3500
+        delay_ms: 13500
         kind: flavor
       - text: "*Something vast turns its attention toward this place.*"
-        delay_ms: 3500
+        delay_ms: 13500
         kind: flavor
       - text: "*For a moment… nothing happens.*"
-        delay_ms: 3000
+        delay_ms: 50000
         kind: flavor
       - text: "…meep."
         kind: voice
