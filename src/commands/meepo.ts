@@ -19,6 +19,7 @@ import {
 } from "../campaign/guildConfig.js";
 import { ensureGuildSetup, type SetupReport } from "../campaign/ensureGuildSetup.js";
 import { cfg } from "../config/env.js";
+import { AwakenEngine, type AwakenRunResult } from "../awakening/AwakenEngine.js";
 import { getAvailablePersonaIds, getPersona } from "../personas/index.js";
 import { logSystemEvent } from "../ledger/system.js";
 import { wakeMeepo, getActiveMeepo, sleepMeepo } from "../meepo/state.js";
@@ -358,19 +359,48 @@ async function handleWake(interaction: any, ctx: CommandCtx): Promise<void> {
       return;
     }
 
-    if (state) {
-      await interaction.reply({
-        content: `Awakening in progress: scene=${state.current_scene} beat=${state.beat_index}. (Engine arrives Sprint 2)`,
-        ephemeral: true,
-      });
-      return;
+    if (!state) {
+      initState(guildId, script.id, script.version, script.start_scene, { db: ctx.db });
     }
 
-    initState(guildId, script.id, script.version, script.start_scene, { db: ctx.db });
-    await interaction.reply({
-      content: "Awakening initialized. (Engine arrives Sprint 2)",
-      ephemeral: true,
+    const result = await AwakenEngine.runWake(interaction, {
+      db: ctx.db,
+      script,
     });
+
+    const editReply = async (content: string): Promise<void> => {
+      if (typeof interaction.editReply === "function" && (interaction.deferred || interaction.replied)) {
+        await interaction.editReply(content);
+        return;
+      }
+      if (typeof interaction.reply === "function" && !interaction.replied) {
+        await interaction.reply({ content, ephemeral: true });
+      }
+    };
+
+    const statusText = (runResult: AwakenRunResult): string => {
+      if (runResult.status === "completed") {
+        return "Awakening complete.";
+      }
+      if (runResult.status === "advanced") {
+        return `Awakening advanced: ${runResult.fromScene} -> ${runResult.toScene}.`;
+      }
+      if (runResult.status === "blocked") {
+        if (runResult.reason === "prompt" || runResult.reason === "action" || runResult.reason === "commit") {
+          return `Awakening paused: ${runResult.reason} steps not implemented yet (Sprint 4/5).`;
+        }
+        if (runResult.reason === "budget") {
+          return "Awakening paused: beat budget reached for this run. Use /meepo wake again to continue.";
+        }
+        return "Awakening paused: next-step shape not supported yet.";
+      }
+      if (runResult.reason === "already_completed") {
+        return "Meepo is already awakened here.";
+      }
+      return "Awakening state not found.";
+    };
+
+    await editReply(statusText(result));
     return;
   }
 

@@ -55,6 +55,7 @@ export default defineConfig({
       "src/tests/test-lab-autocomplete-routing.ts",
       "src/tests/test-lab-wake.ts",
       "src/ledger/__tests__/awakeningStateRepo.test.ts",
+      "src/awakening/__tests__/AwakenEngine.test.ts",
       "src/scripts/awakening/__tests__/loader.test.ts",
       "src/tools/heartbeat/replay.test.ts",
     ],
