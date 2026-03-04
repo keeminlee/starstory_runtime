@@ -1533,6 +1533,84 @@ function applyMigrations(db: Database.Database) {
     `);
   }
 
+  // Migration: Awakening journey state (Sprint 1)
+  const tablesForAwakeningState = db.pragma("table_list") as any[];
+  const hasAwakeningState = tablesForAwakeningState.some((t: any) => t.name === "guild_onboarding_state");
+  if (!hasAwakeningState) {
+    console.log("Migrating: Creating guild_onboarding_state table (Awakening Sprint 1)");
+    db.exec(`
+      CREATE TABLE guild_onboarding_state (
+        guild_id TEXT NOT NULL,
+        script_id TEXT NOT NULL,
+        script_version INTEGER NOT NULL,
+        current_scene TEXT NOT NULL,
+        beat_index INTEGER NOT NULL DEFAULT 0,
+        progress_json TEXT NOT NULL DEFAULT '{}',
+        completed INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE UNIQUE INDEX idx_guild_onboarding_state_guild_script
+      ON guild_onboarding_state(guild_id, script_id);
+
+      CREATE INDEX idx_guild_onboarding_state_guild
+      ON guild_onboarding_state(guild_id);
+    `);
+  } else {
+    const awakeningStateColumns = db.pragma("table_info(guild_onboarding_state)") as any[];
+
+    const hasScriptVersion = awakeningStateColumns.some((c: any) => c.name === "script_version");
+    if (!hasScriptVersion) {
+      console.log("Migrating: Adding script_version to guild_onboarding_state");
+      db.exec("ALTER TABLE guild_onboarding_state ADD COLUMN script_version INTEGER NOT NULL DEFAULT 1");
+    }
+
+    const hasCurrentScene = awakeningStateColumns.some((c: any) => c.name === "current_scene");
+    if (!hasCurrentScene) {
+      console.log("Migrating: Adding current_scene to guild_onboarding_state");
+      db.exec("ALTER TABLE guild_onboarding_state ADD COLUMN current_scene TEXT NOT NULL DEFAULT 'cold_open'");
+    }
+
+    const hasBeatIndex = awakeningStateColumns.some((c: any) => c.name === "beat_index");
+    if (!hasBeatIndex) {
+      console.log("Migrating: Adding beat_index to guild_onboarding_state");
+      db.exec("ALTER TABLE guild_onboarding_state ADD COLUMN beat_index INTEGER NOT NULL DEFAULT 0");
+    }
+
+    const hasProgressJson = awakeningStateColumns.some((c: any) => c.name === "progress_json");
+    if (!hasProgressJson) {
+      console.log("Migrating: Adding progress_json to guild_onboarding_state");
+      db.exec("ALTER TABLE guild_onboarding_state ADD COLUMN progress_json TEXT NOT NULL DEFAULT '{}'");
+    }
+
+    const hasCompleted = awakeningStateColumns.some((c: any) => c.name === "completed");
+    if (!hasCompleted) {
+      console.log("Migrating: Adding completed to guild_onboarding_state");
+      db.exec("ALTER TABLE guild_onboarding_state ADD COLUMN completed INTEGER NOT NULL DEFAULT 0");
+    }
+
+    const hasCreatedAt = awakeningStateColumns.some((c: any) => c.name === "created_at");
+    if (!hasCreatedAt) {
+      console.log("Migrating: Adding created_at to guild_onboarding_state");
+      db.exec("ALTER TABLE guild_onboarding_state ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0");
+    }
+
+    const hasUpdatedAt = awakeningStateColumns.some((c: any) => c.name === "updated_at");
+    if (!hasUpdatedAt) {
+      console.log("Migrating: Adding updated_at to guild_onboarding_state");
+      db.exec("ALTER TABLE guild_onboarding_state ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0");
+    }
+
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_guild_onboarding_state_guild_script
+      ON guild_onboarding_state(guild_id, script_id);
+
+      CREATE INDEX IF NOT EXISTS idx_guild_onboarding_state_guild
+      ON guild_onboarding_state(guild_id);
+    `);
+  }
+
   // Migration: Latches per (guild, channel, user) — drop old key-based table if present
   const tableListForLatches = db.pragma("table_list") as any[];
   const hasLatches = tableListForLatches.some((t: any) => t.name === "latches");

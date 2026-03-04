@@ -110,6 +110,25 @@ ON meepo_actions(status, lease_until_ms, created_at_ms);
 CREATE INDEX IF NOT EXISTS idx_meepo_actions_scope
 ON meepo_actions(guild_id, scope, session_id, action_type, status);
 
+-- Awakening journey state (Sprint 1)
+CREATE TABLE IF NOT EXISTS guild_onboarding_state (
+  guild_id TEXT NOT NULL,
+  script_id TEXT NOT NULL,
+  script_version INTEGER NOT NULL,
+  current_scene TEXT NOT NULL,
+  beat_index INTEGER NOT NULL DEFAULT 0,
+  progress_json TEXT NOT NULL DEFAULT '{}',
+  completed INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_guild_onboarding_state_guild_script
+ON guild_onboarding_state(guild_id, script_id);
+
+CREATE INDEX IF NOT EXISTS idx_guild_onboarding_state_guild
+ON guild_onboarding_state(guild_id);
+
 -- Latches v2: per (guild, channel, user) for Tier S/A reply gating
 CREATE TABLE IF NOT EXISTS latches (
   guild_id TEXT NOT NULL,

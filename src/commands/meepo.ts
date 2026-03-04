@@ -56,9 +56,11 @@ import { getSttProviderInfo } from "../voice/stt/provider.js";
 import { getTtsProviderInfo } from "../voice/tts/provider.js";
 import { voicePlaybackController } from "../voice/voicePlaybackController.js";
 import { getMeepoContextWorkerStatus } from "../ledger/meepoContextWorker.js";
+import { initState, loadState } from "../ledger/awakeningStateRepo.js";
 import { metaMeepoVoice, type DoctorCheck } from "../ui/metaMeepoVoice.js";
 import type { CommandCtx } from "./index.js";
 import { PermissionFlagsBits } from "discord.js";
+import { loadAwakenScript } from "../scripts/awakening/_loader.js";
 
 type SessionRow = {
   session_id: string;
@@ -344,6 +346,34 @@ async function ensureVoiceConnection(interaction: any, guildId: string): Promise
 
 async function handleWake(interaction: any, ctx: CommandCtx): Promise<void> {
   const guildId = interaction.guildId as string;
+  if (ctx?.db && typeof ctx.db.exec === "function") {
+    const script = await loadAwakenScript("meepo_awaken");
+    const state = loadState(guildId, script.id, { db: ctx.db });
+
+    if (state?.completed) {
+      await interaction.reply({
+        content: "Meepo is already awakened here.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (state) {
+      await interaction.reply({
+        content: `Awakening in progress: scene=${state.current_scene} beat=${state.beat_index}. (Engine arrives Sprint 2)`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    initState(guildId, script.id, script.version, script.start_scene, { db: ctx.db });
+    await interaction.reply({
+      content: "Awakening initialized. (Engine arrives Sprint 2)",
+      ephemeral: true,
+    });
+    return;
+  }
+
   const invocationChannelId = interaction.channelId as string;
   const requestedSessionLabel = interaction.options.getString("session")?.trim() ?? null;
 
