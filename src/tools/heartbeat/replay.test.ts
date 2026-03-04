@@ -236,42 +236,53 @@ describe("heartbeat replay tool", () => {
   });
 
   test("replay with execute writes artifacts and advances watermark", async () => {
-    const db = createTestDb();
-    seedSession(db, { guildId: "g1", sessionId: "s1", label: "C2E20" });
-    seedLedger(db, { guildId: "g1", sessionId: "s1", count: 250 });
+    const prevLogScopes = process.env.LOG_SCOPES;
+    const prevForceActionLogs = process.env.MEEPO_FORCE_ACTION_LOGS;
+    process.env.LOG_SCOPES = "meepo_actions";
+    process.env.MEEPO_FORCE_ACTION_LOGS = "true";
+    try {
+      const db = createTestDb();
+      seedSession(db, { guildId: "g1", sessionId: "s1", label: "C2E20" });
+      seedLedger(db, { guildId: "g1", sessionId: "s1", count: 250 });
 
-    const artifactDir = mkTempDir("meepo-replay-artifacts-");
-    process.env.MEEPO_HEARTBEAT_REPLAY_ARTIFACT_DIR = artifactDir;
+      const artifactDir = mkTempDir("meepo-replay-artifacts-");
+      process.env.MEEPO_HEARTBEAT_REPLAY_ARTIFACT_DIR = artifactDir;
 
-    const summary = await runReplayOnDb({
-      db,
-      guildId: "g1",
-      sessionId: "s1",
-      execute: true,
-      artifactOutputDir: artifactDir,
-      workerTickOptions,
-    });
+      const summary = await runReplayOnDb({
+        db,
+        guildId: "g1",
+        sessionId: "s1",
+        execute: true,
+        artifactOutputDir: artifactDir,
+        workerTickOptions,
+      });
 
-    const files = fs.readdirSync(artifactDir).sort((a, b) => a.localeCompare(b));
-    expect(files.some((name) => name.includes("megameecap-chunk") && name.endsWith(".md"))).toBe(true);
-    expect(files.some((name) => name.includes("megameecap-base") && name.endsWith(".md"))).toBe(true);
-    expect(files.some((name) => name.includes("recap-final-balanced") && name.endsWith(".md"))).toBe(true);
-    expect(files.some((name) => name.endsWith(".meta.json"))).toBe(true);
-    const offlineJsonl = files.find((name) => name.endsWith("-meepo-actions-offline-replay.jsonl"));
-    const offlineLog = files.find((name) => name.endsWith("-meepo-actions-offline-replay.log"));
-    expect(offlineJsonl).toBeTruthy();
-    expect(offlineLog).toBeTruthy();
-    const mergedLog = fs.readFileSync(path.join(artifactDir, offlineLog!), "utf8");
-    expect(mergedLog.includes("[Lline-0250]")).toBe(true);
+      const files = fs.readdirSync(artifactDir).sort((a, b) => a.localeCompare(b));
+      expect(files.some((name) => name.includes("megameecap-chunk") && name.endsWith(".md"))).toBe(true);
+      expect(files.some((name) => name.includes("megameecap-base") && name.endsWith(".md"))).toBe(true);
+      expect(files.some((name) => name.includes("recap-final-balanced") && name.endsWith(".md"))).toBe(true);
+      expect(files.some((name) => name.endsWith(".meta.json"))).toBe(true);
+      const offlineJsonl = files.find((name) => name.endsWith("-meepo-actions-offline-replay.jsonl"));
+      const offlineLog = files.find((name) => name.endsWith("-meepo-actions-offline-replay.log"));
+      expect(offlineJsonl).toBeTruthy();
+      expect(offlineLog).toBeTruthy();
+      const mergedLog = fs.readFileSync(path.join(artifactDir, offlineLog!), "utf8");
+      expect(mergedLog.includes("[Lline-0250]")).toBe(true);
 
-    const actionDone = (db.prepare(
-      `SELECT COUNT(*) AS n FROM meepo_actions WHERE status = 'done'`
-    ).get() as { n: number }).n;
+      const actionDone = (db.prepare(
+        `SELECT COUNT(*) AS n FROM meepo_actions WHERE status = 'done'`
+      ).get() as { n: number }).n;
 
-    expect(actionDone).toBeGreaterThanOrEqual(2);
-    expect(summary.finalWatermark).toBe(250);
-    expect(summary.queueDepth).toBe(0);
-    expect(summary.artifactsWritten.length).toBeGreaterThan(0);
+      expect(actionDone).toBeGreaterThanOrEqual(2);
+      expect(summary.finalWatermark).toBe(250);
+      expect(summary.queueDepth).toBe(0);
+      expect(summary.artifactsWritten.length).toBeGreaterThan(0);
+    } finally {
+      if (prevLogScopes === undefined) delete process.env.LOG_SCOPES;
+      else process.env.LOG_SCOPES = prevLogScopes;
+      if (prevForceActionLogs === undefined) delete process.env.MEEPO_FORCE_ACTION_LOGS;
+      else process.env.MEEPO_FORCE_ACTION_LOGS = prevForceActionLogs;
+    }
   });
 
   test("replay execute drains all chunk ranges progressively", async () => {

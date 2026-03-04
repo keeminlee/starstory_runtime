@@ -1,7 +1,40 @@
 import Database from "better-sqlite3";
-import { describe, expect, test } from "vitest";
-import { claimNextAction } from "../ledger/meepoContextRepo.js";
-import { getMeepoContextQueueStatus, processMeepoContextActionsTick } from "../ledger/meepoContextActions.js";
+import { beforeAll, describe, expect, test, vi } from "vitest";
+
+vi.mock("../config/env.js", () => ({
+  cfg: {
+    llm: { model: "mock-model" },
+    logging: {
+      level: "error",
+      scopes: [],
+      format: "pretty",
+      debugLatch: false,
+    },
+    voice: { debug: false },
+    features: {
+      contextInlineActionsDev: false,
+      contextWorkerEnabled: true,
+      contextMiniFirst: false,
+    },
+    meepoContextActions: {
+      pollMs: 100,
+      maxActionsPerTick: 4,
+      maxTotalRuntimeMs: 1000,
+      leaseTtlMs: 30_000,
+      maxAttempts: 4,
+      retryBaseMs: 10,
+    },
+  },
+}));
+
+let claimNextAction: typeof import("../ledger/meepoContextRepo.js").claimNextAction;
+let getMeepoContextQueueStatus: typeof import("../ledger/meepoContextActions.js").getMeepoContextQueueStatus;
+let processMeepoContextActionsTick: typeof import("../ledger/meepoContextActions.js").processMeepoContextActionsTick;
+
+beforeAll(async () => {
+  ({ claimNextAction } = await import("../ledger/meepoContextRepo.js"));
+  ({ getMeepoContextQueueStatus, processMeepoContextActionsTick } = await import("../ledger/meepoContextActions.js"));
+});
 
 function createDb(): any {
   const db = new Database(":memory:");
