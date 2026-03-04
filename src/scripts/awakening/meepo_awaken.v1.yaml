@@ -1,0 +1,27 @@
+id: meepo_awaken
+version: 1
+start_scene: cold_open
+scenes:
+  cold_open:
+    say:
+      - text: "*The air in this place tightens—like the world is holding its breath.*"
+        delay_ms: 3500
+        kind: flavor
+      - text: "*Something vast turns its attention toward this place.*"
+        delay_ms: 3500
+        kind: flavor
+      - text: "*For a moment… nothing happens.*"
+        delay_ms: 3000
+        kind: flavor
+      - text: "…meep."
+        kind: voice
+      - text: "**I heard the summons.**"
+        kind: voice
+    next: dm_role
+
+  dm_role:
+    say: "First, tell me—who bears the mantle of Dungeon Master?"
+    next: done_stub
+
+  done_stub:
+    say: "(stub)"
