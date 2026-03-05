@@ -397,7 +397,7 @@ async function handleTranscription(
     const audioPath = await saveAudioChunk(guildId, userId, displayName, wavBuffer, cap.startedAt);
 
     // Transcribe
-    const result = await sttProvider.transcribePcm(pcmToTranscribe, RATE);
+    const result = await sttProvider.transcribePcm(pcmToTranscribe, RATE, { guildId });
 
     const audioMs = cap.totalBytes > 0 ? Math.round((cap.totalBytes / BYTES_PER_SEC) * 1000) : 0;
     const activeMs = cap.activeFrames * FRAME_MS;

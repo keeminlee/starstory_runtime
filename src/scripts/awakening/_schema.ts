@@ -18,10 +18,33 @@ export interface ActionSpec {
   [key: string]: unknown;
 }
 
-export interface CommitSpec {
-  type: string;
-  [key: string]: unknown;
-}
+export type CommitSpec =
+  | {
+      type: "set_guild_config";
+      key: string;
+      value?: unknown;
+      from?: string;
+    }
+  | {
+      type: "set_flag";
+      key: string;
+      value?: unknown;
+      from?: string;
+    }
+  | {
+      type: "write_memory";
+      memory_key: string;
+      scope?: "guild";
+      sticky?: boolean;
+      value?: unknown;
+      from?: string;
+    }
+  | {
+      type: "append_registry_yaml";
+      target: "pcs";
+      entries_from: string;
+      mode?: "append_only";
+    };
 
 export type NextSceneRef = {
   type: "scene";
@@ -35,11 +58,26 @@ export type NextSpec = NextSceneRef | {
 
 export type SceneSay = string | Beat | Beat[];
 
+export type ChannelDriftMiniScene = {
+  channel: string;
+  say?: SceneSay;
+};
+
+export type ChannelOnChangeSpec = {
+  if_different_channel: {
+    departure: ChannelDriftMiniScene;
+    arrival: ChannelDriftMiniScene;
+  };
+};
+
 export interface Scene {
   say?: SceneSay;
   prompt?: PromptSpec;
   action?: ActionSpec;
   commit?: CommitSpec[];
+  requires?: string[];
+  fallback_next?: string;
+  on_change?: ChannelOnChangeSpec;
   next?: string | NextSpec;
 }
 
@@ -95,6 +133,81 @@ function validateTypeObject(value: unknown, path: string): Record<string, unknow
   return value;
 }
 
+function hasOwn(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function validateCommit(value: unknown, path: string): CommitSpec {
+  const typed = validateTypeObject(value, path);
+  const type = typed.type;
+
+  if (type === "set_guild_config") {
+    if (typeof typed.key !== "string" || typed.key.trim().length === 0) {
+      throw new Error(`${path}.key must be a non-empty string`);
+    }
+    const hasValue = hasOwn(typed, "value");
+    const hasFrom = hasOwn(typed, "from");
+    if ((hasValue && hasFrom) || (!hasValue && !hasFrom)) {
+      throw new Error(`${path} must include exactly one of value or from`);
+    }
+    if (hasFrom && (typeof typed.from !== "string" || typed.from.trim().length === 0)) {
+      throw new Error(`${path}.from must be a non-empty string`);
+    }
+    return typed as CommitSpec;
+  }
+
+  if (type === "set_flag") {
+    if (typeof typed.key !== "string" || typed.key.trim().length === 0) {
+      throw new Error(`${path}.key must be a non-empty string`);
+    }
+    const hasValue = hasOwn(typed, "value");
+    const hasFrom = hasOwn(typed, "from");
+    if ((hasValue && hasFrom) || (!hasValue && !hasFrom)) {
+      throw new Error(`${path} must include exactly one of value or from`);
+    }
+    if (hasFrom && (typeof typed.from !== "string" || typed.from.trim().length === 0)) {
+      throw new Error(`${path}.from must be a non-empty string`);
+    }
+    return typed as CommitSpec;
+  }
+
+  if (type === "write_memory") {
+    if (typeof typed.memory_key !== "string" || typed.memory_key.trim().length === 0) {
+      throw new Error(`${path}.memory_key must be a non-empty string`);
+    }
+    if (typed.scope !== undefined && typed.scope !== "guild") {
+      throw new Error(`${path}.scope supports only guild`);
+    }
+    if (typed.sticky !== undefined && typeof typed.sticky !== "boolean") {
+      throw new Error(`${path}.sticky must be boolean when provided`);
+    }
+    const hasValue = hasOwn(typed, "value");
+    const hasFrom = hasOwn(typed, "from");
+    if ((hasValue && hasFrom) || (!hasValue && !hasFrom)) {
+      throw new Error(`${path} must include exactly one of value or from`);
+    }
+    if (hasFrom && (typeof typed.from !== "string" || typed.from.trim().length === 0)) {
+      throw new Error(`${path}.from must be a non-empty string`);
+    }
+    return typed as CommitSpec;
+  }
+
+  if (type === "append_registry_yaml") {
+    if (typed.target !== "pcs") {
+      throw new Error(`${path}.target must be pcs`);
+    }
+    if (typeof typed.entries_from !== "string" || typed.entries_from.trim().length === 0) {
+      throw new Error(`${path}.entries_from must be a non-empty string`);
+    }
+    if (typed.mode !== undefined && typed.mode !== "append_only") {
+      throw new Error(`${path}.mode must be append_only when provided`);
+    }
+    return typed as CommitSpec;
+  }
+
+  throw new Error(`${path}.type is unsupported: ${String(type)}`);
+}
+
 function validateSay(value: unknown, path: string): SceneSay {
   if (typeof value === "string") {
     return value;
@@ -105,6 +218,42 @@ function validateSay(value: unknown, path: string): SceneSay {
   }
 
   return validateBeat(value, path);
+}
+
+function validateChannelDriftMiniScene(value: unknown, path: string): ChannelDriftMiniScene {
+  if (!isObject(value)) {
+    throw new Error(`${path} must be an object`);
+  }
+  if (typeof value.channel !== "string" || value.channel.trim().length === 0) {
+    throw new Error(`${path}.channel must be a non-empty string`);
+  }
+
+  const out: ChannelDriftMiniScene = {
+    channel: value.channel,
+  };
+
+  if (value.say !== undefined) {
+    out.say = validateSay(value.say, `${path}.say`);
+  }
+
+  return out;
+}
+
+function validateOnChange(value: unknown, path: string): ChannelOnChangeSpec {
+  if (!isObject(value)) {
+    throw new Error(`${path} must be an object`);
+  }
+  if (!isObject(value.if_different_channel)) {
+    throw new Error(`${path}.if_different_channel must be an object`);
+  }
+
+  const ifDifferent = value.if_different_channel as Record<string, unknown>;
+  return {
+    if_different_channel: {
+      departure: validateChannelDriftMiniScene(ifDifferent.departure, `${path}.if_different_channel.departure`),
+      arrival: validateChannelDriftMiniScene(ifDifferent.arrival, `${path}.if_different_channel.arrival`),
+    },
+  };
 }
 
 function resolveDirectNextTarget(next: string | NextSpec | undefined, path: string): string | null {
@@ -170,8 +319,32 @@ export function validateAwakenScript(input: unknown): AwakenScript {
       scene.prompt = validateTypeObject(sceneRaw.prompt, `scenes.${sceneId}.prompt`) as PromptSpec;
     }
 
+    if (sceneRaw.requires !== undefined) {
+      if (!Array.isArray(sceneRaw.requires)) {
+        throw new Error(`scenes.${sceneId}.requires must be an array`);
+      }
+      const requires = sceneRaw.requires.map((item, index) => {
+        if (typeof item !== "string" || item.trim().length === 0) {
+          throw new Error(`scenes.${sceneId}.requires[${index}] must be a non-empty string`);
+        }
+        return item.trim();
+      });
+      scene.requires = [...new Set(requires)];
+    }
+
+    if (sceneRaw.fallback_next !== undefined) {
+      if (typeof sceneRaw.fallback_next !== "string" || sceneRaw.fallback_next.trim().length === 0) {
+        throw new Error(`scenes.${sceneId}.fallback_next must be a non-empty string`);
+      }
+      scene.fallback_next = sceneRaw.fallback_next;
+    }
+
     if (sceneRaw.action !== undefined) {
       scene.action = validateTypeObject(sceneRaw.action, `scenes.${sceneId}.action`) as ActionSpec;
+    }
+
+    if (sceneRaw.on_change !== undefined) {
+      scene.on_change = validateOnChange(sceneRaw.on_change, `scenes.${sceneId}.on_change`);
     }
 
     if (sceneRaw.commit !== undefined) {
@@ -179,7 +352,7 @@ export function validateAwakenScript(input: unknown): AwakenScript {
         throw new Error(`scenes.${sceneId}.commit must be an array`);
       }
       scene.commit = sceneRaw.commit.map((item, index) => {
-        const commit = validateTypeObject(item, `scenes.${sceneId}.commit[${index}]`);
+        const commit = validateCommit(item, `scenes.${sceneId}.commit[${index}]`);
         return commit as CommitSpec;
       });
     }
@@ -195,6 +368,10 @@ export function validateAwakenScript(input: unknown): AwakenScript {
       }
     }
 
+    if (scene.on_change && scene.prompt?.type !== "channel_select") {
+      throw new Error(`scenes.${sceneId}.on_change is supported only for channel_select prompts`);
+    }
+
     sceneMap[sceneId] = scene;
   }
 
@@ -206,6 +383,10 @@ export function validateAwakenScript(input: unknown): AwakenScript {
     const directTarget = resolveDirectNextTarget(scene.next, `scenes.${sceneId}.next`);
     if (directTarget !== null && !(directTarget in sceneMap)) {
       throw new Error(`scenes.${sceneId}.next points to unknown scene \"${directTarget}\"`);
+    }
+
+    if (scene.fallback_next && !(scene.fallback_next in sceneMap)) {
+      throw new Error(`scenes.${sceneId}.fallback_next points to unknown scene "${scene.fallback_next}"`);
     }
   }
 

@@ -95,10 +95,20 @@ export function resolveCampaignExportsDir(campaignSlug: string, opts: ResolveOpt
   return resolveWithLegacyReadFallback("exports", canonical, legacy, opts);
 }
 
-export function resolveCampaignExportSubdir(campaignSlug: string, subdir: "events" | "meecaps" | "gold", opts: ResolveOptions = {}): string {
+export function resolveCampaignExportSubdir(campaignSlug: string, subdir: "events" | "meecaps" | "gold" | "transcripts", opts: ResolveOptions = {}): string {
   const canonical = path.join(resolveCampaignExportsDir(campaignSlug, opts), subdir);
   const legacy = path.join(getDataRoot(), subdir);
   return resolveWithLegacyReadFallback(`exports/${subdir}`, canonical, legacy, opts);
+}
+
+export function resolveCampaignTranscriptExportsDir(
+  campaignSlug: string,
+  lane: "online" | "offline_replay" = "online",
+  opts: ResolveOptions = {}
+): string {
+  const transcriptsRoot = resolveCampaignExportSubdir(campaignSlug, "transcripts", opts);
+  const canonical = path.join(transcriptsRoot, lane);
+  return ensureDirIfRequested(canonical, opts.ensureExists ?? opts.forWrite ?? false);
 }
 
 function sanitizeSessionLabelForFilename(sessionLabel: string): string {

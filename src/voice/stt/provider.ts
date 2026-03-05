@@ -29,7 +29,8 @@ export interface SttProvider {
    */
   transcribePcm(
     pcm: Buffer,
-    sampleRate: number
+    sampleRate: number,
+    opts?: { guildId?: string }
   ): Promise<SttTranscriptionResult>;
 }
 

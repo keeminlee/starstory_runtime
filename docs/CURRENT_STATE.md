@@ -1,9 +1,9 @@
-# Meepo Bot - Current State (March 3, 2026)
+# Meepo Bot - Current State (March 4, 2026)
 
 For documentation navigation, start at [README.md](README.md).
 
 **Status:** V0 complete, MeepoMind (V0.1) Phase 2-3 in progress + Tier S/A interaction memory  
-**Last Updated:** March 3, 2026
+**Last Updated:** March 4, 2026
 
 ---
 
@@ -59,6 +59,108 @@ http://localhost:7777/overlay            # Browser Source for speaking indicator
 ---
 
 ## Architecture Overview
+
+### Awakening Runtime (v1.6)
+
+Awakening Runtime is the deterministic onboarding interpreter used by `/meepo wake` and future ritual-style flows.
+
+Execution lifecycle per scene:
+
+1. Render scene
+2. Await prompt (when present)
+3. Persist prompt input
+4. Execute commits
+5. Execute runtime actions
+6. Transition to next scene
+
+Core guarantees:
+
+- deterministic scene execution
+- resumable runtime checkpoints
+- engine-owned persistent mutation
+- nonce-validated interaction safety
+
+Capabilities currently supported:
+
+Prompts:
+
+- `choice`
+- `modal_text`
+- `role_select`
+- `channel_select`
+- `registry_builder`
+
+Runtime actions:
+
+- `join_voice_and_speak`
+
+Script/runtime features:
+
+- template variable rendering
+- capability gating
+- deterministic resume
+- pending prompt nonce validation
+
+State separation:
+
+- `onboarding_progress.progress_json` for prompt/runtime checkpoint state.
+- `memory` for canonical long-lived identity state.
+
+Progress examples:
+
+- `progress_json.dm_display_name`
+- `progress_json.home_channel_id`
+- `progress_json.players`
+- `progress_json._rb_pending_character_name`
+
+Memory examples:
+
+- `memory.dm_display_name`
+- `memory.dm_user_id`
+
+Commit model:
+
+- scripts declare commit intent
+- engine executes commit mutation
+- append-only setup registry writes (`append_registry_yaml`)
+
+Action model:
+
+- actions execute after commits
+- actions execute in script order
+- actions never mutate progress state directly
+- action failures are non-blocking
+
+Action logs:
+
+- `AWAKEN_ACTION ok type=<type> scene=<scene_id>`
+- `AWAKEN_ACTION fail type=<type> scene=<scene_id> code=<error_code>`
+
+Channel drift behavior:
+
+- triggered by `channel_select` post-processing when selected channel changes
+- emits departure lines in old channel and arrival lines in new channel
+- updates runtime channel context for current run only
+- persists selected channel key; runtime channel context is not persisted
+
+See [docs/awakening/ARCHITECTURE.md](awakening/ARCHITECTURE.md) and [docs/awakening/SCRIPTS.md](awakening/SCRIPTS.md).
+
+### Dynamic STT Prompt Refresh (v1.5)
+
+Purpose:
+
+- adapt STT recognition to current campaign vocabulary
+
+Trigger:
+
+- canonical session start enqueues `refresh-stt-prompt`
+
+Behavior:
+
+- reads campaign registry names
+- builds deduplicated prompt terms (PC names + Meepo/persona context)
+- persists current prompt in guild config runtime state
+- forwards prompt override to STT provider at runtime
 
 ### DB Routing Guardrail (Campaign Isolation)
 

@@ -6,7 +6,9 @@ import {
   COMPACT_MINI_ACTION,
   MEEPO_MIND_RETRIEVE_ACTION,
   MEGAMEECAP_UPDATE_CHUNK_ACTION,
+  REFRESH_STT_PROMPT_ACTION,
   MINI_MEECAP_KIND,
+  type RefreshSttPromptPayload,
   type MeepoMindRetrievePayload,
   RAW_LINES_KIND,
   RECEIPT_KIND,
@@ -36,6 +38,8 @@ import {
   type MeepoActionRunKind,
 } from "./meepoActionLogging.js";
 import { log } from "../utils/logger.js";
+import { cfg } from "../config/env.js";
+import { buildSttPromptFromRegistry, setGuildSttPrompt } from "../voice/stt/promptState.js";
 
 export const CANON_MINI_TRIGGER_LINES = 250;
 export const MEGAMEECAP_ALGO_VERSION = "megameecap-chunk-v1";
@@ -268,6 +272,7 @@ export function enqueueMeepoMindRetrieveIfNeeded(db: any, args: {
   queryHash: string;
   topK: number;
   algoVersion: string;
+  includeIdentityContext?: boolean;
   nowMs: number;
   runKind?: MeepoActionRunKind;
 }): boolean {
@@ -282,6 +287,7 @@ export function enqueueMeepoMindRetrieveIfNeeded(db: any, args: {
     top_k: args.topK,
     algo_version: args.algoVersion,
     include_always_tier: true,
+    include_identity_context: Boolean(args.includeIdentityContext),
   };
 
   const dedupeKey = buildMeepoMindRetrieveDedupeKey({
@@ -380,8 +386,21 @@ function parseMeepoMindRetrievePayload(action: MeepoActionRow): MeepoMindRetriev
     || typeof payload.algo_version !== "string"
     || payload.algo_version.trim().length === 0
     || payload.include_always_tier !== true
+    || (payload.include_identity_context !== undefined && typeof payload.include_identity_context !== "boolean")
   ) {
     throw new Error("Invalid meepo mind retrieval payload");
+  }
+  return payload;
+}
+
+function parseRefreshSttPromptPayload(action: MeepoActionRow): RefreshSttPromptPayload {
+  const payload = JSON.parse(action.payload_json) as RefreshSttPromptPayload;
+  if (
+    payload == null
+    || typeof payload !== "object"
+    || (payload.reason !== undefined && payload.reason !== "session_start")
+  ) {
+    throw new Error("Invalid refresh stt prompt payload");
   }
   return payload;
 }
@@ -624,6 +643,9 @@ function resolveActionAnchorLedgerId(db: any, action: MeepoActionRow): string | 
         sessionId: payload.session_id,
       });
       return allRawLines[payload.end_line - 1]?.id ?? null;
+    }
+    if (action.action_type === REFRESH_STT_PROMPT_ACTION) {
+      return null;
     }
   } catch {
     return null;
@@ -1011,6 +1033,48 @@ export async function processOneMeepoContextAction(
   }
 
   try {
+    if (action.action_type === REFRESH_STT_PROMPT_ACTION) {
+      parseRefreshSttPromptPayload(action);
+      const campaignSlug = resolveCampaignSlugForGuild(db, action.guild_id);
+      const refreshedPrompt = buildSttPromptFromRegistry({
+        campaignSlug,
+        fallbackPrompt: cfg.stt.prompt,
+      });
+      setGuildSttPrompt(action.guild_id, refreshedPrompt);
+
+      log.info("refresh-stt-prompt processed", "meepo_actions", {
+        guildId: action.guild_id,
+        sessionId: action.session_id,
+        actionId: action.id,
+        campaignSlug,
+        sttPromptLen: refreshedPrompt?.length ?? 0,
+      });
+
+      withImmediateTransaction(db, () => {
+        markActionDone(db, { actionId: action.id, nowMs: Date.now() });
+      });
+
+      appendMeepoActionLogEvent(db, {
+        ts_ms: Date.now(),
+        run_kind: runKind,
+        guild_id: action.guild_id,
+        scope: action.scope,
+        session_id: action.session_id,
+        event_type: "action_done",
+        anchor_ledger_id: null,
+        action_id: action.id,
+        action_type: action.action_type,
+        dedupe_key: action.dedupe_key,
+        attempt: action.attempts,
+        status: "done",
+        data: {
+          campaign_slug: campaignSlug,
+          stt_prompt_len: refreshedPrompt?.length ?? 0,
+        },
+      });
+      return true;
+    }
+
     if (action.action_type === MEEPO_MIND_RETRIEVE_ACTION) {
       const payload = parseMeepoMindRetrievePayload(action);
       const { executeMeepoMindRetrieveAction } = await import("./meepoMindRetrieveAction.js");

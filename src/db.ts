@@ -1294,6 +1294,34 @@ function applyMigrations(db: Database.Database) {
     db.exec("ALTER TABLE meep_usages ADD COLUMN mindspace TEXT");
   }
 
+  // Migration: keyed MeepoMind memory rows (Sprint 4 identity runtime writes)
+  const tablesForMeepoMindMemory = db.pragma("table_list") as any[];
+  const hasMeepoMindMemory = tablesForMeepoMindMemory.some((t: any) => t.name === "meepo_mind_memory");
+  if (!hasMeepoMindMemory) {
+    console.log("Migrating: Creating meepo_mind_memory table (Sprint 4 identity)");
+    db.exec(`
+      CREATE TABLE meepo_mind_memory (
+        scope_kind TEXT NOT NULL,
+        scope_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        text TEXT NOT NULL,
+        tags_json TEXT NOT NULL DEFAULT '[]',
+        source TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL,
+        updated_at_ms INTEGER NOT NULL,
+        UNIQUE(scope_kind, scope_id, key)
+      );
+
+      CREATE INDEX idx_meepo_mind_memory_scope
+      ON meepo_mind_memory(scope_kind, scope_id, key);
+    `);
+  } else {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_meepo_mind_memory_scope
+      ON meepo_mind_memory(scope_kind, scope_id, key);
+    `);
+  }
+
   // Migration: Create meepo_convo_log table (Layer 0 - Conversation Memory)
   const tablesForConvoLog = db.pragma("table_list") as any[];
   const hasConvoLog = tablesForConvoLog.some((t: any) => t.name === "meepo_convo_log");
@@ -1355,6 +1383,7 @@ function applyMigrations(db: Database.Database) {
       CREATE TABLE guild_config (
         guild_id TEXT PRIMARY KEY,
         campaign_slug TEXT NOT NULL,
+        awakened INTEGER,
         dm_user_id TEXT,
         dm_role_id TEXT,
         default_persona_id TEXT,
@@ -1374,6 +1403,18 @@ function applyMigrations(db: Database.Database) {
     console.log("Migrating: Adding dm_user_id to guild_config");
     db.exec("ALTER TABLE guild_config ADD COLUMN dm_user_id TEXT");
   }
+
+  const hasAwakened = guildConfigColumns.some((c: any) => c.name === "awakened");
+  if (!hasAwakened) {
+    console.log("Migrating: Adding awakened to guild_config");
+    db.exec("ALTER TABLE guild_config ADD COLUMN awakened INTEGER");
+  }
+
+  db.exec(`
+    UPDATE guild_config
+    SET awakened = 0
+    WHERE awakened IS NULL
+  `);
 
   const hasSetupVersion = guildConfigColumns.some((c: any) => c.name === "setup_version");
   if (!hasSetupVersion) {

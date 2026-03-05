@@ -20,8 +20,26 @@ scenes:
     next: dm_role
 
   dm_role:
-    say: "First, tell me—who bears the mantle of Dungeon Master?"
+    say: "Before we begin, I need one anchor."
+    next: ask_dm_name
+
+  ask_dm_name:
+    say: "What should I call you, Dungeon Master?"
+    prompt:
+      type: text_input
+      key: dm_display_name
+      kind: modal_text
+    commit:
+      - type: write_memory
+        memory_key: dm_display_name
+        scope: guild
+        sticky: true
+        from: dm_display_name
     next: done_stub
 
   done_stub:
     say: "(stub)"
+    commit:
+      - type: set_flag
+        key: awakened
+        value: true

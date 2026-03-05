@@ -1,16 +1,44 @@
-import { advanceScene, loadState, markComplete, setBeatIndex, type GuildOnboardingState } from "../ledger/awakeningStateRepo.js";
+import { randomUUID } from "node:crypto";
+import { advanceScene, loadState, markComplete, saveProgress, setBeatIndex, type GuildOnboardingState } from "../ledger/awakeningStateRepo.js";
 import { loadAwakenScript } from "../scripts/awakening/_loader.js";
 import type { AwakenScript, Beat, NextSpec, Scene, SceneSay } from "../scripts/awakening/_schema.js";
+import {
+  buildPendingPromptPatch,
+  clearPendingPromptPatch,
+  getPendingPromptFromState,
+  resolveAwaitInputFromScene,
+} from "./wakeIdentity.js";
+import { buildCommitContext, executeCommitAction } from "./commitActions/commitActionRegistry.js";
+import { executeSceneActions } from "./actions/index.js";
+import { renderTemplateTree } from "./template.js";
+import { getGuildMemoryByKey } from "../meepoMind/meepoMindMemoryRepo.js";
+import { DM_DISPLAY_NAME_KEY } from "../meepoMind/meepoMindWriter.js";
+import { getGuildConfig } from "../campaign/guildConfig.js";
 
 export const MAX_BEATS_PER_RUN = 25;
 export const MAX_DELAY_MS = 15000;
 export const MAX_TOTAL_DELAY_MS_PER_RUN = 120000;
 const MAX_SCENE_STEPS_PER_RUN = 50;
 
+const AWAKE_CAPABILITIES = new Set<string>([
+  "action.join_voice_and_speak",
+  "prompt.channel_select",
+  "prompt.choice",
+  "prompt.modal_text",
+  "prompt.registry_builder",
+  "prompt.role_select",
+  "template.vars",
+]);
+
+export function getAwakenCapabilities(): Set<string> {
+  return new Set(AWAKE_CAPABILITIES);
+}
+
 type RunOptions = {
   db: any;
   scriptId?: string;
   script?: AwakenScript;
+  runtimeChannelId?: string;
   maxBeatsPerRun?: number;
   maxTotalDelayMsPerRun?: number;
   sleepFn?: (ms: number) => Promise<void>;
@@ -18,6 +46,7 @@ type RunOptions = {
 
 type InteractionLike = {
   guildId?: string;
+  channelId?: string;
   deferred?: boolean;
   replied?: boolean;
   deferReply?: (payload: { ephemeral: boolean }) => Promise<unknown>;
@@ -25,6 +54,7 @@ type InteractionLike = {
   followUp?: (payload: { content: string; ephemeral?: boolean }) => Promise<unknown>;
   reply?: (payload: { content: string; ephemeral?: boolean }) => Promise<unknown>;
   channel?: { send?: (payload: string | { content: string }) => Promise<unknown> };
+  guild?: { channels?: { fetch?: (channelId: string) => Promise<any> } };
 };
 
 export type AwakenRunResult =
@@ -34,9 +64,9 @@ export type AwakenRunResult =
   | { status: "noop"; emittedBeatCount: number; reason: "no_state" | "already_completed" };
 
 type SceneRunResult =
-  | { status: "completed"; emittedBeatCount: number; sleptMs: number }
-  | { status: "advanced"; emittedBeatCount: number; sleptMs: number; fromScene: string; toScene: string; state: GuildOnboardingState }
-  | { status: "blocked"; emittedBeatCount: number; sleptMs: number; reason: "prompt" | "action" | "commit" | "next" | "budget" | "budget_delay"; sceneId: string; state: GuildOnboardingState };
+  | { status: "completed"; emittedBeatCount: number; sleptMs: number; runtimeChannelId?: string }
+  | { status: "advanced"; emittedBeatCount: number; sleptMs: number; fromScene: string; toScene: string; state: GuildOnboardingState; runtimeChannelId?: string }
+  | { status: "blocked"; emittedBeatCount: number; sleptMs: number; reason: "prompt" | "action" | "commit" | "next" | "budget" | "budget_delay"; sceneId: string; state: GuildOnboardingState; runtimeChannelId?: string };
 
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -72,11 +102,134 @@ function resolveNextSceneId(next: string | NextSpec | undefined): string | null 
   return null;
 }
 
-function resolveBlockerReason(scene: Scene): "prompt" | "action" | "commit" | null {
+function resolveBlockerReason(scene: Scene): "prompt" | "commit" | null {
   if (scene.prompt) return "prompt";
-  if (scene.action) return "action";
-  if (scene.commit && scene.commit.length > 0) return "commit";
   return null;
+}
+
+function parseDmDisplayNameFromMemory(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^The Dungeon Master is\s+(.+)\.$/i);
+  if (!match?.[1]) return trimmed;
+  return match[1].trim() || null;
+}
+
+function resolveTemplateValue(args: {
+  db: any;
+  guildId: string;
+  progress: Record<string, unknown>;
+  key: string;
+}): string | undefined {
+  const progressValue = args.progress[args.key];
+  if (progressValue !== undefined && progressValue !== null) {
+    return String(progressValue);
+  }
+
+  try {
+    const memory = getGuildMemoryByKey({
+      db: args.db,
+      guildId: args.guildId,
+      key: args.key,
+    });
+    if (memory?.text) {
+      if (args.key === DM_DISPLAY_NAME_KEY) {
+        return parseDmDisplayNameFromMemory(memory.text) ?? memory.text;
+      }
+      return memory.text;
+    }
+  } catch {
+    // no-op
+  }
+
+  try {
+    const config = getGuildConfig(args.guildId) as Record<string, unknown> | null;
+    const value = config?.[args.key];
+    if (value !== undefined && value !== null) {
+      return String(value);
+    }
+  } catch {
+    // no-op
+  }
+
+  return undefined;
+}
+
+function applySceneTemplates(scene: Scene, args: {
+  db: any;
+  guildId: string;
+  progress: Record<string, unknown>;
+  sceneId: string;
+}): Scene {
+  const unresolved = new Set<string>();
+  const rendered = renderTemplateTree(scene, (key) => resolveTemplateValue({
+    db: args.db,
+    guildId: args.guildId,
+    progress: args.progress,
+    key,
+  }), unresolved);
+
+  if (unresolved.size > 0) {
+    const vars = [...unresolved].sort().join(",");
+    console.warn(`AWAKEN_TEMPLATE_UNRESOLVED scene=${args.sceneId} vars=[${vars}]`);
+  }
+
+  return rendered;
+}
+
+function computeMissingCapabilities(scene: Scene, capabilities: Set<string>): string[] {
+  const required = scene.requires ?? [];
+  return required.filter((item) => !capabilities.has(item));
+}
+
+function resolveSkipNextScene(scene: Scene): string | null {
+  const fallback = scene.fallback_next?.trim();
+  if (fallback) return fallback;
+  return resolveNextSceneId(scene.next);
+}
+
+function hasResolvedPromptInput(state: GuildOnboardingState, scene: Scene): boolean {
+  const awaitInput = resolveAwaitInputFromScene(scene);
+  if (!awaitInput) return false;
+
+  if (awaitInput.kind === "registry_builder") {
+    const pending = getPendingPromptFromState(state);
+    if (pending && pending.kind === "registry_builder" && pending.key === awaitInput.key && pending.sceneId === state.current_scene) {
+      return false;
+    }
+  }
+
+  const value = state.progress_json[awaitInput.key];
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+  return value !== undefined && value !== null;
+}
+
+async function executeCommits(args: {
+  db: any;
+  scriptId: string;
+  sceneId: string;
+  scene: Scene;
+  state: GuildOnboardingState;
+}): Promise<void> {
+  const commits = args.scene.commit ?? [];
+  if (commits.length === 0) return;
+
+  const inputs = { ...args.state.progress_json };
+  const ctx = buildCommitContext({
+    db: args.db,
+    guildId: args.state.guild_id,
+    scriptId: args.scriptId,
+    sceneId: args.sceneId,
+    progress: args.state.progress_json,
+    inputs,
+    onboardingState: args.state,
+  });
+
+  for (const commit of commits) {
+    await executeCommitAction(ctx, commit);
+  }
 }
 
 export function normalizeSay(say: SceneSay | undefined): Beat[] {
@@ -100,7 +253,19 @@ async function ensureAck(interaction: InteractionLike): Promise<void> {
   }
 }
 
-async function emitBeat(interaction: InteractionLike, beat: Beat): Promise<void> {
+async function emitBeat(interaction: InteractionLike, beat: Beat, targetChannelId?: string): Promise<void> {
+  if (targetChannelId && interaction.guild?.channels?.fetch) {
+    try {
+      const channel = await interaction.guild.channels.fetch(targetChannelId);
+      if (channel?.send) {
+        await channel.send({ content: beat.text });
+        return;
+      }
+    } catch {
+      // fall through to default emission path
+    }
+  }
+
   if (typeof interaction.followUp === "function") {
     await interaction.followUp({ content: beat.text, ephemeral: false });
     return;
@@ -125,14 +290,62 @@ export async function runCurrentScene(
   state: GuildOnboardingState,
   opts: {
     db: any;
+    runtimeChannelId?: string;
     maxBeatsRemaining: number;
     maxDelayRemainingMs: number;
     sleepFn: (ms: number) => Promise<void>;
   },
 ): Promise<SceneRunResult> {
-  const scene = script.scenes[state.current_scene];
+  const rawScene = script.scenes[state.current_scene];
+  const scene = rawScene
+    ? applySceneTemplates(rawScene, {
+      db: opts.db,
+      guildId: state.guild_id,
+      progress: state.progress_json,
+      sceneId: state.current_scene,
+    })
+    : undefined;
   if (!scene) {
     throw new Error(`Awakening scene not found: ${state.current_scene}`);
+  }
+
+  const capabilities = getAwakenCapabilities();
+  const missingCapabilities = computeMissingCapabilities(scene, capabilities);
+  if (missingCapabilities.length > 0) {
+    const required = scene.requires ?? [];
+    const target = resolveSkipNextScene(scene);
+    console.info(
+      `AWAKEN_SKIP scene=${state.current_scene} requires=[${required.join(",")}] missing=[${missingCapabilities.join(",")}] next=${target ?? "__complete__"}`
+    );
+
+    if (!target) {
+      state = saveProgress(state.guild_id, state.script_id, {
+        ...clearPendingPromptPatch(),
+      }, { db: opts.db });
+      setBeatIndex(state.guild_id, state.script_id, 0, { db: opts.db });
+      markComplete(state.guild_id, state.script_id, { db: opts.db });
+      return {
+        status: "completed",
+        emittedBeatCount: 0,
+        sleptMs: 0,
+        runtimeChannelId: opts.runtimeChannelId,
+      };
+    }
+
+    state = saveProgress(state.guild_id, state.script_id, {
+      ...clearPendingPromptPatch(),
+    }, { db: opts.db });
+    setBeatIndex(state.guild_id, state.script_id, 0, { db: opts.db });
+    const advancedState = advanceScene(state.guild_id, state.script_id, target, { db: opts.db });
+    return {
+      status: "advanced",
+      emittedBeatCount: 0,
+      sleptMs: 0,
+      fromScene: state.current_scene,
+      toScene: target,
+      state: advancedState,
+      runtimeChannelId: opts.runtimeChannelId,
+    };
   }
 
   const beats = normalizeSay(scene.say);
@@ -152,7 +365,7 @@ export async function runCurrentScene(
     }
 
     const beat = beats[index]!;
-    await emitBeat(interaction, beat);
+    await emitBeat(interaction, beat, opts.runtimeChannelId);
     state = setBeatIndex(state.guild_id, state.script_id, index + 1, { db: opts.db });
     emitted += 1;
 
@@ -165,6 +378,7 @@ export async function runCurrentScene(
         reason: "budget_delay",
         sceneId: state.current_scene,
         state,
+        runtimeChannelId: opts.runtimeChannelId,
       };
     }
 
@@ -175,16 +389,69 @@ export async function runCurrentScene(
   }
 
   const blocker = resolveBlockerReason(scene);
-  if (blocker) {
+  if (blocker === "prompt" && !hasResolvedPromptInput(state, scene)) {
+    const awaitInput = resolveAwaitInputFromScene(scene);
+    if (awaitInput) {
+      const existingPending = getPendingPromptFromState(state);
+      const nonce =
+        existingPending
+        && existingPending.sceneId === state.current_scene
+        && existingPending.key === awaitInput.key
+        && existingPending.kind === awaitInput.kind
+          ? existingPending.nonce
+          : randomUUID();
+
+      state = saveProgress(state.guild_id, state.script_id, buildPendingPromptPatch({
+        key: awaitInput.key,
+        kind: awaitInput.kind,
+        sceneId: state.current_scene,
+        nonce,
+        createdAtMs: existingPending?.createdAtMs ?? Date.now(),
+      }), { db: opts.db });
+    }
+
     return {
       status: "blocked",
       emittedBeatCount: emitted,
       sleptMs,
-      reason: blocker,
+      reason: "prompt",
       sceneId: state.current_scene,
       state,
+        runtimeChannelId: opts.runtimeChannelId,
     };
   }
+
+  state = saveProgress(state.guild_id, state.script_id, {
+    ...clearPendingPromptPatch(),
+  }, { db: opts.db });
+
+  try {
+    await executeCommits({
+      db: opts.db,
+      scriptId: script.id,
+      sceneId: state.current_scene,
+      scene,
+      state,
+    });
+  } catch {
+    return {
+      status: "blocked",
+      emittedBeatCount: emitted,
+      sleptMs,
+      reason: "commit",
+      sceneId: state.current_scene,
+      state,
+      runtimeChannelId: opts.runtimeChannelId,
+    };
+  }
+
+  await executeSceneActions({
+    db: opts.db,
+    interaction,
+    state,
+    sceneId: state.current_scene,
+    scene,
+  });
 
   const nextSceneId = resolveNextSceneId(scene.next);
   if (scene.next !== undefined && nextSceneId === null) {
@@ -195,19 +462,27 @@ export async function runCurrentScene(
       reason: "next",
       sceneId: state.current_scene,
       state,
+      runtimeChannelId: opts.runtimeChannelId,
     };
   }
 
   if (!nextSceneId) {
+    state = saveProgress(state.guild_id, state.script_id, {
+      ...clearPendingPromptPatch(),
+    }, { db: opts.db });
     setBeatIndex(state.guild_id, state.script_id, 0, { db: opts.db });
     markComplete(state.guild_id, state.script_id, { db: opts.db });
     return {
       status: "completed",
       emittedBeatCount: emitted,
       sleptMs,
+      runtimeChannelId: opts.runtimeChannelId,
     };
   }
 
+  state = saveProgress(state.guild_id, state.script_id, {
+    ...clearPendingPromptPatch(),
+  }, { db: opts.db });
   setBeatIndex(state.guild_id, state.script_id, 0, { db: opts.db });
   const advancedState = advanceScene(state.guild_id, state.script_id, nextSceneId, { db: opts.db });
   return {
@@ -217,6 +492,7 @@ export async function runCurrentScene(
     fromScene: state.current_scene,
     toScene: nextSceneId,
     state: advancedState,
+    runtimeChannelId: opts.runtimeChannelId,
   };
 }
 
@@ -244,6 +520,7 @@ export const AwakenEngine = {
     let emittedTotal = 0;
     let totalSleptMs = 0;
     let lastAdvance: { fromScene: string; toScene: string } | null = null;
+    let runtimeChannelId = options.runtimeChannelId ?? interaction.channelId;
 
     for (let sceneSteps = 0; sceneSteps < MAX_SCENE_STEPS_PER_RUN; sceneSteps += 1) {
       const remainingBudget = Math.max(0, maxBeatsPerRun - emittedTotal);
@@ -267,6 +544,7 @@ export const AwakenEngine = {
 
       const result = await runCurrentScene(interaction, script, state, {
         db: options.db,
+        runtimeChannelId,
         maxBeatsRemaining: remainingBudget,
         maxDelayRemainingMs: remainingDelayBudget,
         sleepFn,
@@ -274,6 +552,7 @@ export const AwakenEngine = {
 
       emittedTotal += result.emittedBeatCount;
       totalSleptMs += result.sleptMs;
+  runtimeChannelId = result.runtimeChannelId ?? runtimeChannelId;
 
       if (result.status === "completed") {
         console.log(`[AwakenEngine] script completed: ${script.id}`);

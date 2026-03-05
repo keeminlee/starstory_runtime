@@ -1,5 +1,52 @@
 # Changelog
 
+## v1.6 - 2026-03-04
+
+### Added
+
+- Completed Awakening Runtime interactive surface for onboarding and ritual-style workflows.
+- Prompt primitives: `choice`, `modal_text`, `role_select`, `channel_select`, `registry_builder`.
+- Nonce-protected interaction submission model (`scene_id`, `key`, `nonce` validation).
+- Ordered runtime action dispatcher with stable grep-friendly action logs.
+- Best-effort `join_voice_and_speak` action support.
+- Deterministic resume behavior across pending prompts and scene progression.
+
+### Changed
+
+- Channel drift is executed as `channel_select` prompt post-processing with runtime-only channel context switching.
+- Typed fallback `/meepo wake response:<text>` now targets pending `modal_text` prompts under DM identity gating.
+
+## v1.5 - 2026-03-04
+
+### Added
+
+- Dynamic STT prompt refresh pipeline via `refresh-stt-prompt` action.
+- Per-guild STT prompt generation from campaign registry references.
+- Runtime STT prompt state support and provider forwarding by guild.
+
+### Changed
+
+- OpenAI STT path accepts runtime prompt overrides.
+- Session start enqueues STT prompt refresh in canonical runtime flow.
+
+## v1.4 - 2026-03-04
+
+### Added
+
+- Setup registry system with append-only YAML writes.
+- Setup-phase guardrail for registry mutation safety.
+- Atomic registry persistence for deterministic write behavior.
+
+## v1.3 - 2026-03-04
+
+### Added
+
+- Awakening Engine foundations for deterministic onboarding execution.
+- Versioned YAML scene scripts and loader path.
+- Resumable onboarding state model in onboarding progress storage.
+- Engine-owned commit execution model.
+- Prompt capability gating with deterministic skip semantics.
+
 ## v1.2 - 2026-03-04
 
 ### Added

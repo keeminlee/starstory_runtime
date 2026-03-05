@@ -9,6 +9,7 @@ export type AwakenScriptId = "meepo_awaken";
 const AWAKEN_SCRIPT_REGISTRY: Record<AwakenScriptId, Record<number, string>> = {
   meepo_awaken: {
     1: path.join(__dirname, "meepo_awaken.v1.yaml"),
+    2: path.join(__dirname, "meepo_awaken.v2.yaml"),
   },
 };
 

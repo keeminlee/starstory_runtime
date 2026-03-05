@@ -37,6 +37,15 @@ vi.mock("../../config/env.js", () => ({
     tts: { enabled: false },
     overlay: { homeVoiceChannelId: null },
     openai: { apiKey: "test" },
+    data: { root: ".", campaignsDir: "campaigns" },
+    db: { filename: "db.sqlite", path: "db.sqlite" },
+    voice: { debug: false },
+    logging: {
+      level: "error",
+      scopes: [],
+      format: "pretty",
+      debugLatch: false,
+    },
   },
 }));
 
@@ -140,6 +149,15 @@ vi.mock("../../sessions/megameecapArtifactLocator.js", () => ({
   getAllFinalStatuses: vi.fn(() => [{ exists: true }]),
 }));
 
+vi.mock("../../sessions/transcriptExport.js", () => ({
+  ensureBronzeTranscriptExportCached: vi.fn(() => ({
+    path: "mock-transcript.log",
+    bytes: 0,
+    hash: "mock",
+    cacheHit: true,
+  })),
+}));
+
 vi.mock("../../voice/connection.js", () => ({
   joinVoice: vi.fn(),
   leaveVoice: vi.fn(),
@@ -185,6 +203,13 @@ afterEach(() => {
 describe("v1.1 golden path smoke (mocked)", () => {
   test("wake -> recap -> view surfaces stable metadata", async () => {
     const { meepo } = await import("../../commands/meepo.js");
+    const mockDb = {
+      prepare: vi.fn(() => ({
+        run: vi.fn(),
+        get: vi.fn(() => ({ ts: null })),
+        all: vi.fn(() => []),
+      })),
+    };
 
     const wakeReply = vi.fn(async (_payload: any) => undefined);
     await meepo.execute(
@@ -205,7 +230,7 @@ describe("v1.1 golden path smoke (mocked)", () => {
         },
         reply: wakeReply,
       } as any,
-      { guildId: "guild-1", campaignSlug: "default", dbPath: "test.sqlite", db: { prepare: vi.fn(() => ({ run: vi.fn(), get: vi.fn(() => ({ ts: null })) })) } }
+      { guildId: "guild-1", campaignSlug: "default", dbPath: "test.sqlite", db: mockDb }
     );
 
     const recapEditReply = vi.fn(async (_payload: any) => undefined);
@@ -226,7 +251,7 @@ describe("v1.1 golden path smoke (mocked)", () => {
         editReply: recapEditReply,
         reply: vi.fn(async () => undefined),
       } as any,
-      { guildId: "guild-1", campaignSlug: "default", dbPath: "test.sqlite", db: { prepare: vi.fn(() => ({ run: vi.fn(), get: vi.fn(() => ({ ts: null })) })) } }
+      { guildId: "guild-1", campaignSlug: "default", dbPath: "test.sqlite", db: mockDb }
     );
 
     const viewReply = vi.fn(async (_payload: any) => undefined);
@@ -245,7 +270,7 @@ describe("v1.1 golden path smoke (mocked)", () => {
         },
         reply: viewReply,
       } as any,
-      { guildId: "guild-1", campaignSlug: "default", dbPath: "test.sqlite", db: { prepare: vi.fn(() => ({ run: vi.fn(), get: vi.fn(() => ({ ts: null })) })) } }
+      { guildId: "guild-1", campaignSlug: "default", dbPath: "test.sqlite", db: mockDb }
     );
 
     expect(wakeReply).toHaveBeenCalledTimes(1);

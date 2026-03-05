@@ -258,6 +258,22 @@ ON meepo_mind(gravity DESC);
 -- idx_meepo_mind_mindspace is created in migration (Persona Overhaul v1) so existing DBs
 -- that lack the mindspace column don't fail when schema runs.
 
+-- Keyed MeepoMind memory rows (Sprint 4 identity runtime writes)
+CREATE TABLE IF NOT EXISTS meepo_mind_memory (
+  scope_kind TEXT NOT NULL,               -- 'guild'
+  scope_id TEXT NOT NULL,                 -- guild_id
+  key TEXT NOT NULL,                      -- e.g. 'dm_display_name'
+  text TEXT NOT NULL,                     -- short memory text
+  tags_json TEXT NOT NULL DEFAULT '[]',   -- JSON array of tags
+  source TEXT NOT NULL,                   -- e.g. 'awakening' | 'awakening_repair'
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  UNIQUE(scope_kind, scope_id, key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_meepo_mind_memory_scope
+ON meepo_mind_memory(scope_kind, scope_id, key);
+
 -- Phase 1C: Structured event extraction
 -- events: Extract structured narrative events from session transcripts
 -- Bridges ledger (raw) → meecaps (narrative) with deterministic event records

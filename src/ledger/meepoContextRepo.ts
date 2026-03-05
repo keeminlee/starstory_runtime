@@ -9,6 +9,7 @@ export const RECEIPT_KIND = "receipt";
 export const COMPACT_MINI_ACTION = "compact-mini-meecap";
 export const MEGAMEECAP_UPDATE_CHUNK_ACTION = "megameecap-update-chunk";
 export const MEEPO_MIND_RETRIEVE_ACTION = "meepo-mind-retrieve";
+export const REFRESH_STT_PROMPT_ACTION = "refresh-stt-prompt";
 
 export type MeepoContextRow = {
   guild_id: string;
@@ -89,6 +90,11 @@ export type MeepoMindRetrievePayload = {
   top_k: number;
   algo_version: string;
   include_always_tier: true;
+  include_identity_context?: boolean;
+};
+
+export type RefreshSttPromptPayload = {
+  reason?: "session_start";
 };
 
 export type MeepoActionRow = {

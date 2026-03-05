@@ -37,6 +37,7 @@ import {
 } from "../sessions/sessions.js";
 import { generateSessionRecap } from "../sessions/recapEngine.js";
 import type { RecapStrategy } from "../sessions/recapEngine.js";
+import { ensureBronzeTranscriptExportCached } from "../sessions/transcriptExport.js";
 import {
   buildSessionArtifactStem,
   getAllFinalStatuses,
@@ -57,11 +58,32 @@ import { getSttProviderInfo } from "../voice/stt/provider.js";
 import { getTtsProviderInfo } from "../voice/tts/provider.js";
 import { voicePlaybackController } from "../voice/voicePlaybackController.js";
 import { getMeepoContextWorkerStatus } from "../ledger/meepoContextWorker.js";
-import { initState, loadState } from "../ledger/awakeningStateRepo.js";
+import { initState, loadState, saveProgress } from "../ledger/awakeningStateRepo.js";
 import { metaMeepoVoice, type DoctorCheck } from "../ui/metaMeepoVoice.js";
 import type { CommandCtx } from "./index.js";
 import { PermissionFlagsBits } from "discord.js";
 import { loadAwakenScript } from "../scripts/awakening/_loader.js";
+import {
+  clearPendingPromptPatch,
+  getPendingPromptFromState,
+  resolveModalTextFallback,
+  repairDmDisplayNameMemory,
+} from "../awakening/wakeIdentity.js";
+import {
+  parseChannelSelectCustomId,
+  parseChoicePromptCustomId,
+  parseModalOpenCustomId,
+  parseModalSubmitCustomId,
+  parseRegistryAddCustomId,
+  parseRegistryDoneCustomId,
+  parseRegistryNameModalCustomId,
+  parseRegistryUserSelectCustomId,
+  parseRoleSelectPromptCustomId,
+  renderPendingAwakeningPrompt,
+  resolveChoicePromptValue,
+} from "../awakening/prompts/index.js";
+import { AWAKEN_MODAL_INPUT_ID, buildModalTextSubmitModal } from "../awakening/prompts/modalTextPrompt.js";
+import { AWAKEN_REGISTRY_NAME_INPUT_ID } from "../awakening/prompts/registryBuilderPrompt.js";
 
 type SessionRow = {
   session_id: string;
@@ -90,6 +112,8 @@ type SessionArtifactRow = {
 const DEFAULT_RECAP_STRATEGY: RecapStrategy = "balanced";
 const RECAP_STRATEGIES: RecapStrategy[] = ["detailed", "balanced", "concise"];
 const setupWarningDigestByGuild = new Map<string, string>();
+const TRANSCRIPT_EXPORT_TIME_BUDGET_MS = 1500;
+const MAX_INLINE_ATTACHMENT_BYTES = 24 * 1024 * 1024;
 
 function setReplyMode(db: any, guildId: string, mode: "voice" | "text"): void {
   db.prepare(
@@ -154,6 +178,504 @@ function shouldPrintSetupSummary(guildId: string, report: SetupReport): boolean 
 
 function renderSetupSummary(report: SetupReport): string[] {
   return metaMeepoVoice.wake.setupSummaryLines(report.applied, report.warnings, report.errors);
+}
+
+function formatAwakenStatus(runResult: AwakenRunResult): string {
+  if (runResult.status === "completed") {
+    return "Awakening complete.";
+  }
+  if (runResult.status === "advanced") {
+    return `Awakening advanced: ${runResult.fromScene} -> ${runResult.toScene}.`;
+  }
+  if (runResult.status === "blocked") {
+    if (runResult.reason === "prompt") {
+      return "Awakening paused: awaiting DM input.";
+    }
+    if (runResult.reason === "action" || runResult.reason === "commit") {
+      return `Awakening paused: ${runResult.reason} steps not implemented yet (Sprint 5).`;
+    }
+    if (runResult.reason === "budget") {
+      return "Awakening paused: beat budget reached for this run. Use /meepo wake again to continue.";
+    }
+    if (runResult.reason === "budget_delay") {
+      return "Awakening paused: cinematic delay budget reached for this run. Use /meepo wake again to continue.";
+    }
+    return "Awakening paused: next-step shape not supported yet.";
+  }
+  if (runResult.reason === "already_completed") {
+    return "Meepo is already awakened here.";
+  }
+  return "Awakening state not found.";
+}
+
+async function replyEphemeral(interaction: any, content: string): Promise<void> {
+  if (interaction.deferred || interaction.replied) {
+    await interaction.followUp({ content, ephemeral: true }).catch(() => {});
+    return;
+  }
+  await interaction.reply({ content, ephemeral: true }).catch(() => {});
+}
+
+function canAnswerAwakeningPrompt(guildId: string, interaction: any): boolean {
+  const configuredDmUserId = getGuildDmUserId(guildId);
+  if (configuredDmUserId) {
+    return interaction.user?.id === configuredDmUserId;
+  }
+  return Boolean(interaction.memberPermissions?.has?.(PermissionFlagsBits.ManageGuild));
+}
+
+type PromptTarget = {
+  kind: "choice" | "role_select" | "modal_text" | "channel_select" | "registry_builder";
+  sceneId: string;
+  key: string;
+  nonce: string;
+  source:
+    | "choice"
+    | "role_select"
+    | "modal_open"
+    | "modal_submit"
+    | "channel_select"
+    | "registry_add"
+    | "registry_done"
+    | "registry_user"
+    | "registry_name_modal";
+  optionIndex?: number;
+};
+
+function parsePromptTargetFromInteraction(interaction: any): PromptTarget | null {
+  const customId = String(interaction?.customId ?? "");
+
+  const choice = parseChoicePromptCustomId(customId);
+  if (choice) {
+    return {
+      kind: "choice",
+      sceneId: choice.sceneId,
+      key: choice.key,
+      nonce: choice.nonce,
+      source: "choice",
+      optionIndex: choice.optionIndex,
+    };
+  }
+
+  const role = parseRoleSelectPromptCustomId(customId);
+  if (role) {
+    return {
+      kind: "role_select",
+      sceneId: role.sceneId,
+      key: role.key,
+      nonce: role.nonce,
+      source: "role_select",
+    };
+  }
+
+  const modalOpen = parseModalOpenCustomId(customId);
+  if (modalOpen) {
+    return {
+      kind: "modal_text",
+      sceneId: modalOpen.sceneId,
+      key: modalOpen.key,
+      nonce: modalOpen.nonce,
+      source: "modal_open",
+    };
+  }
+
+  const modalSubmit = parseModalSubmitCustomId(customId);
+  if (modalSubmit) {
+    return {
+      kind: "modal_text",
+      sceneId: modalSubmit.sceneId,
+      key: modalSubmit.key,
+      nonce: modalSubmit.nonce,
+      source: "modal_submit",
+    };
+  }
+
+  const channelSelect = parseChannelSelectCustomId(customId);
+  if (channelSelect) {
+    return {
+      kind: "channel_select",
+      sceneId: channelSelect.sceneId,
+      key: channelSelect.key,
+      nonce: channelSelect.nonce,
+      source: "channel_select",
+    };
+  }
+
+  const registryAdd = parseRegistryAddCustomId(customId);
+  if (registryAdd) {
+    return {
+      kind: "registry_builder",
+      sceneId: registryAdd.sceneId,
+      key: registryAdd.key,
+      nonce: registryAdd.nonce,
+      source: "registry_add",
+    };
+  }
+
+  const registryDone = parseRegistryDoneCustomId(customId);
+  if (registryDone) {
+    return {
+      kind: "registry_builder",
+      sceneId: registryDone.sceneId,
+      key: registryDone.key,
+      nonce: registryDone.nonce,
+      source: "registry_done",
+    };
+  }
+
+  const registryUser = parseRegistryUserSelectCustomId(customId);
+  if (registryUser) {
+    return {
+      kind: "registry_builder",
+      sceneId: registryUser.sceneId,
+      key: registryUser.key,
+      nonce: registryUser.nonce,
+      source: "registry_user",
+    };
+  }
+
+  const registryNameModal = parseRegistryNameModalCustomId(customId);
+  if (registryNameModal) {
+    return {
+      kind: "registry_builder",
+      sceneId: registryNameModal.sceneId,
+      key: registryNameModal.key,
+      nonce: registryNameModal.nonce,
+      source: "registry_name_modal",
+    };
+  }
+
+  return null;
+}
+
+function currentPendingMatches(state: any, target: PromptTarget): boolean {
+  const pending = getPendingPromptFromState(state);
+  return Boolean(
+    pending
+    && pending.kind === target.kind
+    && pending.sceneId === target.sceneId
+    && pending.key === target.key
+    && pending.nonce === target.nonce
+  );
+}
+
+async function resumeAwakeningAfterPromptSubmit(args: {
+  interaction: any;
+  ctx: CommandCtx;
+  script: any;
+  guildId: string;
+  runtimeChannelId?: string;
+}): Promise<void> {
+  const runResult = await AwakenEngine.runWake(args.interaction, {
+    db: args.ctx.db,
+    script: args.script,
+    runtimeChannelId: args.runtimeChannelId,
+  });
+
+  const refreshedState = loadState(args.guildId, args.script.id, { db: args.ctx.db });
+  const refreshedPending = getPendingPromptFromState(refreshedState);
+  if (refreshedState && refreshedPending) {
+    const rendered = await renderPendingAwakeningPrompt({
+      interaction: args.interaction,
+      script: args.script,
+      state: refreshedState,
+      pending: refreshedPending,
+    });
+    if (rendered) return;
+  }
+
+  await args.interaction.editReply(formatAwakenStatus(runResult));
+}
+
+async function runChannelDriftBestEffort(args: {
+  interaction: any;
+  scene: any;
+  oldChannelId: string;
+  newChannelId: string;
+}): Promise<void> {
+  const onChange = args.scene?.on_change?.if_different_channel;
+  if (!onChange || args.oldChannelId === args.newChannelId) return;
+
+  const sendLines = async (channelRef: string, say: any): Promise<void> => {
+    const channelId = channelRef === "current_channel" ? args.oldChannelId : channelRef;
+    const beats = Array.isArray(say) ? say : say ? [say] : [];
+    for (const beat of beats) {
+      const text = typeof beat === "string"
+        ? beat
+        : typeof beat?.text === "string"
+          ? beat.text
+          : "";
+      if (!text.trim()) continue;
+
+      try {
+        const channel = await args.interaction.guild?.channels?.fetch?.(channelId);
+        if (channel?.send) {
+          await channel.send({ content: text.replaceAll("{{home_channel_id}}", args.newChannelId) });
+        }
+      } catch {
+        console.warn("AWAKEN_DRIFT_WARN code=DRIFT_SEND_FAILED");
+      }
+    }
+  };
+
+  try {
+    await sendLines(String(onChange.departure?.channel ?? args.oldChannelId), onChange.departure?.say);
+    await sendLines(String(onChange.arrival?.channel ?? args.newChannelId), onChange.arrival?.say);
+  } catch {
+    console.warn("AWAKEN_DRIFT_WARN code=DRIFT_PROCESS_FAILED");
+  }
+}
+
+async function handleAwakeningChoicePromptInteraction(interaction: any, ctx: CommandCtx | null): Promise<boolean> {
+  const target = parsePromptTargetFromInteraction(interaction);
+  if (!target) return false;
+
+  const guildId = interaction.guildId as string | null;
+  if (!guildId || !ctx?.db) {
+    await replyEphemeral(interaction, metaMeepoVoice.errors.notInGuild());
+    return true;
+  }
+
+  const script = await loadAwakenScript("meepo_awaken");
+  const state = loadState(guildId, script.id, { db: ctx.db });
+  if (!state || !currentPendingMatches(state, target)) {
+    await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo wake again.");
+    return true;
+  }
+
+  if (!canAnswerAwakeningPrompt(guildId, interaction)) {
+    await replyEphemeral(interaction, "Only the Dungeon Master can answer this awakening prompt.");
+    return true;
+  }
+
+  const scene = script.scenes[target.sceneId];
+  const prompt = scene?.prompt;
+  if (!scene || !prompt || prompt.key !== target.key) {
+    await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo wake again.");
+    return true;
+  }
+
+  if (target.source === "modal_open") {
+    if (prompt.type !== "modal_text") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo wake again.");
+      return true;
+    }
+    if (typeof interaction.showModal !== "function") {
+      await replyEphemeral(interaction, "This client cannot open the text prompt. Use /meepo wake response:<text>.");
+      return true;
+    }
+    await interaction.showModal(buildModalTextSubmitModal({
+      prompt,
+      sceneId: target.sceneId,
+      key: target.key,
+      nonce: target.nonce,
+    }));
+    return true;
+  }
+
+  if (!interaction.deferred && !interaction.replied && typeof interaction.deferReply === "function") {
+    await interaction.deferReply({ ephemeral: true });
+  }
+
+  if (target.source === "choice") {
+    if (prompt.type !== "choice") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo wake again.");
+      return true;
+    }
+    const selectedValue = resolveChoicePromptValue(prompt, target.optionIndex ?? -1);
+    if (!selectedValue) {
+      await replyEphemeral(interaction, "Invalid awakening choice. Run /meepo wake again.");
+      return true;
+    }
+    saveProgress(guildId, script.id, {
+      [prompt.key]: selectedValue,
+      ...clearPendingPromptPatch(),
+    }, { db: ctx.db });
+    await resumeAwakeningAfterPromptSubmit({ interaction, ctx, script, guildId });
+    return true;
+  }
+
+  if (target.source === "role_select") {
+    if (prompt.type !== "role_select") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo wake again.");
+      return true;
+    }
+    const selectedRoleId = Array.isArray(interaction.values) && interaction.values.length === 1
+      ? String(interaction.values[0] ?? "").trim()
+      : "";
+    if (!selectedRoleId) {
+      await replyEphemeral(interaction, "Invalid awakening choice. Run /meepo wake again.");
+      return true;
+    }
+    saveProgress(guildId, script.id, {
+      [prompt.key]: selectedRoleId,
+      ...clearPendingPromptPatch(),
+    }, { db: ctx.db });
+    await resumeAwakeningAfterPromptSubmit({ interaction, ctx, script, guildId });
+    return true;
+  }
+
+  if (target.source === "modal_submit") {
+    if (prompt.type !== "modal_text") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo wake again.");
+      return true;
+    }
+    const text = String(interaction.fields?.getTextInputValue?.(AWAKEN_MODAL_INPUT_ID) ?? "");
+    let normalized = "";
+    try {
+      normalized = resolveModalTextFallback(text);
+    } catch {
+      await replyEphemeral(interaction, "Text prompt cannot be empty.");
+      return true;
+    }
+    saveProgress(guildId, script.id, {
+      [prompt.key]: normalized,
+      ...clearPendingPromptPatch(),
+    }, { db: ctx.db });
+    await resumeAwakeningAfterPromptSubmit({ interaction, ctx, script, guildId });
+    return true;
+  }
+
+  if (target.source === "channel_select") {
+    if (prompt.type !== "channel_select") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo wake again.");
+      return true;
+    }
+    const selectedChannelId = Array.isArray(interaction.values) && interaction.values.length === 1
+      ? String(interaction.values[0] ?? "").trim()
+      : "";
+    if (!selectedChannelId) {
+      await replyEphemeral(interaction, "Invalid awakening choice. Run /meepo wake again.");
+      return true;
+    }
+
+    const selectedChannel = await interaction.guild?.channels?.fetch?.(selectedChannelId).catch(() => null);
+    const filter = (prompt as Record<string, unknown>).filter === "voice" ? "voice" : "text";
+    const isValidForFilter = filter === "voice"
+      ? Boolean(selectedChannel?.isVoiceBased?.())
+      : Boolean(selectedChannel?.isTextBased?.()) && !selectedChannel?.isVoiceBased?.();
+    if (!isValidForFilter) {
+      await replyEphemeral(interaction, "Invalid awakening choice. Run /meepo wake again.");
+      return true;
+    }
+
+    const oldChannelIdRaw = state.progress_json[prompt.key];
+    const oldChannelId = typeof oldChannelIdRaw === "string" ? oldChannelIdRaw : interaction.channelId;
+    saveProgress(guildId, script.id, {
+      [prompt.key]: selectedChannelId,
+      ...clearPendingPromptPatch(),
+    }, { db: ctx.db });
+
+    await runChannelDriftBestEffort({
+      interaction,
+      scene,
+      oldChannelId: String(oldChannelId ?? interaction.channelId ?? ""),
+      newChannelId: selectedChannelId,
+    });
+
+    await resumeAwakeningAfterPromptSubmit({
+      interaction,
+      ctx,
+      script,
+      guildId,
+      runtimeChannelId: selectedChannelId,
+    });
+    return true;
+  }
+
+  if (target.source === "registry_add") {
+    if (prompt.type !== "registry_builder" || typeof interaction.showModal !== "function") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo wake again.");
+      return true;
+    }
+
+    const modal = buildModalTextSubmitModal({
+      prompt: { ...prompt, label: "Character name" },
+      sceneId: target.sceneId,
+      key: target.key,
+      nonce: target.nonce,
+    });
+    modal.setCustomId(`awaken:rb:name:${encodeURIComponent(target.sceneId)}:${encodeURIComponent(target.key)}:${encodeURIComponent(target.nonce)}`);
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  if (target.source === "registry_name_modal") {
+    if (prompt.type !== "registry_builder") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo wake again.");
+      return true;
+    }
+    const text = String(interaction.fields?.getTextInputValue?.(AWAKEN_MODAL_INPUT_ID) ?? interaction.fields?.getTextInputValue?.(AWAKEN_REGISTRY_NAME_INPUT_ID) ?? "");
+    const characterName = text.trim();
+    if (!characterName) {
+      await replyEphemeral(interaction, "Character name cannot be empty.");
+      return true;
+    }
+
+    saveProgress(guildId, script.id, {
+      _rb_pending_character_name: characterName,
+    }, { db: ctx.db });
+
+    const refreshed = loadState(guildId, script.id, { db: ctx.db });
+    const refreshedPending = getPendingPromptFromState(refreshed);
+    if (refreshed && refreshedPending) {
+      await renderPendingAwakeningPrompt({
+        interaction,
+        script,
+        state: refreshed,
+        pending: refreshedPending,
+      });
+    }
+    return true;
+  }
+
+  if (target.source === "registry_user") {
+    if (prompt.type !== "registry_builder") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo wake again.");
+      return true;
+    }
+    const selectedUserId = Array.isArray(interaction.values) && interaction.values.length === 1
+      ? String(interaction.values[0] ?? "").trim()
+      : "";
+    const characterNameRaw = state.progress_json._rb_pending_character_name;
+    const characterName = typeof characterNameRaw === "string" ? characterNameRaw.trim() : "";
+    if (!selectedUserId || !characterName) {
+      await replyEphemeral(interaction, "Registry entry is incomplete. Add player again.");
+      return true;
+    }
+    const existing = Array.isArray(state.progress_json[prompt.key]) ? state.progress_json[prompt.key] as any[] : [];
+    saveProgress(guildId, script.id, {
+      [prompt.key]: [...existing, { user_id: selectedUserId, character_name: characterName }],
+      _rb_pending_character_name: null,
+    }, { db: ctx.db });
+
+    const refreshed = loadState(guildId, script.id, { db: ctx.db });
+    const refreshedPending = getPendingPromptFromState(refreshed);
+    if (refreshed && refreshedPending) {
+      await renderPendingAwakeningPrompt({
+        interaction,
+        script,
+        state: refreshed,
+        pending: refreshedPending,
+      });
+    }
+    return true;
+  }
+
+  if (target.source === "registry_done") {
+    if (prompt.type !== "registry_builder") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo wake again.");
+      return true;
+    }
+    saveProgress(guildId, script.id, {
+      ...clearPendingPromptPatch(),
+      _rb_pending_character_name: null,
+    }, { db: ctx.db });
+    await resumeAwakeningAfterPromptSubmit({ interaction, ctx, script, guildId });
+    return true;
+  }
+
+  return false;
 }
 
 async function runDoctorChecks(interaction: any, ctx: CommandCtx): Promise<DoctorCheck[]> {
@@ -349,9 +871,43 @@ async function handleWake(interaction: any, ctx: CommandCtx): Promise<void> {
   const guildId = interaction.guildId as string;
   if (ctx?.db && typeof ctx.db.exec === "function") {
     const script = await loadAwakenScript("meepo_awaken");
+    const responseTextRaw = interaction.options.getString("response")?.trim() ?? "";
+    const hasResponseText = responseTextRaw.length > 0;
     const state = loadState(guildId, script.id, { db: ctx.db });
 
-    if (state?.completed) {
+    if (hasResponseText) {
+      const pending = getPendingPromptFromState(state);
+      if (!state || !pending || pending.kind !== "modal_text") {
+        await interaction.reply({
+          content: "No pending text prompt.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      if (!canAnswerAwakeningPrompt(guildId, interaction)) {
+        await interaction.reply({
+          content: "Only the Dungeon Master can answer this awakening prompt.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const normalized = resolveModalTextFallback(responseTextRaw);
+      saveProgress(guildId, script.id, {
+        [pending.key]: normalized,
+        ...clearPendingPromptPatch(),
+      }, { db: ctx.db });
+    }
+
+    repairDmDisplayNameMemory({
+      db: ctx.db,
+      guildId,
+      scriptId: script.id,
+    });
+
+    const refreshedState = loadState(guildId, script.id, { db: ctx.db });
+    if (refreshedState?.completed) {
       await interaction.reply({
         content: "Meepo is already awakened here.",
         ephemeral: true,
@@ -359,7 +915,7 @@ async function handleWake(interaction: any, ctx: CommandCtx): Promise<void> {
       return;
     }
 
-    if (!state) {
+    if (!refreshedState) {
       initState(guildId, script.id, script.version, script.start_scene, { db: ctx.db });
     }
 
@@ -379,29 +935,22 @@ async function handleWake(interaction: any, ctx: CommandCtx): Promise<void> {
     };
 
     const statusText = (runResult: AwakenRunResult): string => {
-      if (runResult.status === "completed") {
-        return "Awakening complete.";
-      }
-      if (runResult.status === "advanced") {
-        return `Awakening advanced: ${runResult.fromScene} -> ${runResult.toScene}.`;
-      }
-      if (runResult.status === "blocked") {
-        if (runResult.reason === "prompt" || runResult.reason === "action" || runResult.reason === "commit") {
-          return `Awakening paused: ${runResult.reason} steps not implemented yet (Sprint 4/5).`;
-        }
-        if (runResult.reason === "budget") {
-          return "Awakening paused: beat budget reached for this run. Use /meepo wake again to continue.";
-        }
-        if (runResult.reason === "budget_delay") {
-          return "Awakening paused: cinematic delay budget reached for this run. Use /meepo wake again to continue.";
-        }
-        return "Awakening paused: next-step shape not supported yet.";
-      }
-      if (runResult.reason === "already_completed") {
-        return "Meepo is already awakened here.";
-      }
-      return "Awakening state not found.";
+      return formatAwakenStatus(runResult);
     };
+
+    const stateAfterRun = loadState(guildId, script.id, { db: ctx.db });
+    const pendingPrompt = getPendingPromptFromState(stateAfterRun);
+    if (stateAfterRun && pendingPrompt) {
+      const rendered = await renderPendingAwakeningPrompt({
+        interaction,
+        script,
+        state: stateAfterRun,
+        pending: pendingPrompt,
+      });
+      if (rendered) {
+        return;
+      }
+    }
 
     await editReply(statusText(result));
     return;
@@ -735,12 +1284,31 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
     }
 
     const recap = getSessionArtifact(guildId, session.session_id, "recap_final") as SessionArtifactRow | null;
-    const transcriptArtifact = getSessionArtifact(
+    let transcriptArtifact = getSessionArtifact(
       guildId,
       session.session_id,
       "transcript_export"
     ) as SessionArtifactRow | null;
     const effectiveCampaignSlug = ctx.campaignSlug;
+
+    try {
+      ensureBronzeTranscriptExportCached({
+        guildId,
+        campaignSlug: effectiveCampaignSlug,
+        sessionId: session.session_id,
+        sessionLabel: session.label,
+        db: ctx.db,
+        timeBudgetMs: TRANSCRIPT_EXPORT_TIME_BUDGET_MS,
+      });
+      transcriptArtifact = getSessionArtifact(
+        guildId,
+        session.session_id,
+        "transcript_export"
+      ) as SessionArtifactRow | null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[sessions.view] transcript export unavailable session=${session.session_id}: ${message}`);
+    }
 
     const baseStatus = getBaseStatus(effectiveCampaignSlug, session.session_id, session.label);
     const finalFileForDbStyle =
@@ -751,7 +1319,7 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
     const hasAnyFinalFiles = allFinalFiles.some((status) => status.exists);
 
     const recapExists = Boolean(recap);
-    const transcriptStatus = transcriptArtifact ? "available" : "not cached yet";
+    let transcriptStatus = transcriptArtifact ? "available" : "unavailable";
 
     let recapMeta: Record<string, unknown> = {};
     try {
@@ -815,13 +1383,30 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
       }
     }
 
-    if (transcriptArtifact?.content_text) {
+    if (transcriptArtifact?.file_path && fs.existsSync(transcriptArtifact.file_path)) {
       const fileStem = buildSessionArtifactStem(session.session_id, session.label);
-      files.push(
-        new AttachmentBuilder(Buffer.from(transcriptArtifact.content_text, "utf8"), {
-          name: `${fileStem}-transcript.txt`,
-        })
-      );
+      const bytes = Number(transcriptArtifact.size_bytes ?? fs.statSync(transcriptArtifact.file_path).size);
+      if (bytes <= MAX_INLINE_ATTACHMENT_BYTES) {
+        files.push(
+          new AttachmentBuilder(transcriptArtifact.file_path, {
+            name: `${fileStem}-transcript-bronze.log`,
+          })
+        );
+      } else {
+        transcriptStatus = "cached (too large to attach inline)";
+      }
+    } else if (transcriptArtifact?.content_text) {
+      const fileStem = buildSessionArtifactStem(session.session_id, session.label);
+      const bytes = Buffer.byteLength(transcriptArtifact.content_text, "utf8");
+      if (bytes <= MAX_INLINE_ATTACHMENT_BYTES) {
+        files.push(
+          new AttachmentBuilder(Buffer.from(transcriptArtifact.content_text, "utf8"), {
+            name: `${fileStem}-transcript.txt`,
+          })
+        );
+      } else {
+        transcriptStatus = "cached (too large to attach inline)";
+      }
     }
 
     await interaction.reply({
@@ -1108,6 +1693,12 @@ export const meepo = {
             .setDescription("Optional session label to start canon mode.")
             .setRequired(false)
         )
+        .addStringOption((opt) =>
+          opt
+            .setName("response")
+            .setDescription("Answer the current awakening prompt (DM-only).")
+            .setRequired(false)
+        )
     )
     .addSubcommand((sub) => sub.setName("sleep").setDescription("Put Meepo to sleep and end active session."))
     .addSubcommandGroup((group) =>
@@ -1254,6 +1845,10 @@ export const meepo = {
             )
         )
     ),
+
+  async handleComponentInteraction(interaction: any, ctx: CommandCtx | null): Promise<boolean> {
+    return handleAwakeningChoicePromptInteraction(interaction, ctx);
+  },
 
   async autocomplete(interaction: any) {
     const focused = interaction.options.getFocused(true);

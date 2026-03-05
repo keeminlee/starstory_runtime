@@ -2,7 +2,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { AwakenEngine, MAX_DELAY_MS } from "../AwakenEngine.js";
 import type { AwakenScript } from "../../scripts/awakening/_schema.js";
 
 const tempDirs: string[] = [];
@@ -48,6 +47,7 @@ describe("AwakenEngine", () => {
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
 
+    const { AwakenEngine } = await import("../AwakenEngine.js");
     const { getDbForCampaign } = await import("../../db.js");
     const { initState, loadState } = await import("../../ledger/awakeningStateRepo.js");
 
@@ -92,6 +92,7 @@ describe("AwakenEngine", () => {
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
 
+    const { AwakenEngine } = await import("../AwakenEngine.js");
     const { getDbForCampaign } = await import("../../db.js");
     const { initState, loadState, setBeatIndex } = await import("../../ledger/awakeningStateRepo.js");
 
@@ -133,6 +134,7 @@ describe("AwakenEngine", () => {
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
 
+    const { AwakenEngine } = await import("../AwakenEngine.js");
     const { getDbForCampaign } = await import("../../db.js");
     const { initState, loadState } = await import("../../ledger/awakeningStateRepo.js");
 
@@ -143,7 +145,7 @@ describe("AwakenEngine", () => {
       scenes: {
         cold_open: {
           say: [{ text: "beat-1" }],
-          prompt: { type: "choice" },
+          prompt: { type: "text_input", key: "dm_display_name", kind: "modal_text" },
         },
       },
     };
@@ -164,6 +166,7 @@ describe("AwakenEngine", () => {
     const state = loadState("guild-awaken-1", script.id, { db });
     expect(state?.current_scene).toBe("cold_open");
     expect(state?.beat_index).toBe(1);
+    expect(state?.progress_json.await_input).toEqual({ key: "dm_display_name", kind: "modal_text" });
     expect(state?.completed).toBe(false);
     db.close();
   });
@@ -173,6 +176,7 @@ describe("AwakenEngine", () => {
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
 
+    const { AwakenEngine } = await import("../AwakenEngine.js");
     const { getDbForCampaign } = await import("../../db.js");
     const { initState } = await import("../../ledger/awakeningStateRepo.js");
 
@@ -206,6 +210,7 @@ describe("AwakenEngine", () => {
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
 
+    const { AwakenEngine } = await import("../AwakenEngine.js");
     const { getDbForCampaign } = await import("../../db.js");
     const { initState, loadState } = await import("../../ledger/awakeningStateRepo.js");
 
@@ -243,6 +248,7 @@ describe("AwakenEngine", () => {
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
 
+    const { AwakenEngine } = await import("../AwakenEngine.js");
     const { getDbForCampaign } = await import("../../db.js");
     const { initState } = await import("../../ledger/awakeningStateRepo.js");
 
@@ -283,6 +289,7 @@ describe("AwakenEngine", () => {
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
 
+    const { AwakenEngine, MAX_DELAY_MS } = await import("../AwakenEngine.js");
     const { getDbForCampaign } = await import("../../db.js");
     const { initState } = await import("../../ledger/awakeningStateRepo.js");
 
@@ -320,6 +327,7 @@ describe("AwakenEngine", () => {
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
 
+    const { AwakenEngine } = await import("../AwakenEngine.js");
     const { getDbForCampaign } = await import("../../db.js");
     const { initState, loadState } = await import("../../ledger/awakeningStateRepo.js");
 
