@@ -1071,6 +1071,7 @@ export async function executeLabAwakenRespond(interaction: any, ctx: CommandCtx,
 
 async function handleAwaken(interaction: any, ctx: CommandCtx): Promise<void> {
   const guildId = interaction.guildId as string;
+  const alreadyAwakeMessage = "Meepo is already awake in this world, meep. Use /lab awaken reset to run onboarding again.";
   if (ctx?.db && typeof ctx.db.exec === "function") {
     const script = await loadAwakenScript("meepo_awaken");
     const responseTextRaw = interaction.options.getString("response")?.trim() ?? "";
@@ -1094,6 +1095,15 @@ async function handleAwaken(interaction: any, ctx: CommandCtx): Promise<void> {
       scriptId: script.id,
     });
 
+    const guildConfig = getGuildConfig(guildId);
+    if (guildConfig?.awakened === 1) {
+      await interaction.reply({
+        content: alreadyAwakeMessage,
+        ephemeral: true,
+      });
+      return;
+    }
+
     let refreshedState = loadState(guildId, script.id, { db: ctx.db });
     const hasValidScene = refreshedState ? Boolean(script.scenes[refreshedState.current_scene]) : true;
     const needsStateReset = Boolean(
@@ -1112,7 +1122,7 @@ async function handleAwaken(interaction: any, ctx: CommandCtx): Promise<void> {
 
     if (refreshedState?.completed) {
       await interaction.reply({
-        content: "Meepo is already awake in this world, meep.",
+        content: alreadyAwakeMessage,
         ephemeral: true,
       });
       return;
