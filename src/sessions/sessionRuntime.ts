@@ -120,9 +120,10 @@ export function getActiveSessionId(guildId: string): string | null {
 }
 
 /**
- * Set the active session ID for a guild. Preserves active_persona_id.
+ * Internal primitive for runtime active session updates.
+ * Keep mutations scoped to session lifecycle entrypoints only.
  */
-export function setActiveSessionId(guildId: string, sessionId: string | null): void {
+function setActiveSessionIdInternal(guildId: string, sessionId: string | null): void {
   const db = getRuntimeDbForGuild(guildId);
   const now = Date.now();
   const state = ensureRuntimeState(guildId);
@@ -143,10 +144,17 @@ export function setActiveSessionId(guildId: string, sessionId: string | null): v
 }
 
 /**
- * Clear the active session for a guild
+ * Session lifecycle boundary: mark runtime active session on start.
  */
-export function clearActiveSessionId(guildId: string): void {
-  setActiveSessionId(guildId, null);
+export function markRuntimeSessionStarted(guildId: string, sessionId: string): void {
+  setActiveSessionIdInternal(guildId, sessionId);
+}
+
+/**
+ * Session lifecycle boundary: clear runtime active session on close.
+ */
+export function markRuntimeSessionEnded(guildId: string): void {
+  setActiveSessionIdInternal(guildId, null);
 }
 
 export function getConfiguredDiegeticPersonaId(guildId: string): string | null {

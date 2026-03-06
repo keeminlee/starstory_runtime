@@ -160,6 +160,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   guild_id TEXT NOT NULL,
   kind TEXT NOT NULL DEFAULT 'canon',         -- 'canon' | 'noncanon' (legacy rows may contain 'chat')
   mode_at_start TEXT NOT NULL DEFAULT 'ambient', -- 'canon' | 'ambient' | 'lab' | 'dormant'
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'completed', 'interrupted')),
   label TEXT,                              -- User-provided label (e.g., "C2E03") for reference
   created_at_ms INTEGER NOT NULL,          -- When this session record was created (immutable timestamp)
   started_at_ms INTEGER NOT NULL,          -- When the session's content began (may differ for ingested sessions)
@@ -172,6 +173,11 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS idx_sessions_guild_active
 ON sessions(guild_id, ended_at_ms);
+
+-- Hard invariant: at most one active session per guild.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_session_per_guild
+ON sessions(guild_id)
+WHERE status = 'active';
 
 -- Session artifacts: recap/transcript exports and future session-scoped files
 CREATE TABLE IF NOT EXISTS session_artifacts (

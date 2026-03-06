@@ -1,6 +1,5 @@
 import { getDbForCampaign } from "../db.js";
 import { getDefaultCampaignSlug } from "../campaign/defaultCampaign.js";
-import { resolveCampaignSlug } from "../campaign/guildConfig.js";
 
 /**
  * EventRow: Minimal event search result for searchEventsByTitle
@@ -33,10 +32,23 @@ export function searchEventsByTitle(term: string, campaignSlug?: string): EventR
 
 export function searchEventsByTitleScoped(opts: {
   term: string;
-  guildId: string;
+  scope: {
+    guildId: string;
+    campaignSlug: string;
+  };
+  limit?: number;
 }): EventRow[] {
-  const campaignSlug = resolveCampaignSlug({ guildId: opts.guildId });
+  const guildId = opts.scope?.guildId?.trim();
+  const campaignSlug = opts.scope?.campaignSlug?.trim();
+  if (!guildId || !campaignSlug) {
+    throw new Error("searchEventsByTitleScoped requires explicit scope { guildId, campaignSlug }");
+  }
+
   const db = getDbForCampaign(campaignSlug);
+  const safeLimit =
+    typeof opts.limit === "number" && Number.isFinite(opts.limit)
+      ? Math.max(1, Math.trunc(opts.limit))
+      : null;
   const rows = db.prepare(
     `SELECT e.id as event_id, e.session_id, e.description as title, e.start_index as start_line, e.end_index as end_line
      FROM events e
@@ -44,6 +56,6 @@ export function searchEventsByTitleScoped(opts: {
      WHERE e.description LIKE ? COLLATE NOCASE
        AND s.guild_id = ?
      ORDER BY e.timestamp_ms ASC`
-  ).all(`%${opts.term}%`, opts.guildId) as Array<EventRow>;
-  return rows;
+  ).all(`%${opts.term}%`, guildId) as Array<EventRow>;
+  return safeLimit ? rows.slice(0, safeLimit) : rows;
 }

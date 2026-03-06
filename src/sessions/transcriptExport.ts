@@ -314,7 +314,11 @@ export function ensureBronzeTranscriptExportCached(args: {
     forWrite: true,
     ensureExists: true,
   });
-  const stem = buildSessionArtifactStem(args.sessionId, args.sessionLabel);
+  const stem = buildSessionArtifactStem({
+    guildId: args.guildId,
+    campaignSlug: args.campaignSlug,
+    sessionId: args.sessionId,
+  });
   const shortSessionId = args.sessionId.slice(0, 8);
   const filePath = path.join(outputDir, `${stem}-${shortSessionId}-transcript-bronze.log`);
   writeFileAtomic(filePath, logText);

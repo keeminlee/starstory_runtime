@@ -11,6 +11,26 @@ const baseSession = {
 
 let sessionById: typeof baseSession | null = { ...baseSession };
 let recapArtifact: any | null = null;
+let transcriptArtifact: any | null = {
+  id: "transcript-1",
+  session_id: "session-1",
+  artifact_type: "transcript_export",
+  created_at_ms: Date.now(),
+  engine: "bronze_transcript_export_v1",
+  source_hash: "tx-hash-1",
+  strategy: "default",
+  strategy_version: "v1",
+  meta_json: "{}",
+  content_text: "DM: Welcome",
+  file_path: null,
+  size_bytes: 12,
+};
+const ensureBronzeTranscriptExportCachedMock = vi.fn(() => ({
+  path: "transcript.log",
+  bytes: 12,
+  hash: "tx-hash-1",
+  cacheHit: true,
+}));
 
 vi.mock("../campaign/guildConfig.js", () => ({
   getGuildCanonPersonaId: vi.fn(() => null),
@@ -102,7 +122,11 @@ vi.mock("../sessions/sessions.js", () => ({
   getSessionById: vi.fn(() => sessionById),
   listSessions: vi.fn(() => (sessionById ? [sessionById] : [])),
   startSession: vi.fn(),
-  getSessionArtifact: vi.fn(() => recapArtifact),
+  getSessionArtifact: vi.fn((_guildId: string, _sessionId: string, artifactType: string) => {
+    if (artifactType === "recap_final") return recapArtifact;
+    if (artifactType === "transcript_export") return transcriptArtifact;
+    return null;
+  }),
   getSessionArtifactMap: vi.fn(() => {
     const map = new Map<string, any>();
     if (sessionById && recapArtifact) map.set(sessionById.session_id, recapArtifact);
@@ -110,6 +134,10 @@ vi.mock("../sessions/sessions.js", () => ({
   }),
   getSessionArtifactsForSession: vi.fn(() => (recapArtifact ? [recapArtifact] : [])),
   upsertSessionArtifact: vi.fn(),
+}));
+
+vi.mock("../sessions/transcriptExport.js", () => ({
+  ensureBronzeTranscriptExportCached: ensureBronzeTranscriptExportCachedMock,
 }));
 
 vi.mock("../sessions/sessionRuntime.js", () => ({
@@ -162,6 +190,27 @@ vi.mock("../ledger/meepoContextWorker.js", () => ({
 afterEach(() => {
   sessionById = { ...baseSession };
   recapArtifact = null;
+  transcriptArtifact = {
+    id: "transcript-1",
+    session_id: "session-1",
+    artifact_type: "transcript_export",
+    created_at_ms: Date.now(),
+    engine: "bronze_transcript_export_v1",
+    source_hash: "tx-hash-1",
+    strategy: "default",
+    strategy_version: "v1",
+    meta_json: "{}",
+    content_text: "DM: Welcome",
+    file_path: null,
+    size_bytes: 12,
+  };
+  ensureBronzeTranscriptExportCachedMock.mockReset();
+  ensureBronzeTranscriptExportCachedMock.mockImplementation(() => ({
+    path: "transcript.log",
+    bytes: 12,
+    hash: "tx-hash-1",
+    cacheHit: true,
+  }));
   vi.clearAllMocks();
 });
 
@@ -257,6 +306,371 @@ describe("/meepo sessions recap contract", () => {
     expect(Array.isArray(payload?.files)).toBe(true);
   });
 
+  test("sessions recap short-circuits duplicate in-flight requests", async () => {
+    sessionById = { ...baseSession, session_id: "session-inflight-1", label: "Arc Inflight" };
+    const { generateSessionRecap } = await import("../sessions/recapEngine.js");
+    let markStarted: (() => void) | null = null;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    vi.mocked(generateSessionRecap).mockImplementationOnce(async () => {
+      markStarted?.();
+      await new Promise((resolve) => setTimeout(resolve, 75));
+      return {
+        text: "# Recap\n\nGenerated recap",
+        createdAtMs: Date.now(),
+        strategy: "balanced",
+        engine: "megameecap",
+        strategyVersion: "megameecap-v1",
+        baseVersion: "megameecap-base-v1",
+        finalVersion: "megameecap-final-v1",
+        sourceTranscriptHash: "hash-1",
+        cacheHit: false,
+        artifactPaths: {
+          recapPath: "recap.md",
+          metaPath: "recap.meta.json",
+        },
+        sourceRange: { startLine: 0, endLine: 10, lineCount: 11 },
+      };
+    });
+
+    const { meepo } = await import("../commands/meepo.js");
+
+    const firstInteraction: any = {
+      guildId: "guild-inflight-1",
+      channelId: "text-1",
+      guild: { voiceAdapterCreator: {} },
+      user: { id: "user-1", username: "Tester" },
+      member: {},
+      options: {
+        getSubcommandGroup: vi.fn(() => "sessions"),
+        getSubcommand: vi.fn(() => "recap"),
+        getString: vi.fn((name: string) => (name === "style" ? "balanced" : "session-inflight-1")),
+        getBoolean: vi.fn(() => false),
+      },
+      reply: vi.fn(async () => undefined),
+      deferReply: vi.fn(async () => undefined),
+      editReply: vi.fn(async () => undefined),
+    };
+
+    const secondReply = vi.fn(async (_payload: any) => undefined);
+    const secondInteraction: any = {
+      guildId: "guild-inflight-1",
+      channelId: "text-1",
+      guild: { voiceAdapterCreator: {} },
+      user: { id: "user-2", username: "Tester2" },
+      member: {},
+      options: {
+        getSubcommandGroup: vi.fn(() => "sessions"),
+        getSubcommand: vi.fn(() => "recap"),
+        getString: vi.fn((name: string) => (name === "style" ? "balanced" : "session-inflight-1")),
+        getBoolean: vi.fn(() => true),
+      },
+      reply: secondReply,
+      deferReply: vi.fn(async () => undefined),
+      editReply: vi.fn(async () => undefined),
+    };
+
+    const ctx = {
+      guildId: "guild-inflight-1",
+      campaignSlug: "default",
+      dbPath: "test.sqlite",
+      db: { prepare: vi.fn(() => ({ run: vi.fn(), get: vi.fn(() => ({ ts: null })) })) },
+    };
+
+    const firstCall = meepo.execute(firstInteraction, ctx);
+    await started;
+
+    await meepo.execute(secondInteraction, ctx);
+
+    expect(generateSessionRecap).toHaveBeenCalledTimes(1);
+    expect(secondReply).toHaveBeenCalledTimes(1);
+    const secondPayload = secondReply.mock.calls.at(0)?.[0];
+    expect(secondPayload?.content).toContain("already being generated");
+
+    await firstCall;
+  });
+
+  test("sessions recap cooldown blocks immediate repeat request", async () => {
+    sessionById = { ...baseSession, session_id: "session-cooldown-1", label: "Arc Cooldown" };
+
+    const { generateSessionRecap } = await import("../sessions/recapEngine.js");
+    const { meepo } = await import("../commands/meepo.js");
+
+    const ctx = {
+      guildId: "guild-cooldown-1",
+      campaignSlug: "default",
+      dbPath: "test.sqlite",
+      db: { prepare: vi.fn(() => ({ run: vi.fn(), get: vi.fn(() => ({ ts: null })) })) },
+    };
+
+    const firstInteraction: any = {
+      guildId: "guild-cooldown-1",
+      channelId: "text-1",
+      guild: { voiceAdapterCreator: {} },
+      user: { id: "user-1", username: "Tester" },
+      member: {},
+      options: {
+        getSubcommandGroup: vi.fn(() => "sessions"),
+        getSubcommand: vi.fn(() => "recap"),
+        getString: vi.fn((name: string) => (name === "style" ? "balanced" : "session-cooldown-1")),
+        getBoolean: vi.fn(() => false),
+      },
+      reply: vi.fn(async () => undefined),
+      deferReply: vi.fn(async () => undefined),
+      editReply: vi.fn(async () => undefined),
+    };
+
+    const secondReply = vi.fn(async (_payload: any) => undefined);
+    const secondInteraction: any = {
+      guildId: "guild-cooldown-1",
+      channelId: "text-1",
+      guild: { voiceAdapterCreator: {} },
+      user: { id: "user-2", username: "Tester2" },
+      member: {},
+      options: {
+        getSubcommandGroup: vi.fn(() => "sessions"),
+        getSubcommand: vi.fn(() => "recap"),
+        getString: vi.fn((name: string) => (name === "style" ? "balanced" : "session-cooldown-1")),
+        getBoolean: vi.fn(() => false),
+      },
+      reply: secondReply,
+      deferReply: vi.fn(async () => undefined),
+      editReply: vi.fn(async () => undefined),
+    };
+
+    await meepo.execute(firstInteraction, ctx);
+    await meepo.execute(secondInteraction, ctx);
+
+    expect(generateSessionRecap).toHaveBeenCalledTimes(1);
+    expect(secondReply).toHaveBeenCalledTimes(1);
+    const payload = secondReply.mock.calls.at(0)?.[0];
+    expect(payload?.content).toContain("requested very recently");
+    expect(payload?.content).toContain("seconds");
+  });
+
+  test("sessions recap force does not bypass hard concurrency cap", async () => {
+    sessionById = { ...baseSession, session_id: "session-cap-1", label: "Arc Cap" };
+
+    const { generateSessionRecap } = await import("../sessions/recapEngine.js");
+    let releaseRecap: ((value: any) => void) | null = null;
+    const blockedRecap = new Promise<any>((resolve) => {
+      releaseRecap = resolve;
+    });
+    vi.mocked(generateSessionRecap).mockImplementationOnce(async () => blockedRecap);
+
+    const { meepo } = await import("../commands/meepo.js");
+
+    const ctx = {
+      guildId: "guild-cap-1",
+      campaignSlug: "default",
+      dbPath: "test.sqlite",
+      db: { prepare: vi.fn(() => ({ run: vi.fn(), get: vi.fn(() => ({ ts: null })) })) },
+    };
+
+    const firstCall = meepo.execute(
+      {
+        guildId: "guild-cap-1",
+        channelId: "text-1",
+        guild: { voiceAdapterCreator: {} },
+        user: { id: "user-1", username: "Tester" },
+        member: {},
+        options: {
+          getSubcommandGroup: vi.fn(() => "sessions"),
+          getSubcommand: vi.fn(() => "recap"),
+          getString: vi.fn((name: string) => (name === "style" ? "balanced" : "session-cap-1")),
+          getBoolean: vi.fn(() => false),
+        },
+        reply: vi.fn(async () => undefined),
+        deferReply: vi.fn(async () => undefined),
+        editReply: vi.fn(async () => undefined),
+      } as any,
+      ctx
+    );
+    await Promise.resolve();
+
+    const secondReply = vi.fn(async (_payload: any) => undefined);
+    await meepo.execute(
+      {
+        guildId: "guild-cap-1",
+        channelId: "text-1",
+        guild: { voiceAdapterCreator: {} },
+        user: { id: "user-2", username: "Tester2" },
+        member: {},
+        options: {
+          getSubcommandGroup: vi.fn(() => "sessions"),
+          getSubcommand: vi.fn(() => "recap"),
+          getString: vi.fn((name: string) => (name === "style" ? "concise" : "session-cap-1")),
+          getBoolean: vi.fn(() => true),
+        },
+        reply: secondReply,
+        deferReply: vi.fn(async () => undefined),
+        editReply: vi.fn(async () => undefined),
+      } as any,
+      ctx
+    );
+
+    expect(generateSessionRecap).toHaveBeenCalledTimes(1);
+    const payload = secondReply.mock.calls.at(0)?.[0];
+    expect(payload?.content).toContain("at capacity");
+
+    releaseRecap?.({
+      text: "# Recap\n\nGenerated recap",
+      createdAtMs: Date.now(),
+      strategy: "balanced",
+      engine: "megameecap",
+      strategyVersion: "megameecap-v1",
+      sourceTranscriptHash: "hash-1",
+      cacheHit: false,
+      artifactPaths: {
+        recapPath: "recap.md",
+        metaPath: "recap.meta.json",
+      },
+      sourceRange: { startLine: 0, endLine: 10, lineCount: 11 },
+    });
+    await firstCall;
+  });
+
+  test("sessions recap force bypasses cooldown and logs bypass", async () => {
+    sessionById = { ...baseSession, session_id: "session-cooldown-force", label: "Arc Force" };
+
+    const { generateSessionRecap } = await import("../sessions/recapEngine.js");
+    const { logSystemEvent } = await import("../ledger/system.js");
+    const { meepo } = await import("../commands/meepo.js");
+
+    const ctx = {
+      guildId: "guild-cooldown-force",
+      campaignSlug: "default",
+      dbPath: "test.sqlite",
+      db: { prepare: vi.fn(() => ({ run: vi.fn(), get: vi.fn(() => ({ ts: null })) })) },
+    };
+
+    const firstInteraction: any = {
+      guildId: "guild-cooldown-force",
+      channelId: "text-1",
+      guild: { voiceAdapterCreator: {} },
+      user: { id: "user-1", username: "Tester" },
+      member: {},
+      options: {
+        getSubcommandGroup: vi.fn(() => "sessions"),
+        getSubcommand: vi.fn(() => "recap"),
+        getString: vi.fn((name: string) => (name === "style" ? "balanced" : "session-cooldown-force")),
+        getBoolean: vi.fn(() => false),
+      },
+      reply: vi.fn(async () => undefined),
+      deferReply: vi.fn(async () => undefined),
+      editReply: vi.fn(async () => undefined),
+    };
+
+    const secondReply = vi.fn(async (_payload: any) => undefined);
+    const secondInteraction: any = {
+      guildId: "guild-cooldown-force",
+      channelId: "text-1",
+      guild: { voiceAdapterCreator: {} },
+      user: { id: "user-2", username: "Tester2" },
+      member: {},
+      options: {
+        getSubcommandGroup: vi.fn(() => "sessions"),
+        getSubcommand: vi.fn(() => "recap"),
+        getString: vi.fn((name: string) => (name === "style" ? "balanced" : "session-cooldown-force")),
+        getBoolean: vi.fn(() => true),
+      },
+      reply: secondReply,
+      deferReply: vi.fn(async () => undefined),
+      editReply: vi.fn(async () => undefined),
+    };
+
+    await meepo.execute(firstInteraction, ctx);
+    await meepo.execute(secondInteraction, ctx);
+
+    expect(generateSessionRecap).toHaveBeenCalledTimes(2);
+    expect(secondReply).not.toHaveBeenCalled();
+
+    const bypassEvent = vi
+      .mocked(logSystemEvent)
+      .mock.calls.find((call) => call[0]?.eventType === "SESSION_RECAP_COOLDOWN_BYPASSED");
+    expect(bypassEvent).toBeTruthy();
+  });
+
+  test("sessions recap cooldown key is scoped by session and guild", async () => {
+    const { generateSessionRecap } = await import("../sessions/recapEngine.js");
+    const { meepo } = await import("../commands/meepo.js");
+
+    const baseCtx = {
+      campaignSlug: "default",
+      dbPath: "test.sqlite",
+      db: { prepare: vi.fn(() => ({ run: vi.fn(), get: vi.fn(() => ({ ts: null })) })) },
+    };
+
+    // First request seeds cooldown for guild-scope-1/session-scope-1/balanced
+    sessionById = { ...baseSession, session_id: "session-scope-1", label: "Arc Scope 1" };
+    await meepo.execute(
+      {
+        guildId: "guild-scope-1",
+        channelId: "text-1",
+        guild: { voiceAdapterCreator: {} },
+        user: { id: "user-1", username: "Tester" },
+        member: {},
+        options: {
+          getSubcommandGroup: vi.fn(() => "sessions"),
+          getSubcommand: vi.fn(() => "recap"),
+          getString: vi.fn((name: string) => (name === "style" ? "balanced" : "session-scope-1")),
+          getBoolean: vi.fn(() => false),
+        },
+        reply: vi.fn(async () => undefined),
+        deferReply: vi.fn(async () => undefined),
+        editReply: vi.fn(async () => undefined),
+      } as any,
+      { ...baseCtx, guildId: "guild-scope-1" }
+    );
+
+    // Different session same guild should not be blocked.
+    sessionById = { ...baseSession, session_id: "session-scope-2", label: "Arc Scope 2" };
+    await meepo.execute(
+      {
+        guildId: "guild-scope-1",
+        channelId: "text-1",
+        guild: { voiceAdapterCreator: {} },
+        user: { id: "user-2", username: "Tester2" },
+        member: {},
+        options: {
+          getSubcommandGroup: vi.fn(() => "sessions"),
+          getSubcommand: vi.fn(() => "recap"),
+          getString: vi.fn((name: string) => (name === "style" ? "balanced" : "session-scope-2")),
+          getBoolean: vi.fn(() => false),
+        },
+        reply: vi.fn(async () => undefined),
+        deferReply: vi.fn(async () => undefined),
+        editReply: vi.fn(async () => undefined),
+      } as any,
+      { ...baseCtx, guildId: "guild-scope-1" }
+    );
+
+    // Same session id but different guild should not be blocked.
+    sessionById = { ...baseSession, session_id: "session-scope-1", label: "Arc Scope 1" };
+    await meepo.execute(
+      {
+        guildId: "guild-scope-2",
+        channelId: "text-1",
+        guild: { voiceAdapterCreator: {} },
+        user: { id: "user-3", username: "Tester3" },
+        member: {},
+        options: {
+          getSubcommandGroup: vi.fn(() => "sessions"),
+          getSubcommand: vi.fn(() => "recap"),
+          getString: vi.fn((name: string) => (name === "style" ? "balanced" : "session-scope-1")),
+          getBoolean: vi.fn(() => false),
+        },
+        reply: vi.fn(async () => undefined),
+        deferReply: vi.fn(async () => undefined),
+        editReply: vi.fn(async () => undefined),
+      } as any,
+      { ...baseCtx, guildId: "guild-scope-2" }
+    );
+
+    expect(generateSessionRecap).toHaveBeenCalledTimes(3);
+  });
+
   test("sessions view shows most recent final style", async () => {
     recapArtifact = {
       id: "artifact-1",
@@ -305,5 +719,136 @@ describe("/meepo sessions recap contract", () => {
     expect(payload?.content).toContain("Recap");
     expect(payload?.content).toContain("Final:");
     expect(payload?.content).toContain("concise");
+  });
+
+  test("sessions view uses taxonomy when requested session does not exist", async () => {
+    sessionById = null;
+    const { meepo } = await import("../commands/meepo.js");
+    const reply = vi.fn(async (_payload: any) => undefined);
+
+    const interaction: any = {
+      guildId: "guild-1",
+      channelId: "text-1",
+      guild: { voiceAdapterCreator: {} },
+      user: { id: "user-1", username: "Tester" },
+      member: {},
+      options: {
+        getSubcommandGroup: vi.fn(() => "sessions"),
+        getSubcommand: vi.fn(() => "view"),
+        getString: vi.fn(() => "missing-session"),
+      },
+      reply,
+    };
+
+    await meepo.execute(interaction, {
+      guildId: "guild-1",
+      campaignSlug: "default",
+      dbPath: "test.sqlite",
+      db: { prepare: vi.fn(() => ({ run: vi.fn(), get: vi.fn(() => ({ ts: null })) })) },
+    });
+
+    const payload = reply.mock.calls.at(0)?.[0];
+    expect(payload?.content).toContain("(ERR_NO_ACTIVE_SESSION)");
+    expect(payload?.content).toContain("/meepo sessions list");
+  });
+
+  test("sessions view maps transcript export failure to transcript unavailable taxonomy", async () => {
+    ensureBronzeTranscriptExportCachedMock.mockImplementationOnce(() => {
+      throw new Error("No bronze transcript data found for session session-1");
+    });
+
+    const { meepo } = await import("../commands/meepo.js");
+    const reply = vi.fn(async (_payload: any) => undefined);
+
+    const interaction: any = {
+      guildId: "guild-1",
+      channelId: "text-1",
+      guild: { voiceAdapterCreator: {} },
+      user: { id: "user-1", username: "Tester" },
+      member: {},
+      options: {
+        getSubcommandGroup: vi.fn(() => "sessions"),
+        getSubcommand: vi.fn(() => "view"),
+        getString: vi.fn(() => "session-1"),
+      },
+      reply,
+    };
+
+    await meepo.execute(interaction, {
+      guildId: "guild-1",
+      campaignSlug: "default",
+      dbPath: "test.sqlite",
+      db: { prepare: vi.fn(() => ({ run: vi.fn(), get: vi.fn(() => ({ ts: null })) })) },
+    });
+
+    const payload = reply.mock.calls.at(0)?.[0];
+    expect(payload?.content).toContain("(ERR_TRANSCRIPT_UNAVAILABLE)");
+    expect(payload?.content).toContain("transcript export");
+  });
+
+  test("sessions view maps transcript time budget expiration to stale interaction taxonomy", async () => {
+    ensureBronzeTranscriptExportCachedMock.mockImplementationOnce(() => {
+      throw new Error("transcript_export_time_budget_exceeded:pre_build");
+    });
+
+    const { meepo } = await import("../commands/meepo.js");
+    const reply = vi.fn(async (_payload: any) => undefined);
+
+    const interaction: any = {
+      guildId: "guild-1",
+      channelId: "text-1",
+      guild: { voiceAdapterCreator: {} },
+      user: { id: "user-1", username: "Tester" },
+      member: {},
+      options: {
+        getSubcommandGroup: vi.fn(() => "sessions"),
+        getSubcommand: vi.fn(() => "view"),
+        getString: vi.fn(() => "session-1"),
+      },
+      reply,
+    };
+
+    await meepo.execute(interaction, {
+      guildId: "guild-1",
+      campaignSlug: "default",
+      dbPath: "test.sqlite",
+      db: { prepare: vi.fn(() => ({ run: vi.fn(), get: vi.fn(() => ({ ts: null })) })) },
+    });
+
+    const payload = reply.mock.calls.at(0)?.[0];
+    expect(payload?.content).toContain("(ERR_STALE_INTERACTION)");
+    expect(payload?.content).toContain("from scratch");
+  });
+
+  test("sessions view maps missing transcript artifact to transcript unavailable taxonomy", async () => {
+    transcriptArtifact = null;
+
+    const { meepo } = await import("../commands/meepo.js");
+    const reply = vi.fn(async (_payload: any) => undefined);
+
+    const interaction: any = {
+      guildId: "guild-1",
+      channelId: "text-1",
+      guild: { voiceAdapterCreator: {} },
+      user: { id: "user-1", username: "Tester" },
+      member: {},
+      options: {
+        getSubcommandGroup: vi.fn(() => "sessions"),
+        getSubcommand: vi.fn(() => "view"),
+        getString: vi.fn(() => "session-1"),
+      },
+      reply,
+    };
+
+    await meepo.execute(interaction, {
+      guildId: "guild-1",
+      campaignSlug: "default",
+      dbPath: "test.sqlite",
+      db: { prepare: vi.fn(() => ({ run: vi.fn(), get: vi.fn(() => ({ ts: null })) })) },
+    });
+
+    const payload = reply.mock.calls.at(0)?.[0];
+    expect(payload?.content).toContain("(ERR_TRANSCRIPT_UNAVAILABLE)");
+    expect(payload?.content).toContain("no transcript artifact");
   });
 });

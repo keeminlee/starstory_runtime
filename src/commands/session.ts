@@ -6,7 +6,7 @@ import type { LedgerEntry } from "../ledger/ledger.js";
 import { chat } from "../llm/client.js";
 import { buildBeatsJsonFromNarrative, generateMeecapStub, validateMeecapV1 } from "../sessions/meecap.js";
 import { cfg } from "../config/env.js";
-import { loadRegistry } from "../registry/loadRegistry.js";
+import { loadRegistryForScope } from "../registry/loadRegistry.js";
 import { isElevated } from "../security/isElevated.js";
 import type { CommandCtx } from "./index.js";
 import path from "path";
@@ -15,9 +15,9 @@ import fs from "fs";
 /**
  * Get formatted list of PC names from registry for prompt context
  */
-function getPCNamesForPrompt(): string {
+function getPCNamesForPrompt(scope: { guildId: string; campaignSlug: string }): string {
   try {
-    const registry = loadRegistry();
+    const registry = loadRegistryForScope(scope);
     const pcNames = registry.characters
       .filter(c => c.type === "pc")
       .map(c => c.canonical_name)
@@ -377,7 +377,7 @@ export const session = {
         }
 
         // Summarize the meecap narrative using DM recap structure
-        const pcNames = getPCNamesForPrompt();
+        const pcNames = getPCNamesForPrompt({ guildId, campaignSlug: ctx.campaignSlug });
         const systemPrompt = `You are MeepoRecap, a D&D session recap generator.
 
 INPUT
@@ -926,7 +926,7 @@ This recap should feel like:
       const activeSession = getActiveSession(guildId);
       if (activeSession) {
         const now = Date.now();
-        db.prepare("UPDATE sessions SET ended_at_ms = ? WHERE session_id = ?")
+        db.prepare("UPDATE sessions SET ended_at_ms = ?, status = 'completed' WHERE session_id = ?")
           .run(now, activeSession.session_id);
       }
 

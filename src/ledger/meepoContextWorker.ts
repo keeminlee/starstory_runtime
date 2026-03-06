@@ -3,6 +3,8 @@ import { getDbForCampaign } from "../db.js";
 import { resolveCampaignSlug } from "../campaign/guildConfig.js";
 import { log } from "../utils/logger.js";
 import { getMeepoContextQueueStatus, processMeepoContextActionsTick } from "./meepoContextActions.js";
+import { toMeepoError } from "../errors/meepoError.js";
+import { formatUserFacingError } from "../errors/formatUserFacingError.js";
 
 const workerLog = log.withScope("meepo-context-worker");
 
@@ -35,15 +37,22 @@ export async function runMeepoContextActionWorkerTick(guildId?: string | null): 
     retryBaseMs: cfg.meepoContextActions.retryBaseMs,
   });
   if (result.processed > 0) {
-    workerTickLog.debug(
-      `tick processed=${result.processed} succeeded=${result.succeeded} failed=${result.failed} timedOut=${result.timedOut} elapsedMs=${result.elapsedMs}`
-    );
+    workerTickLog.debug("Context worker tick processed", {
+      event_type: "MEEPO_CONTEXT_WORKER_TICK",
+      processed: result.processed,
+      succeeded: result.succeeded,
+      failed: result.failed,
+      timed_out: result.timedOut,
+      elapsed_ms: result.elapsedMs,
+    });
   }
 }
 
 export function startMeepoContextActionWorker(guildId?: string | null): void {
   if (!cfg.features.contextWorkerEnabled) {
-    workerLog.info("disabled");
+    workerLog.info("Context worker disabled", {
+      event_type: "MEEPO_CONTEXT_WORKER_DISABLED",
+    });
     return;
   }
   if (workerTimer) return;
@@ -53,17 +62,30 @@ export function startMeepoContextActionWorker(guildId?: string | null): void {
     try {
       await runMeepoContextActionWorkerTick(guildId);
     } catch (error: any) {
-      scopedWorkerLog.error(`tick_error ${error?.message ?? error}`);
+      const meepoErr = toMeepoError(error, "ERR_INTERNAL_RUNTIME_FAILURE");
+      const payload = formatUserFacingError(meepoErr);
+      scopedWorkerLog.error("Context worker tick error", {
+        event_type: "MEEPO_CONTEXT_WORKER_TICK_ERROR",
+        error_code: payload.code,
+        failure_class: payload.failureClass,
+        trace_id: payload.trace_id,
+        error: error?.message ?? String(error),
+      });
     }
   }, intervalMs);
-  scopedWorkerLog.info(`started pollMs=${intervalMs}`);
+  scopedWorkerLog.info("Context worker started", {
+    event_type: "MEEPO_CONTEXT_WORKER_STARTED",
+    poll_ms: intervalMs,
+  });
 }
 
 export function stopMeepoContextActionWorker(): void {
   if (!workerTimer) return;
   clearInterval(workerTimer);
   workerTimer = null;
-  workerLog.info("stopped");
+  workerLog.info("Context worker stopped", {
+    event_type: "MEEPO_CONTEXT_WORKER_STOPPED",
+  });
 }
 
 export function getMeepoContextWorkerStatus(guildId?: string | null): {

@@ -120,6 +120,16 @@ function sanitizeSessionLabelForFilename(sessionLabel: string): string {
     .replace(/^-|-$/g, "");
 }
 
+function sanitizeArtifactToken(value: string | null | undefined, fallback: string): string {
+  const safe = (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return safe.length > 0 ? safe : fallback;
+}
+
 function sanitizeFileToken(value: string): string {
   const safe = value
     .trim()
@@ -129,13 +139,25 @@ function sanitizeFileToken(value: string): string {
   return safe.length > 0 ? safe : "na";
 }
 
-export function buildSessionArtifactStem(sessionId: string, sessionLabel?: string | null): string {
+export function buildLegacySessionArtifactStem(sessionId: string, sessionLabel?: string | null): string {
   const safeLabel = sessionLabel ? sanitizeSessionLabelForFilename(sessionLabel) : "";
   const identity = safeLabel.length > 0 ? safeLabel : sessionId;
   return `session-${identity}`;
 }
 
+export function buildSessionArtifactStem(args: {
+  guildId: string;
+  campaignSlug?: string | null;
+  sessionId: string;
+}): string {
+  const guildToken = sanitizeArtifactToken(args.guildId, "none");
+  const campaignToken = sanitizeArtifactToken(args.campaignSlug ?? null, "none");
+  const sessionToken = sanitizeArtifactToken(args.sessionId, "none");
+  return `g_${guildToken}__c_${campaignToken}__s_${sessionToken}`;
+}
+
 export function resolveSessionMegameecapPaths(args: {
+  guildId: string;
   campaignSlug: string;
   sessionId: string;
   sessionLabel?: string | null;
@@ -162,7 +184,11 @@ export function resolveSessionMegameecapPaths(args: {
         forWrite: true,
         ensureExists: true,
       });
-  const stem = buildSessionArtifactStem(args.sessionId, args.sessionLabel);
+  const stem = buildSessionArtifactStem({
+    guildId: args.guildId,
+    campaignSlug: args.campaignSlug,
+    sessionId: args.sessionId,
+  });
   const finalStyle = args.finalStyle ?? "balanced";
   const baseName = `${stem}-megameecap-base`;
   const finalName = `${stem}-recap-final-${finalStyle}`;

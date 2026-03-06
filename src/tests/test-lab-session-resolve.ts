@@ -15,6 +15,7 @@ function createDb() {
       guild_id TEXT NOT NULL,
       kind TEXT NOT NULL,
       mode_at_start TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
       label TEXT,
       started_at_ms INTEGER NOT NULL
     );

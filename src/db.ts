@@ -396,6 +396,7 @@ function applyMigrations(db: Database.Database) {
           guild_id TEXT NOT NULL,
           kind TEXT NOT NULL DEFAULT 'canon',
           mode_at_start TEXT NOT NULL DEFAULT 'ambient',
+          status TEXT NOT NULL DEFAULT 'active',
           label TEXT,
           created_at_ms INTEGER NOT NULL,
           started_at_ms INTEGER NOT NULL,
@@ -408,6 +409,10 @@ function applyMigrations(db: Database.Database) {
         
         CREATE INDEX idx_sessions_guild_active
         ON sessions(guild_id, ended_at_ms);
+
+        CREATE UNIQUE INDEX idx_one_active_session_per_guild
+        ON sessions(guild_id)
+        WHERE status = 'active';
         
         -- Restore data
         INSERT INTO sessions 
@@ -419,6 +424,10 @@ function applyMigrations(db: Database.Database) {
             WHEN LOWER(COALESCE(label, '')) LIKE '%test%' THEN 'lab'
             WHEN LOWER(TRIM(COALESCE(label, ''))) = 'chat' THEN 'ambient'
             ELSE 'ambient'
+          END,
+          CASE
+            WHEN ended_at_ms IS NULL THEN 'active'
+            ELSE 'completed'
           END,
           label,
           created_at_ms,
@@ -442,6 +451,7 @@ function applyMigrations(db: Database.Database) {
           guild_id TEXT NOT NULL,
           kind TEXT NOT NULL DEFAULT 'canon',
           mode_at_start TEXT NOT NULL DEFAULT 'ambient',
+          status TEXT NOT NULL DEFAULT 'active',
           label TEXT,
           created_at_ms INTEGER NOT NULL,
           started_at_ms INTEGER NOT NULL,
@@ -454,6 +464,10 @@ function applyMigrations(db: Database.Database) {
         
         CREATE INDEX idx_sessions_guild_active
         ON sessions(guild_id, ended_at_ms);
+
+        CREATE UNIQUE INDEX idx_one_active_session_per_guild
+        ON sessions(guild_id)
+        WHERE status = 'active';
       `);
     }
   }
@@ -510,6 +524,81 @@ function applyMigrations(db: Database.Database) {
       ALTER TABLE sessions ADD COLUMN ended_reason TEXT;
     `);
   }
+
+  // Sprint 1A: Session lifecycle status + pre-index deterministic repair.
+  // Rollback note: snapshot DB / export sessions rows before first production migration.
+  const sessionColumnsWithStatus = db.pragma("table_info(sessions)") as any[];
+  const hasSessionStatus = sessionColumnsWithStatus.some((col: any) => col.name === "status");
+
+  if (!hasSessionStatus) {
+    console.log("Migrating: Adding status to sessions table (Sprint 1A)");
+    console.warn("Migration note: snapshot DB/export sessions rows before production run (Sprint 1A)");
+    db.exec(`
+      ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
+    `);
+  }
+
+  // Backfill lifecycle status from ended_at_ms for existing rows.
+  db.exec(`
+    UPDATE sessions
+    SET status = CASE WHEN ended_at_ms IS NULL THEN 'active' ELSE 'completed' END
+    WHERE status IS NULL
+       OR TRIM(status) = ''
+       OR status NOT IN ('active', 'completed', 'interrupted');
+
+    UPDATE sessions
+    SET status = 'completed'
+    WHERE ended_at_ms IS NOT NULL AND status = 'active';
+  `);
+
+  // Deterministic legacy repair for multi-active rows (before unique index creation).
+  const multiActiveBefore = db
+    .prepare(
+      `SELECT COALESCE(SUM(cnt - 1), 0) AS extra_active
+       FROM (
+         SELECT guild_id, COUNT(*) AS cnt
+         FROM sessions
+         WHERE status = 'active'
+         GROUP BY guild_id
+         HAVING COUNT(*) > 1
+       )`
+    )
+    .get() as { extra_active: number } | undefined;
+
+  const extraActive = Number(multiActiveBefore?.extra_active ?? 0);
+  if (extraActive > 0) {
+    console.log(`Migrating: Repairing ${extraActive} legacy multi-active sessions (Sprint 1A)`);
+    db.exec(`
+      WITH ranked AS (
+        SELECT
+          session_id,
+          guild_id,
+          ROW_NUMBER() OVER (
+            PARTITION BY guild_id
+            ORDER BY started_at_ms DESC, created_at_ms DESC, session_id DESC
+          ) AS row_num
+        FROM sessions
+        WHERE status = 'active'
+      )
+      UPDATE sessions
+      SET status = 'interrupted',
+          ended_reason = COALESCE(NULLIF(ended_reason, ''), 'migration_multi_active_repair'),
+          ended_at_ms = COALESCE(ended_at_ms, started_at_ms)
+      WHERE session_id IN (SELECT session_id FROM ranked WHERE row_num > 1);
+    `);
+
+    dbLog.warn("session_migration_repair", {
+      event: "session_migration_repair",
+      repaired_active_rows: extraActive,
+      policy: "keep_newest_active_mark_older_interrupted",
+    });
+  }
+
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_session_per_guild
+    ON sessions(guild_id)
+    WHERE status = 'active';
+  `);
 
   // Migration: Add kind to sessions table (Phase 4 - runtime routing)
   const sessionColumnsWithCreatedAt = db.pragma("table_info(sessions)") as any[];

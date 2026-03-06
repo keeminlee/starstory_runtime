@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.9 - 2026-03-06
+
+### Sprint 3 Hardening (Operational Closure)
+
+- Completed expensive-job safety rails for recap and retrieval paths:
+  - edge + engine in-flight dedupe,
+  - recap cooldown with explicit `force` semantics,
+  - keyed worker back-pressure for expensive action families.
+- Completed user-safe failure taxonomy rollout across priority command/voice surfaces:
+  - canonical error codes,
+  - deterministic formatter contract (`failureClass`, `retryable`, `correctiveActionRequired`),
+  - retry-after/corrective guidance where applicable.
+- Completed observability closure in strict runtime zones:
+  - structured runtime failure logging normalization,
+  - new runtime observability stopline (`stopline:observability-runtime`) wired into CI,
+  - concise operational runbook in `docs/OPS_RUNBOOK.md`.
+
+### Reliability Notes
+
+- Voice/reply degradation now uses taxonomy-safe fallback behavior for explicit reply failures.
+- Optional enrichment failures degrade quietly with telemetry instead of breaking reply flow.
+
 ## v1.8 - 2026-03-04
 
 ### Changed

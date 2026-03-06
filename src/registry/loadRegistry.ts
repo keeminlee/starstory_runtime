@@ -5,6 +5,11 @@ import { Character, Location, Faction, Misc, Entity, LoadedRegistry, RawRegistry
 import { getDefaultCampaignSlug } from "../campaign/defaultCampaign.js";
 import { ensureRegistryScaffold, getRegistryDirForCampaign } from "./scaffold.js";
 
+export type RegistryScope = {
+  guildId: string;
+  campaignSlug: string;
+};
+
 /**
  * Single normalization function used everywhere.
  * - lowercase
@@ -275,6 +280,29 @@ export function loadRegistry(opts?: {
     byName,
     ignore,
   };
+}
+
+/**
+ * Runtime-safe registry loader: explicit guild + campaign scope required.
+ */
+export function loadRegistryForScope(
+  scope: RegistryScope,
+  opts?: {
+    registryPath?: string;
+    ignorePath?: string;
+  }
+): LoadedRegistry {
+  const campaignSlug = scope?.campaignSlug?.trim();
+  const guildId = scope?.guildId?.trim();
+  if (!guildId || !campaignSlug) {
+    throw new Error("loadRegistryForScope requires explicit guildId and campaignSlug");
+  }
+
+  return loadRegistry({
+    campaignSlug,
+    registryPath: opts?.registryPath,
+    ignorePath: opts?.ignorePath,
+  });
 }
 
 /**

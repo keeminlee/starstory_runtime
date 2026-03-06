@@ -10,6 +10,7 @@ import { autoJoinGeneralVoice } from "./meepo/autoJoinVoice.js";
 import { startAutoSleepChecker } from "./meepo/autoSleep.js";
 import { getActiveSession } from "./sessions/sessions.js";
 import { getGuildMode } from "./sessions/sessionRuntime.js";
+import { reconcileSessionStateOnBootForGuilds } from "./sessions/reconcileSessionsOnBoot.js";
 import { appendLedgerEntry } from "./ledger/ledger.js";
 import { startMeepoContextActionWorker } from "./ledger/meepoContextWorker.js";
 import { getSanitizedSpeakerName } from "./ledger/speakerSanitizer.js";
@@ -36,12 +37,13 @@ import { buildMeepoPromptBundle } from "./llm/buildMeepoPromptBundle.js";
 import { setBotNicknameForPersona } from "./meepo/nickname.js";
 import { acquireLock } from "./pidlock.js";
 import { getDbForCampaign, seedMeepoMemories } from "./db.js";
-import { loadRegistry } from "./registry/loadRegistry.js";
+import { loadRegistryForScope } from "./registry/loadRegistry.js";
 import { extractRegistryMatches } from "./registry/extractRegistryMatches.js";
 import { searchEventsByTitleScoped, type EventRow } from "./ledger/eventSearch.js";
 import { loadGptcap } from "./ledger/gptcapProvider.js";
 import { findRelevantBeats, type ScoredBeat } from "./recall/findRelevantBeats.js";
 import { buildMemoryContext } from "./recall/buildMemoryContext.js";
+import { RECALL_SAFETY, boundedItems, checkAndRecordRecallThrottle } from "./recall/recallSafety.js";
 import { getTranscriptLines } from "./ledger/transcripts.js";
 import { randomUUID } from "node:crypto";
 import { startOverlayServer, overlayEmitPresence } from "./overlay/server.js";
@@ -124,6 +126,12 @@ client.once("ready", async () => {
   if (client.guilds.cache.size === 0) {
     bootLog.info("Startup restore skipped: bot is not in any guilds.");
   } else {
+    const guildIds = Array.from(client.guilds.cache.keys());
+    const bootReconcileSummary = reconcileSessionStateOnBootForGuilds(guildIds);
+    bootLog.info(
+      `Session boot reconciliation: total=${bootReconcileSummary.totalGuilds} changed=${bootReconcileSummary.changedGuilds} set=${bootReconcileSummary.setRuntimeActiveCount} cleared=${bootReconcileSummary.clearedRuntimeActiveCount}`
+    );
+
     for (const guild of client.guilds.cache.values()) {
       const activeMeepo = getActiveMeepo(guild.id);
       if (!activeMeepo) continue;
@@ -292,12 +300,6 @@ client.on("messageCreate", async (message: any) => {
     let active = getActiveMeepo(message.guildId);
     const contentLower = content.toLowerCase();
     
-    // console.log("WAKE CHECK:", {
-    //   hasActive: !!active,
-    //   contentLower,
-    //   containsMeepo: contentLower.includes("meepo"),
-    // });
-    
     const defaultPersonaId = getGuildDefaultPersonaId(message.guildId) ?? "meta_meepo";
     const defaultPersonaName = getPersona(defaultPersonaId).displayName.toLowerCase();
     const autoWakeHit =
@@ -327,8 +329,6 @@ client.on("messageCreate", async (message: any) => {
         channelId: message.channelId,
       });
       
-      // console.log("WAKE RESULT:", active);
-
       // Log the auto-awaken action
       appendLedgerEntry({
         guild_id: message.guildId,
@@ -349,13 +349,6 @@ client.on("messageCreate", async (message: any) => {
 
     // If still no active Meepo, nothing more to do
     if (!active) return;
-
-    // console.log("ACTIVE MEEPO:", {
-    //   id: active.id,
-    //   form_id: active.form_id,
-    //   persona_seed: active.persona_seed,
-    // });
-
 
     // 3.5) COMMAND-LESS TRANSFORM: Check for natural language transform triggers
     const lowerContent = contentLower; // Already computed earlier
@@ -553,8 +546,21 @@ client.on("messageCreate", async (message: any) => {
       
       if (memoryEnabled) {
         try {
-          const registry = loadRegistry({ campaignSlug });
-          const matches = extractRegistryMatches(content, registry);
+          const throttle = checkAndRecordRecallThrottle({
+            guildId: message.guildId,
+            actorUserId: message.author.id,
+            surface: "text_message",
+          });
+          if (throttle.throttled) {
+            recallLog.debug(
+              `Recall throttled (surface=text_message reason=${throttle.reason} retry_ms=${throttle.retryAfterMs})`
+            );
+          } else {
+          const registry = loadRegistryForScope({ guildId: message.guildId, campaignSlug });
+          const matches = boundedItems(
+            extractRegistryMatches(content, registry),
+            RECALL_SAFETY.shape.maxRegistryMatches
+          );
           
           recallLog.debug(`Registry matches: ${matches.length} [${matches.map(m => m.canonical).join(", ")}]`);
 
@@ -562,10 +568,20 @@ client.on("messageCreate", async (message: any) => {
             // Search for events using registry matches
             const allEvents = new Map<string, EventRow>();
             for (const match of matches) {
-              const events = searchEventsByTitleScoped({ term: match.canonical, guildId: message.guildId });
+              const events = searchEventsByTitleScoped({
+                term: match.canonical,
+                scope: { guildId: message.guildId, campaignSlug },
+                limit: RECALL_SAFETY.shape.maxEventsPerMatch,
+              });
               recallLog.debug(`Events for "${match.canonical}": ${events.length}`);
               for (const event of events) {
+                if (allEvents.size >= RECALL_SAFETY.shape.maxUniqueEvents) {
+                  break;
+                }
                 allEvents.set(event.event_id, event);
+              }
+              if (allEvents.size >= RECALL_SAFETY.shape.maxUniqueEvents) {
+                break;
               }
             }
             
@@ -583,7 +599,10 @@ client.on("messageCreate", async (message: any) => {
               // Load GPTcaps and find relevant beats per session
               const allBeats: ScoredBeat[] = [];
 
-              for (const [sessionId, sessionEvents] of eventsBySession.entries()) {
+              for (const [sessionId, sessionEvents] of boundedItems(
+                Array.from(eventsBySession.entries()),
+                RECALL_SAFETY.shape.maxSessionsWithEvents
+              )) {
                 // Get session label for GPTcap loading
                 const labelRow = db.prepare("SELECT label FROM sessions WHERE session_id = ? LIMIT 1")
                   .get(sessionId) as { label: string | null } | undefined;
@@ -595,20 +614,27 @@ client.on("messageCreate", async (message: any) => {
                   const gptcap = loadGptcap(label);
                   recallLog.debug(`GPTcap for "${label}": ${gptcap ? `${gptcap.beats.length} beats` : "not found"}`);
                   if (gptcap) {
-                    const relevantBeats = findRelevantBeats(gptcap, sessionEvents, { topK: 6 });
+                    const relevantBeats = findRelevantBeats(gptcap, sessionEvents, {
+                      topK: RECALL_SAFETY.shape.maxBeatsPerSession,
+                    });
                     recallLog.debug(`Found ${relevantBeats.length} relevant beats for ${label}`);
                     allBeats.push(...relevantBeats);
+                    if (allBeats.length >= RECALL_SAFETY.shape.maxTotalBeats) {
+                      break;
+                    }
                   }
                 }
               }
+
+              const boundedBeats = boundedItems(allBeats, RECALL_SAFETY.shape.maxTotalBeats);
               
-              recallLog.debug(`Total beats across all sessions: ${allBeats.length}`);
+              recallLog.debug(`Total beats across all sessions: ${boundedBeats.length}`);
 
               // Build memory context if we have beats
-              if (allBeats.length > 0) {
+              if (boundedBeats.length > 0) {
                 // Collect all needed transcript lines from beats
                 const linesBySession = new Map<string, Set<number>>();
-                for (const scored of allBeats) {
+                for (const scored of boundedBeats) {
                   // Find which session this beat belongs to (via events)
                   for (const [sessionId, sessionEvents] of eventsBySession.entries()) {
                     // Simple heuristic: if any event overlaps with beat lines, associate beat with this session
@@ -637,10 +663,13 @@ client.on("messageCreate", async (message: any) => {
                 // Fetch transcript lines (use first session with lines for now)
                 const firstSessionWithLines = Array.from(linesBySession.keys())[0];
                 if (firstSessionWithLines) {
-                  const neededLines = Array.from(linesBySession.get(firstSessionWithLines) || []);
+                  const neededLines = boundedItems(
+                    Array.from(linesBySession.get(firstSessionWithLines) || []),
+                    RECALL_SAFETY.shape.maxTranscriptLines
+                  );
                   if (neededLines.length > 0) {
                     const transcriptLines = getTranscriptLines(firstSessionWithLines, neededLines, { db });
-                    partyMemory = buildMemoryContext(allBeats, transcriptLines, {
+                    partyMemory = buildMemoryContext(boundedBeats, transcriptLines, {
                       maxLinesPerBeat: 2,
                       maxTotalChars: 1600,
                     });
@@ -649,6 +678,7 @@ client.on("messageCreate", async (message: any) => {
                 }
               }
             }
+          }
           }
         } catch (recallErr: any) {
           recallLog.warn(`Memory retrieval failed: ${recallErr.message ?? recallErr}`);
@@ -882,7 +912,26 @@ client.on("messageCreate", async (message: any) => {
     );
 
   } catch (err) {
-    console.error("messageCreate error", err);
+    const payload = formatUserFacingError(err, {
+      fallbackMessage: "⚠️ Meepo hit an internal runtime failure.",
+    });
+    textReplyLog.error("messageCreate error", {
+      event_type: "MESSAGE_CREATE_ERROR",
+      interaction_id: message.id,
+      error_code: payload.code,
+      failure_class: payload.failureClass,
+      trace_id: payload.trace_id,
+      error: err instanceof Error ? err.message : String(err),
+    }, {
+      guild_id: message.guildId,
+      campaign_slug: resolveCampaignSlug({
+        guildId: message.guildId ?? undefined,
+        guildName: message.guild?.name ?? undefined,
+      }),
+      session_id: getActiveSession(message.guildId)?.session_id ?? undefined,
+      interaction_id: message.id,
+      trace_id: payload.trace_id,
+    });
   }
 });
 

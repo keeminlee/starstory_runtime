@@ -22,7 +22,7 @@ import { getTtsProvider } from "../voice/tts/provider.js";
 import { speakInGuild } from "../voice/speaker.js";
 import { voicePlaybackController } from "../voice/voicePlaybackController.js";
 import { applyPostTtsFx } from "../voice/audioFx.js";
-import { loadRegistry } from "../registry/loadRegistry.js";
+import { loadRegistryForScope } from "../registry/loadRegistry.js";
 import { extractRegistryMatches } from "../registry/extractRegistryMatches.js";
 import { searchEventsByTitleScoped, type EventRow } from "../ledger/eventSearch.js";
 import { getTranscriptLinesDetailed, getTranscriptLines } from "../ledger/transcripts.js";
@@ -447,7 +447,7 @@ export const meepo = {
         guildId,
         guildName: interaction.guild?.name ?? undefined,
       });
-      const registry = loadRegistry({ campaignSlug });
+      const registry = loadRegistryForScope({ guildId, campaignSlug });
       const matches = extractRegistryMatches(queryText, registry);
 
       const eventsByMatch = matches.map((match) => {
@@ -455,7 +455,10 @@ export const meepo = {
         const dedup = new Map<string, EventRow>();
 
         for (const term of terms) {
-          for (const event of searchEventsByTitleScoped({ term, guildId })) {
+          for (const event of searchEventsByTitleScoped({
+            term,
+            scope: { guildId, campaignSlug },
+          })) {
             dedup.set(event.event_id, event);
           }
         }

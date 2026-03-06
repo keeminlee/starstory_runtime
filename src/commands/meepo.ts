@@ -63,6 +63,8 @@ import { initState, loadState, saveProgress } from "../ledger/awakeningStateRepo
 import { metaMeepoVoice, type DoctorCheck } from "../ui/metaMeepoVoice.js";
 import type { CommandCtx } from "./index.js";
 import { PermissionFlagsBits } from "discord.js";
+import { formatUserFacingError } from "../errors/formatUserFacingError.js";
+import { MeepoError, type MeepoErrorCode } from "../errors/meepoError.js";
 import { loadAwakenScript } from "../scripts/awakening/_loader.js";
 import {
   AWAKEN_INVOKER_USER_ID_KEY,
@@ -101,6 +103,7 @@ import {
 import { AWAKEN_MODAL_INPUT_ID, buildModalTextSubmitModal } from "../awakening/prompts/modalTextPrompt.js";
 import { AWAKEN_REGISTRY_NAME_INPUT_ID } from "../awakening/prompts/registryBuilderPrompt.js";
 import { AWAKEN_CONTINUE_KEY } from "../awakening/prompts/continuePrompt.js";
+import { log } from "../utils/logger.js";
 
 type SessionRow = {
   session_id: string;
@@ -131,6 +134,54 @@ const RECAP_STRATEGIES: RecapStrategy[] = ["detailed", "balanced", "concise"];
 const setupWarningDigestByGuild = new Map<string, string>();
 const TRANSCRIPT_EXPORT_TIME_BUDGET_MS = 1500;
 const MAX_INLINE_ATTACHMENT_BYTES = 24 * 1024 * 1024;
+const RECAP_COOLDOWN_MS = 30_000;
+const RECAP_MAX_CONCURRENT_PER_GUILD = 1;
+const inFlightRecapRequests = new Set<string>();
+const inFlightRecapCountByGuild = new Map<string, number>();
+const recapCooldownByKey = new Map<string, number>();
+const meepoCommandLog = log.withScope("meepo", {
+  requireGuildContext: true,
+  callsite: "commands/meepo.ts",
+});
+
+function buildRecapDedupeKey(args: {
+  guildId: string;
+  campaignSlug: string;
+  sessionId: string;
+  strategy: RecapStrategy;
+}): string {
+  return [
+    args.guildId.trim().toLowerCase(),
+    args.campaignSlug.trim().toLowerCase(),
+    args.sessionId.trim().toLowerCase(),
+    "recap_final",
+    args.strategy,
+  ].join("|");
+}
+
+function incrementGuildRecapInFlight(guildId: string): void {
+  const next = (inFlightRecapCountByGuild.get(guildId) ?? 0) + 1;
+  inFlightRecapCountByGuild.set(guildId, next);
+}
+
+function decrementGuildRecapInFlight(guildId: string): void {
+  const current = inFlightRecapCountByGuild.get(guildId) ?? 0;
+  if (current <= 1) {
+    inFlightRecapCountByGuild.delete(guildId);
+    return;
+  }
+  inFlightRecapCountByGuild.set(guildId, current - 1);
+}
+
+function buildTaxonomyPayload(code: MeepoErrorCode, ctx: CommandCtx, metadata?: Record<string, unknown>) {
+  return formatUserFacingError(
+    new MeepoError(code, metadata ? { metadata } : undefined),
+    {
+      trace_id: ctx.trace_id,
+      interaction_id: ctx.interaction_id,
+    }
+  );
+}
 
 function setReplyMode(db: any, guildId: string, mode: "voice" | "text"): void {
   db.prepare(
@@ -475,7 +526,16 @@ async function runChannelDriftBestEffort(args: {
           await channel.send({ content: text.replaceAll("{{home_channel_id}}", args.newChannelId) });
         }
       } catch {
-        console.warn("AWAKEN_DRIFT_WARN code=DRIFT_SEND_FAILED");
+        meepoCommandLog.warn("Awakening drift send failed", {
+          event_type: "AWAKEN_DRIFT_WARN",
+          error_code: "DRIFT_SEND_FAILED",
+          failure_class: "internal",
+          interaction_id: args.interaction?.id,
+          old_channel_id: args.oldChannelId,
+          new_channel_id: args.newChannelId,
+        }, {
+          guild_id: args.interaction?.guildId,
+        });
       }
     }
   };
@@ -484,7 +544,16 @@ async function runChannelDriftBestEffort(args: {
     await sendLines(String(onChange.departure?.channel ?? args.oldChannelId), onChange.departure?.say);
     await sendLines(String(onChange.arrival?.channel ?? args.newChannelId), onChange.arrival?.say);
   } catch {
-    console.warn("AWAKEN_DRIFT_WARN code=DRIFT_PROCESS_FAILED");
+    meepoCommandLog.warn("Awakening drift processing failed", {
+      event_type: "AWAKEN_DRIFT_WARN",
+      error_code: "DRIFT_PROCESS_FAILED",
+      failure_class: "internal",
+      interaction_id: args.interaction?.id,
+      old_channel_id: args.oldChannelId,
+      new_channel_id: args.newChannelId,
+    }, {
+      guild_id: args.interaction?.guildId,
+    });
   }
 }
 
@@ -845,7 +914,7 @@ async function runDoctorChecks(interaction: any, ctx: CommandCtx): Promise<Docto
       action: "Run /meepo awaken then start a session and generate a recap",
     });
   } else {
-    const baseStatus = getBaseStatus(ctx.campaignSlug, session.session_id, session.label);
+    const baseStatus = getBaseStatus(guildId, ctx.campaignSlug, session.session_id, session.label);
     checks.push(
       baseStatus.exists
         ? { icon: "✅", label: "Base recap artifact present", action: "No action needed" }
@@ -1314,7 +1383,7 @@ async function handleHush(interaction: any, ctx: CommandCtx): Promise<void> {
   });
 }
 
-async function handleSessionsRecap(interaction: any): Promise<void> {
+async function handleSessionsRecap(interaction: any, ctx: CommandCtx): Promise<void> {
   const guildId = interaction.guildId as string;
   const sessionId = interaction.options.getString("session", true);
   const force = interaction.options.getBoolean("force") ?? false;
@@ -1336,43 +1405,126 @@ async function handleSessionsRecap(interaction: any): Promise<void> {
     return;
   }
 
-  await interaction.deferReply({ ephemeral: true });
-
-  logSystemEvent({
+  const recapDedupeKey = buildRecapDedupeKey({
     guildId,
-    channelId: interaction.channelId,
-    eventType: "SESSION_RECAP_REQUESTED",
-    content: JSON.stringify({ id: session.session_id, force, strategy }),
-    authorId: interaction.user.id,
-    authorName: interaction.user.username,
-    narrativeWeight: "secondary",
-  });
-
-  const recap = await generateSessionRecap({
-    guildId,
+    campaignSlug: ctx.campaignSlug,
     sessionId: session.session_id,
-    force,
     strategy,
   });
+  if (inFlightRecapRequests.has(recapDedupeKey)) {
+    const payload = formatUserFacingError(new MeepoError("ERR_RECAP_IN_PROGRESS"), {
+      trace_id: ctx.trace_id,
+      interaction_id: ctx.interaction_id,
+    });
+    await interaction.reply({
+      content: payload.content,
+      ephemeral: true,
+    });
+    return;
+  }
 
-  const sessionLabel = getSessionDisplayLabel(session);
-  const previewText = recap.text.length > 700 ? `${recap.text.slice(0, 700)}…` : recap.text;
-  const fileStem = buildSessionArtifactStem(session.session_id, session.label);
-  const fileName = `${fileStem}-recap-${strategy}.md`;
-  const file = new AttachmentBuilder(Buffer.from(recap.text, "utf8"), { name: fileName });
+  const inFlightForGuild = inFlightRecapCountByGuild.get(guildId) ?? 0;
+  if (inFlightForGuild >= RECAP_MAX_CONCURRENT_PER_GUILD) {
+    const payload = formatUserFacingError(new MeepoError("ERR_RECAP_CAPACITY_REACHED"), {
+      trace_id: ctx.trace_id,
+      interaction_id: ctx.interaction_id,
+    });
+    await interaction.reply({
+      content: payload.content,
+      ephemeral: true,
+    });
+    return;
+  }
 
-  await interaction.editReply({
-    content: metaMeepoVoice.sessions.recapResult({
-      cacheHit: recap.cacheHit,
-      sessionLabel,
-      strategy: recap.strategy,
-      finalVersion: recap.finalVersion,
-      baseVersion: recap.baseVersion,
-      sourceHashShort: recap.sourceTranscriptHash.slice(0, 12),
-      previewText,
-    }),
-    files: [file],
-  });
+  const nowMs = Date.now();
+  const cooldownUntilMs = recapCooldownByKey.get(recapDedupeKey) ?? 0;
+  if (cooldownUntilMs > nowMs && !force) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((cooldownUntilMs - nowMs) / 1000));
+    const payload = formatUserFacingError(
+      new MeepoError("ERR_RECAP_RATE_LIMITED", {
+        metadata: { retry_after_seconds: retryAfterSeconds },
+      }),
+      {
+        trace_id: ctx.trace_id,
+        interaction_id: ctx.interaction_id,
+      }
+    );
+    await interaction.reply({
+      content: payload.content,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  inFlightRecapRequests.add(recapDedupeKey);
+  incrementGuildRecapInFlight(guildId);
+  recapCooldownByKey.set(recapDedupeKey, Date.now() + RECAP_COOLDOWN_MS);
+
+  await interaction.deferReply({ ephemeral: true });
+
+  try {
+    if (cooldownUntilMs > nowMs && force) {
+      logSystemEvent({
+        guildId,
+        channelId: interaction.channelId,
+        eventType: "SESSION_RECAP_COOLDOWN_BYPASSED",
+        content: JSON.stringify({
+          id: session.session_id,
+          strategy,
+          force: true,
+          cooldown_bypassed: true,
+          cooldown_remaining_ms: Math.max(0, cooldownUntilMs - nowMs),
+        }),
+        authorId: interaction.user.id,
+        authorName: interaction.user.username,
+        narrativeWeight: "secondary",
+      });
+    }
+
+    logSystemEvent({
+      guildId,
+      channelId: interaction.channelId,
+      eventType: "SESSION_RECAP_REQUESTED",
+      content: JSON.stringify({ id: session.session_id, force, strategy }),
+      authorId: interaction.user.id,
+      authorName: interaction.user.username,
+      narrativeWeight: "secondary",
+    });
+
+    const recap = await generateSessionRecap({
+      guildId,
+      sessionId: session.session_id,
+      force,
+      strategy,
+    });
+
+    const sessionLabel = getSessionDisplayLabel(session);
+    const previewText = recap.text.length > 700 ? `${recap.text.slice(0, 700)}…` : recap.text;
+    const fileStem = buildSessionArtifactStem({
+      guildId,
+      campaignSlug: ctx.campaignSlug,
+      sessionId: session.session_id,
+    });
+    const fileName = `${fileStem}-recap-${strategy}.md`;
+    const file = new AttachmentBuilder(Buffer.from(recap.text, "utf8"), { name: fileName });
+
+    await interaction.editReply({
+      content: metaMeepoVoice.sessions.recapResult({
+        cacheHit: recap.cacheHit,
+        sessionLabel,
+        strategy: recap.strategy,
+        finalVersion: recap.finalVersion,
+        baseVersion: recap.baseVersion,
+        sourceHashShort: recap.sourceTranscriptHash.slice(0, 12),
+        previewText,
+      }),
+      files: [file],
+    });
+
+  } finally {
+    inFlightRecapRequests.delete(recapDedupeKey);
+    decrementGuildRecapInFlight(guildId);
+  }
 }
 
 async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> {
@@ -1416,7 +1568,11 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
     const session = getSessionById(guildId, sessionId) as SessionRow | null;
 
     if (!session) {
-      await interaction.reply({ content: metaMeepoVoice.sessions.sessionNotFound(), ephemeral: true });
+      const payload = buildTaxonomyPayload("ERR_NO_ACTIVE_SESSION", ctx, {
+        command_surface: "sessions.view",
+        requested_session_id: sessionId,
+      });
+      await interaction.reply({ content: payload.content, ephemeral: true });
       return;
     }
 
@@ -1444,15 +1600,42 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
       ) as SessionArtifactRow | null;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[sessions.view] transcript export unavailable session=${session.session_id}: ${message}`);
+      const isTimeBudgetExceeded = message.includes("transcript_export_time_budget_exceeded");
+      const payload = buildTaxonomyPayload(
+        isTimeBudgetExceeded ? "ERR_STALE_INTERACTION" : "ERR_TRANSCRIPT_UNAVAILABLE",
+        ctx,
+        {
+          command_surface: "sessions.view",
+          session_id: session.session_id,
+          transcript_state: isTimeBudgetExceeded ? "time_budget_exceeded" : "export_failed",
+        }
+      );
+      await interaction.reply({
+        content: payload.content,
+        ephemeral: true,
+      });
+      return;
     }
 
-    const baseStatus = getBaseStatus(effectiveCampaignSlug, session.session_id, session.label);
+    if (!transcriptArtifact) {
+      const payload = buildTaxonomyPayload("ERR_TRANSCRIPT_UNAVAILABLE", ctx, {
+        command_surface: "sessions.view",
+        session_id: session.session_id,
+        transcript_state: "missing_artifact",
+      });
+      await interaction.reply({
+        content: payload.content,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const baseStatus = getBaseStatus(guildId, effectiveCampaignSlug, session.session_id, session.label);
     const finalFileForDbStyle =
       recap && recap.strategy && RECAP_STRATEGIES.includes(recap.strategy as RecapPassStrategy)
-        ? getFinalStatus(effectiveCampaignSlug, session.session_id, recap.strategy as RecapPassStrategy, session.label)
-        : getFinalStatus(effectiveCampaignSlug, session.session_id, undefined, session.label);
-    const allFinalFiles = getAllFinalStatuses(effectiveCampaignSlug, session.session_id, session.label);
+        ? getFinalStatus(guildId, effectiveCampaignSlug, session.session_id, recap.strategy as RecapPassStrategy, session.label)
+        : getFinalStatus(guildId, effectiveCampaignSlug, session.session_id, undefined, session.label);
+    const allFinalFiles = getAllFinalStatuses(guildId, effectiveCampaignSlug, session.session_id, session.label);
     const hasAnyFinalFiles = allFinalFiles.some((status) => status.exists);
 
     const recapExists = Boolean(recap);
@@ -1498,12 +1681,16 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
       dbRowMissingFileNotice: recapExists && !finalFileForDbStyle.exists,
       hasUnindexedFilesNotice: !recapExists && hasAnyFinalFiles,
       nextActionLine,
-      transcriptMissingNotice: !transcriptArtifact,
+      transcriptMissingNotice: false,
     });
 
     const files: AttachmentBuilder[] = [];
     if (recap) {
-      const fileStem = buildSessionArtifactStem(session.session_id, session.label);
+      const fileStem = buildSessionArtifactStem({
+        guildId,
+        campaignSlug: effectiveCampaignSlug,
+        sessionId: session.session_id,
+      });
       const fileName = `${fileStem}-recap-final-${recap.strategy ?? DEFAULT_RECAP_STRATEGY}.md`;
       if (finalFileForDbStyle.exists && finalFileForDbStyle.paths?.recapPath && fs.existsSync(finalFileForDbStyle.paths.recapPath)) {
         files.push(
@@ -1521,7 +1708,11 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
     }
 
     if (transcriptArtifact?.file_path && fs.existsSync(transcriptArtifact.file_path)) {
-      const fileStem = buildSessionArtifactStem(session.session_id, session.label);
+      const fileStem = buildSessionArtifactStem({
+        guildId,
+        campaignSlug: effectiveCampaignSlug,
+        sessionId: session.session_id,
+      });
       const bytes = Number(transcriptArtifact.size_bytes ?? fs.statSync(transcriptArtifact.file_path).size);
       if (bytes <= MAX_INLINE_ATTACHMENT_BYTES) {
         files.push(
@@ -1533,7 +1724,11 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
         transcriptStatus = "cached (too large to attach inline)";
       }
     } else if (transcriptArtifact?.content_text) {
-      const fileStem = buildSessionArtifactStem(session.session_id, session.label);
+      const fileStem = buildSessionArtifactStem({
+        guildId,
+        campaignSlug: effectiveCampaignSlug,
+        sessionId: session.session_id,
+      });
       const bytes = Buffer.byteLength(transcriptArtifact.content_text, "utf8");
       if (bytes <= MAX_INLINE_ATTACHMENT_BYTES) {
         files.push(
@@ -1555,7 +1750,7 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
   }
 
   if (sub === "recap") {
-    await handleSessionsRecap(interaction);
+    await handleSessionsRecap(interaction, ctx);
     return;
   }
 
@@ -1744,7 +1939,7 @@ async function handleStatus(interaction: any, ctx: CommandCtx): Promise<void> {
   }
 
   const baseStatus = statusSession
-    ? getBaseStatus(ctx.campaignSlug, statusSession.session_id, statusSession.label)
+    ? getBaseStatus(guildId, ctx.campaignSlug, statusSession.session_id, statusSession.label)
     : null;
   const recapFinal = statusSession
     ? (getSessionArtifact(guildId, statusSession.session_id, "recap_final") as SessionArtifactRow | null)

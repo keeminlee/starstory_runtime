@@ -30,12 +30,13 @@ import { logConvoTurn } from "../ledger/meepoConvo.js";
 import { buildConvoTailContext } from "../recall/buildConvoTailContext.js";
 import { appendLedgerEntry } from "../ledger/ledger.js";
 import type { TextChannel } from "discord.js";
-import { loadRegistry } from "../registry/loadRegistry.js";
+import { loadRegistryForScope } from "../registry/loadRegistry.js";
 import { extractRegistryMatches } from "../registry/extractRegistryMatches.js";
 import { searchEventsByTitleScoped, type EventRow } from "../ledger/eventSearch.js";
 import { loadGptcap } from "../ledger/gptcapProvider.js";
 import { findRelevantBeats, type ScoredBeat } from "../recall/findRelevantBeats.js";
 import { buildMemoryContext } from "../recall/buildMemoryContext.js";
+import { RECALL_SAFETY, boundedItems, checkAndRecordRecallThrottle } from "../recall/recallSafety.js";
 import { getTranscriptLines } from "../ledger/transcripts.js";
 import { getDbForCampaign } from "../db.js";
 import { resolveCampaignSlug } from "../campaign/guildConfig.js";
@@ -57,6 +58,66 @@ let warnedMissingRegistryForVoiceMemory = false;
 
 // Per-guild voice reply cooldown (prevents rapid-fire replies)
 const guildLastVoiceReply = new Map<string, number>();
+
+function normalizeVoiceReplyFailure(err: unknown, traceId: string, interactionId: string): MeepoError {
+  if (err instanceof MeepoError) {
+    return err;
+  }
+  return new MeepoError("ERR_INTERNAL_RUNTIME_FAILURE", {
+    message: err instanceof Error ? err.message : String(err),
+    cause: err,
+    trace_id: traceId,
+    interaction_id: interactionId,
+  });
+}
+
+function classifyOptionalRecallFailure(err: unknown, traceId: string, interactionId: string): MeepoError {
+  if (err instanceof MeepoError) {
+    return err;
+  }
+
+  const message = err instanceof Error ? err.message : String(err);
+  if (message.includes("transcript") || message.includes("bronze")) {
+    return new MeepoError("ERR_TRANSCRIPT_UNAVAILABLE", {
+      message,
+      cause: err,
+      trace_id: traceId,
+      interaction_id: interactionId,
+      metadata: {
+        surface: "voice_reply_optional_enrichment",
+        transcript_state: "export_failed",
+      },
+    });
+  }
+
+  return new MeepoError("ERR_INTERNAL_RUNTIME_FAILURE", {
+    message,
+    cause: err,
+    trace_id: traceId,
+    interaction_id: interactionId,
+    metadata: {
+      surface: "voice_reply_optional_enrichment",
+    },
+  });
+}
+
+async function sendDegradedVoiceTextReply(args: {
+  voiceState: any;
+  channelId: string;
+  content: string;
+}): Promise<boolean> {
+  try {
+    const client = args.voiceState.guild.client;
+    const channel = await client.channels.fetch(args.channelId) as TextChannel;
+    if (!channel?.isTextBased()) {
+      return false;
+    }
+    await channel.send(args.content);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Generate and speak a reply to a voice utterance.
@@ -136,6 +197,8 @@ export async function respondToVoiceUtterance(
   // Update cooldown
   guildLastVoiceReply.set(guildId, now);
 
+  const targetTextChannelId = textChannelId ?? channelId;
+
   try {
     const activeSession = getActiveSession(guildId);
     const db = getDbForCampaign(campaignSlug);
@@ -160,8 +223,21 @@ export async function respondToVoiceUtterance(
     
     if (memoryEnabled) {
       try {
-        const registry = loadRegistry({ campaignSlug });
-        const matches = extractRegistryMatches(utterance, registry);
+        const throttle = checkAndRecordRecallThrottle({
+          guildId,
+          actorUserId: speakerId,
+          surface: "voice_utterance",
+        });
+        if (throttle.throttled) {
+          voiceReplyLog.debug(
+            `Recall throttled (surface=voice_utterance reason=${throttle.reason} retry_ms=${throttle.retryAfterMs})`
+          );
+        } else {
+        const registry = loadRegistryForScope({ guildId, campaignSlug });
+        const matches = boundedItems(
+          extractRegistryMatches(utterance, registry),
+          RECALL_SAFETY.shape.maxRegistryMatches
+        );
         
         voiceReplyLog.debug(`Voice - Registry matches: ${matches.length} [${matches.map(m => m.canonical).join(", ")}]`);
 
@@ -169,10 +245,20 @@ export async function respondToVoiceUtterance(
           // Search for events using registry matches
           const allEvents = new Map<string, EventRow>();
           for (const match of matches) {
-            const events = searchEventsByTitleScoped({ term: match.canonical, guildId });
+            const events = searchEventsByTitleScoped({
+              term: match.canonical,
+              scope: { guildId, campaignSlug },
+              limit: RECALL_SAFETY.shape.maxEventsPerMatch,
+            });
             voiceReplyLog.debug(`Voice - Events for "${match.canonical}": ${events.length}`);
             for (const event of events) {
+              if (allEvents.size >= RECALL_SAFETY.shape.maxUniqueEvents) {
+                break;
+              }
               allEvents.set(event.event_id, event);
+            }
+            if (allEvents.size >= RECALL_SAFETY.shape.maxUniqueEvents) {
+              break;
             }
           }
 
@@ -189,7 +275,10 @@ export async function respondToVoiceUtterance(
             const allBeats: ScoredBeat[] = [];
             const db = getDbForCampaign(campaignSlug);
 
-            for (const [sessionId, sessionEvents] of eventsBySession.entries()) {
+            for (const [sessionId, sessionEvents] of boundedItems(
+              Array.from(eventsBySession.entries()),
+              RECALL_SAFETY.shape.maxSessionsWithEvents
+            )) {
               // Get session label for GPTcap loading
               const labelRow = db.prepare("SELECT label FROM sessions WHERE session_id = ? LIMIT 1")
                 .get(sessionId) as { label: string | null } | undefined;
@@ -198,17 +287,24 @@ export async function respondToVoiceUtterance(
               if (label) {
                 const gptcap = loadGptcap(label);
                 if (gptcap) {
-                  const relevantBeats = findRelevantBeats(gptcap, sessionEvents, { topK: 6 });
+                  const relevantBeats = findRelevantBeats(gptcap, sessionEvents, {
+                    topK: RECALL_SAFETY.shape.maxBeatsPerSession,
+                  });
                   allBeats.push(...relevantBeats);
+                  if (allBeats.length >= RECALL_SAFETY.shape.maxTotalBeats) {
+                    break;
+                  }
                 }
               }
             }
 
+            const boundedBeats = boundedItems(allBeats, RECALL_SAFETY.shape.maxTotalBeats);
+
             // Build memory context if we have beats
-            if (allBeats.length > 0) {
+            if (boundedBeats.length > 0) {
               // Collect all needed transcript lines from beats
               const linesBySession = new Map<string, Set<number>>();
-              for (const scored of allBeats) {
+              for (const scored of boundedBeats) {
                 // Find which session this beat belongs to (via events)
                 for (const [sessionId, sessionEvents] of eventsBySession.entries()) {
                   // Simple heuristic: if any event overlaps with beat lines, associate beat with this session
@@ -237,10 +333,13 @@ export async function respondToVoiceUtterance(
               // Fetch transcript lines (use first session with lines for now)
               const firstSessionWithLines = Array.from(linesBySession.keys())[0];
               if (firstSessionWithLines) {
-                const neededLines = Array.from(linesBySession.get(firstSessionWithLines) || []);
+                const neededLines = boundedItems(
+                  Array.from(linesBySession.get(firstSessionWithLines) || []),
+                  RECALL_SAFETY.shape.maxTranscriptLines
+                );
                 if (neededLines.length > 0) {
                   const transcriptLines = getTranscriptLines(firstSessionWithLines, neededLines, { db });
-                  partyMemory = buildMemoryContext(allBeats, transcriptLines, {
+                  partyMemory = buildMemoryContext(boundedBeats, transcriptLines, {
                     maxLinesPerBeat: 2,
                     maxTotalChars: 1600,
                   });
@@ -248,6 +347,7 @@ export async function respondToVoiceUtterance(
               }
             }
           }
+        }
         }
       } catch (recallErr: any) {
         const message = recallErr?.message ?? String(recallErr);
@@ -259,7 +359,17 @@ export async function respondToVoiceUtterance(
             );
           }
         } else {
-          voiceReplyLog.warn(`Memory retrieval failed (voice): ${message}`);
+          const classified = classifyOptionalRecallFailure(recallErr, traceId, interactionId);
+          const payload = formatUserFacingError(classified, {
+            trace_id: traceId,
+            interaction_id: interactionId,
+          });
+          voiceReplyLog.warn(`Memory retrieval failed (voice): ${message}`, {
+            error_code: payload.code,
+            failure_class: payload.failureClass,
+            retryable: payload.retryable,
+            corrective_action_required: payload.correctiveActionRequired,
+          });
         }
         // Continue without memory context on error
       }
@@ -413,7 +523,6 @@ export async function respondToVoiceUtterance(
       voiceReplyLog.debug(`LLM response: "${responseText.substring(0, 50)}..."`);
     }
 
-    const targetTextChannelId = textChannelId ?? channelId;
     const sendAsText = active.reply_mode === "text" || replyViaTextOnly === true;
 
     // Increment latch turn only when we actually reply (per-user)
@@ -495,14 +604,26 @@ export async function respondToVoiceUtterance(
     voiceReplyLog.info(`🔊 Meepo: "${responseText}"`);
     return true;
   } catch (err: any) {
-    const payload = formatUserFacingError(err, {
+    const normalized = normalizeVoiceReplyFailure(err, traceId, interactionId);
+    const payload = formatUserFacingError(normalized, {
       fallbackMessage: "⚠️ Meepo couldn't generate a voice reply.",
       trace_id: traceId,
+      interaction_id: interactionId,
     });
     voiceReplyLog.error(`Error generating reply: ${err.message ?? err}`, {
       error_code: payload.code,
+      failure_class: payload.failureClass,
+      retryable: payload.retryable,
+      corrective_action_required: payload.correctiveActionRequired,
     });
-    return false;
+
+    // The user explicitly expected a reply on this path; send a safe degraded text response if possible.
+    const delivered = await sendDegradedVoiceTextReply({
+      voiceState,
+      channelId: targetTextChannelId,
+      content: payload.content,
+    });
+    return delivered;
   }
     }
   );

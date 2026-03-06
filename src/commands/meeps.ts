@@ -11,7 +11,7 @@
 
 import { SlashCommandBuilder, TextChannel, GuildMember } from 'discord.js';
 import { log } from '../utils/logger.js';
-import { loadRegistry } from '../registry/loadRegistry.js';
+import { loadRegistryForScope } from '../registry/loadRegistry.js';
 import { getActiveMeepo } from '../meepo/state.js';
 import { getDiscordClient } from '../bot.js';
 import {
@@ -30,8 +30,11 @@ const meepsLog = log.withScope("meeps");
  * Resolve a Discord user to a registered PC
  * @returns {canonical_name, discord_user_id} or null if not found
  */
-function resolvePcFromUser(user: any): { canonical_name: string; discord_user_id: string } | null {
-  const registry = loadRegistry();
+function resolvePcFromUser(
+  user: any,
+  scope: { guildId: string; campaignSlug: string }
+): { canonical_name: string; discord_user_id: string } | null {
+  const registry = loadRegistryForScope(scope);
   const pc = registry.byDiscordUserId.get(user.id);
   if (!pc) {
     return null;
@@ -95,16 +98,22 @@ export const meeps = {
 
   async execute(interaction: any, _ctx: CommandCtx | null) {
     const guildId = interaction.guildId as string;
+    const campaignSlug = _ctx?.campaignSlug;
     const sub = interaction.options.getSubcommand();
 
+    if (!campaignSlug) {
+      await interaction.reply({ content: 'Meepo scope unavailable for this command.', ephemeral: true });
+      return;
+    }
+
     if (sub === 'spend') {
-      await handleSpend(interaction, guildId);
+      await handleSpend(interaction, guildId, campaignSlug);
     } else if (sub === 'reward') {
-      await handleReward(interaction, guildId);
+      await handleReward(interaction, guildId, campaignSlug);
     } else if (sub === 'balance') {
-      await handleBalance(interaction, guildId);
+      await handleBalance(interaction, guildId, campaignSlug);
     } else if (sub === 'history') {
-      await handleHistory(interaction, guildId);
+      await handleHistory(interaction, guildId, campaignSlug);
     }
   },
 };
@@ -113,9 +122,9 @@ export const meeps = {
  * /meeps spend
  * Player spends 1 meep from their balance
  */
-async function handleSpend(interaction: any, guildId: string): Promise<void> {
+async function handleSpend(interaction: any, guildId: string, campaignSlug: string): Promise<void> {
   const invoker = interaction.user;
-  const invokerPC = resolvePcFromUser(invoker);
+  const invokerPC = resolvePcFromUser(invoker, { guildId, campaignSlug });
 
   if (!invokerPC) {
     // Not a registered PC - allow any Discord user to have a meep balance
@@ -127,6 +136,7 @@ async function handleSpend(interaction: any, guildId: string): Promise<void> {
   // Use engine to spend
   const success = spendMeep({
     guildId,
+    campaignSlug,
     invokerDiscordId: invoker.id,
     invokerName: interaction.member?.displayName ?? invoker.username,
   });
@@ -139,7 +149,7 @@ async function handleSpend(interaction: any, guildId: string): Promise<void> {
     return;
   }
 
-  const newBalance = getMeepBalance(guildId, invoker.id);
+  const newBalance = getMeepBalance({ guildId, campaignSlug }, invoker.id);
   const oldBalance = newBalance + 1;
   meepsLog.info(`Spend: ${invoker.username} spent 1 meep, balance ${oldBalance} → ${newBalance}`);
   const response = formatMeepReceipt(newBalance, 'spend');
@@ -168,7 +178,7 @@ async function handleSpend(interaction: any, guildId: string): Promise<void> {
  * /meeps reward
  * DM grants 1 meep to target PC
  */
-async function handleReward(interaction: any, guildId: string): Promise<void> {
+async function handleReward(interaction: any, guildId: string, campaignSlug: string): Promise<void> {
   // Guard: DM-only
   if (!isElevated(interaction.member as GuildMember | null)) {
     await interaction.reply({
@@ -181,7 +191,7 @@ async function handleReward(interaction: any, guildId: string): Promise<void> {
   const target = interaction.options.getUser('target');
 
   // Resolve target to PC
-  const targetPC = resolvePcFromUser(target);
+  const targetPC = resolvePcFromUser(target, { guildId, campaignSlug });
   if (!targetPC) {
     await interaction.reply({
       content: `I don't know who that is yet… add them to the registry first, meep.`,
@@ -190,7 +200,7 @@ async function handleReward(interaction: any, guildId: string): Promise<void> {
     return;
   }
 
-  const currentBalance = getMeepBalance(guildId, target.id);
+  const currentBalance = getMeepBalance({ guildId, campaignSlug }, target.id);
 
   // Guardrail: Already at cap
   if (currentBalance >= MEEP_MAX_BALANCE) {
@@ -205,6 +215,7 @@ async function handleReward(interaction: any, guildId: string): Promise<void> {
   const dm = interaction.member;
   const result = creditMeep({
     guildId,
+    campaignSlug,
     targetDiscordId: target.id,
     issuerType: 'dm',
     issuerDiscordId: interaction.user.id,
@@ -249,13 +260,13 @@ async function handleReward(interaction: any, guildId: string): Promise<void> {
  * /meeps balance
  * Check meep balance for self or another PC (DM-only for others)
  */
-async function handleBalance(interaction: any, guildId: string): Promise<void> {
+async function handleBalance(interaction: any, guildId: string, campaignSlug: string): Promise<void> {
   const target = interaction.options.getUser('target');
   const invoker = interaction.user;
 
   // Default to invoker if no target specified
   const checkUser = target ?? invoker;
-  const checkPC = resolvePcFromUser(checkUser);
+  const checkPC = resolvePcFromUser(checkUser, { guildId, campaignSlug });
   meepsLog.debug(`/meeps balance invoked: invoker=${invoker.username}, target=${checkUser.username}`);
 
   // Guard: Non-DM checking someone else's balance
@@ -267,7 +278,7 @@ async function handleBalance(interaction: any, guildId: string): Promise<void> {
     return;
   }
 
-  const balance = getMeepBalance(guildId, checkUser.id);
+  const balance = getMeepBalance({ guildId, campaignSlug }, checkUser.id);
   const maxBalance = 3;
 
   let response: string;
@@ -287,14 +298,14 @@ async function handleBalance(interaction: any, guildId: string): Promise<void> {
  * /meeps history
  * View transaction history for self or another PC (DM-only for others)
  */
-async function handleHistory(interaction: any, guildId: string): Promise<void> {
+async function handleHistory(interaction: any, guildId: string, campaignSlug: string): Promise<void> {
   const target = interaction.options.getUser('target');
   const limit = interaction.options.getInteger('limit') ?? 10;
   const invoker = interaction.user;
 
   // Default to invoker if no target specified
   const checkUser = target ?? invoker;
-  const checkPC = resolvePcFromUser(checkUser);
+  const checkPC = resolvePcFromUser(checkUser, { guildId, campaignSlug });
 
   // Guard: Non-DM checking someone else's history
   if (target && !isElevated(interaction.member as GuildMember | null)) {
@@ -305,7 +316,7 @@ async function handleHistory(interaction: any, guildId: string): Promise<void> {
     return;
   }
 
-  const txs = getMeepHistory(guildId, checkUser.id, limit);
+  const txs = getMeepHistory({ guildId, campaignSlug }, checkUser.id, limit);
   const historyText = formatMeepHistory(txs);
 
   let title: string;
