@@ -1,4 +1,4 @@
-import { loadRegistry } from "../../registry/loadRegistry.js";
+import { loadRegistryForScope } from "../../registry/loadRegistry.js";
 
 const guildPromptOverrides = new Map<string, string>();
 
@@ -37,13 +37,14 @@ export function buildSttPromptFromNames(baseNames: string[], registryNames: stri
 }
 
 export function buildSttPromptFromRegistry(args: {
+  guildId: string;
   campaignSlug: string;
   fallbackPrompt?: string | null;
 }): string | null {
   const fallbackNames = parsePromptNames(args.fallbackPrompt);
 
   try {
-    const registry = loadRegistry({ campaignSlug: args.campaignSlug });
+    const registry = loadRegistryForScope({ guildId: args.guildId, campaignSlug: args.campaignSlug });
     const registryNames = registry.characters
       .map((character) => normalizeName(character.canonical_name))
       .filter((name) => name.length > 0);

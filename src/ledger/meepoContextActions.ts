@@ -41,6 +41,7 @@ import { log } from "../utils/logger.js";
 import { cfg } from "../config/env.js";
 import { buildSttPromptFromRegistry, setGuildSttPrompt } from "../voice/stt/promptState.js";
 import { MeepoError, toMeepoError } from "../errors/meepoError.js";
+import { formatUserFacingError } from "../errors/formatUserFacingError.js";
 
 export const CANON_MINI_TRIGGER_LINES = 250;
 export const MEGAMEECAP_ALGO_VERSION = "megameecap-chunk-v1";
@@ -76,6 +77,81 @@ const DEFAULT_EXEC_OPTIONS: MeepoContextActionExecutionOptions = {
   maxAttempts: 4,
   retryBaseMs: 500,
 };
+
+type ActionFamily = "recall_enrichment" | "recap_generation";
+
+type ActionFamilyPolicy = {
+  actionTypes: readonly string[];
+  maxInFlightPerGuild: number;
+  maxQueuedPerGuild: number;
+  queuePolicy: "collapse_or_skip";
+};
+
+const ACTION_FAMILY_POLICIES: Record<ActionFamily, ActionFamilyPolicy> = {
+  recall_enrichment: {
+    actionTypes: [MEEPO_MIND_RETRIEVE_ACTION],
+    maxInFlightPerGuild: 1,
+    maxQueuedPerGuild: 6,
+    queuePolicy: "collapse_or_skip",
+  },
+  recap_generation: {
+    actionTypes: [MEGAMEECAP_UPDATE_CHUNK_ACTION],
+    maxInFlightPerGuild: 1,
+    maxQueuedPerGuild: 4,
+    queuePolicy: "collapse_or_skip",
+  },
+};
+
+function getActionFamily(actionType: string): ActionFamily | null {
+  if (ACTION_FAMILY_POLICIES.recall_enrichment.actionTypes.includes(actionType)) {
+    return "recall_enrichment";
+  }
+  if (ACTION_FAMILY_POLICIES.recap_generation.actionTypes.includes(actionType)) {
+    return "recap_generation";
+  }
+  return null;
+}
+
+function countQueuedActionsForGuildFamily(db: any, args: {
+  guildId: string;
+  family: ActionFamily;
+}): number {
+  const policy = ACTION_FAMILY_POLICIES[args.family];
+  const placeholders = policy.actionTypes.map(() => "?").join(", ");
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n
+       FROM meepo_actions
+       WHERE guild_id = ?
+         AND action_type IN (${placeholders})
+         AND status IN ('pending', 'processing')`
+    )
+    .get(args.guildId, ...policy.actionTypes) as { n: number } | undefined;
+  return Number(row?.n ?? 0);
+}
+
+function countOtherInFlightActionsForGuildFamily(db: any, args: {
+  guildId: string;
+  family: ActionFamily;
+  nowMs: number;
+  excludingActionId: string;
+}): number {
+  const policy = ACTION_FAMILY_POLICIES[args.family];
+  const placeholders = policy.actionTypes.map(() => "?").join(", ");
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n
+       FROM meepo_actions
+       WHERE guild_id = ?
+         AND action_type IN (${placeholders})
+         AND status = 'processing'
+         AND lease_until_ms IS NOT NULL
+         AND lease_until_ms > ?
+         AND id <> ?`
+    )
+    .get(args.guildId, ...policy.actionTypes, args.nowMs, args.excludingActionId) as { n: number } | undefined;
+  return Number(row?.n ?? 0);
+}
 
 export function buildCompactionDedupeKey(args: {
   guildId: string;
@@ -258,6 +334,42 @@ export function enqueueMegameecapChunkIfNeeded(db: any, args: {
     algoVersion: payload.algo_version,
   });
 
+  const family: ActionFamily = "recap_generation";
+  const existingByDedupe = db
+    .prepare(`SELECT id FROM meepo_actions WHERE dedupe_key = ? LIMIT 1`)
+    .get(dedupeKey) as { id: string } | undefined;
+
+  if (!existingByDedupe) {
+    const queuedForFamily = countQueuedActionsForGuildFamily(db, {
+      guildId: payload.guild_id,
+      family,
+    });
+    const policy = ACTION_FAMILY_POLICIES[family];
+    if (queuedForFamily >= policy.maxQueuedPerGuild) {
+      appendMeepoActionLogEvent(db, {
+        ts_ms: args.nowMs,
+        run_kind: args.runKind ?? "online",
+        guild_id: payload.guild_id,
+        scope: payload.scope,
+        session_id: payload.session_id,
+        event_type: "action_backpressure_skipped",
+        anchor_ledger_id: payload.range_end_ledger_id,
+        action_type: MEGAMEECAP_UPDATE_CHUNK_ACTION,
+        dedupe_key: dedupeKey,
+        algo_version: payload.algo_version,
+        status: "skipped",
+        data: {
+          reason: "queue_backpressure",
+          action_family: family,
+          queue_count: queuedForFamily,
+          queue_limit: policy.maxQueuedPerGuild,
+          queue_policy: policy.queuePolicy,
+        },
+      });
+      return { attempted: true, queued: false };
+    }
+  }
+
   const enqueueResult = enqueueActionIfMissing(db, {
     id: randomUUID(),
     guildId: payload.guild_id,
@@ -291,6 +403,7 @@ export function enqueueMeepoMindRetrieveIfNeeded(db: any, args: {
   nowMs: number;
   runKind?: MeepoActionRunKind;
 }): boolean {
+  const family: ActionFamily = "recall_enrichment";
   const payload: MeepoMindRetrievePayload = {
     guild_id: args.guildId,
     campaign_slug: args.campaignSlug,
@@ -316,6 +429,43 @@ export function enqueueMeepoMindRetrieveIfNeeded(db: any, args: {
     topK: args.topK,
     queryHash: args.queryHash,
   });
+
+  const existingByDedupe = db
+    .prepare(`SELECT id FROM meepo_actions WHERE dedupe_key = ? LIMIT 1`)
+    .get(dedupeKey) as { id: string } | undefined;
+
+  if (!existingByDedupe) {
+    const queuedForFamily = countQueuedActionsForGuildFamily(db, {
+      guildId: args.guildId,
+      family,
+    });
+    const policy = ACTION_FAMILY_POLICIES[family];
+    if (queuedForFamily >= policy.maxQueuedPerGuild) {
+      appendMeepoActionLogEvent(db, {
+        ts_ms: args.nowMs,
+        run_kind: args.runKind ?? "online",
+        guild_id: args.guildId,
+        scope: args.scope,
+        session_id: args.sessionId,
+        event_type: "action_backpressure_skipped",
+        anchor_ledger_id: args.anchorLedgerId,
+        action_type: MEEPO_MIND_RETRIEVE_ACTION,
+        dedupe_key: dedupeKey,
+        algo_version: args.algoVersion,
+        query_hash: args.queryHash,
+        top_k: args.topK,
+        status: "skipped",
+        data: {
+          reason: "queue_backpressure",
+          action_family: family,
+          queue_count: queuedForFamily,
+          queue_limit: policy.maxQueuedPerGuild,
+          queue_policy: policy.queuePolicy,
+        },
+      });
+      return false;
+    }
+  }
 
   const enqueueResult = enqueueActionIfMissing(db, {
     id: randomUUID(),
@@ -751,6 +901,7 @@ async function prepareMegameecapChunkCommit(
   const sessionLabel = readSessionLabel(db, payload.guild_id, payload.session_id);
   const { buildSessionArtifactStem, resolveSessionMegameecapPaths } = await import("../dataPaths.js");
   const paths = resolveSessionMegameecapPaths({
+    guildId: payload.guild_id,
     campaignSlug,
     sessionId: payload.session_id,
     sessionLabel,
@@ -872,7 +1023,11 @@ async function prepareMegameecapChunkCommit(
     )
   );
 
-  const chunkPrefix = `${buildSessionArtifactStem(payload.session_id, sessionLabel)}-megameecap-chunk-`;
+  const chunkPrefix = `${buildSessionArtifactStem({
+    guildId: payload.guild_id,
+    campaignSlug,
+    sessionId: payload.session_id,
+  })}-megameecap-chunk-`;
   const chunkBodies = fs
     .readdirSync(paths.outputDir)
     .filter((name) => name.startsWith(chunkPrefix) && name.endsWith(".md"))
@@ -1074,11 +1229,58 @@ export async function processOneMeepoContextAction(
     });
   }
 
+  const family = getActionFamily(action.action_type);
+  if (family) {
+    const policy = ACTION_FAMILY_POLICIES[family];
+    const inFlightOthers = countOtherInFlightActionsForGuildFamily(db, {
+      guildId: action.guild_id,
+      family,
+      nowMs,
+      excludingActionId: action.id,
+    });
+
+    if (inFlightOthers >= policy.maxInFlightPerGuild) {
+      const backoffMs = Math.max(100, options.retryBaseMs);
+      withImmediateTransaction(db, () => {
+        releaseActionForRetry(db, {
+          actionId: action.id,
+          nowMs,
+          nextAttemptAtMs: nowMs + backoffMs,
+          error: `BACKPRESSURE:${family}`,
+        });
+      });
+
+      appendMeepoActionLogEvent(db, {
+        ts_ms: nowMs,
+        run_kind: runKind,
+        guild_id: action.guild_id,
+        scope: action.scope,
+        session_id: action.session_id,
+        event_type: "action_backpressure_retry",
+        anchor_ledger_id: anchorLedgerId,
+        action_id: action.id,
+        action_type: action.action_type,
+        dedupe_key: action.dedupe_key,
+        attempt: action.attempts,
+        status: "pending",
+        data: {
+          reason: "inflight_backpressure",
+          action_family: family,
+          inflight_others: inFlightOthers,
+          inflight_limit: policy.maxInFlightPerGuild,
+          retry_after_ms: backoffMs,
+        },
+      });
+      return false;
+    }
+  }
+
   try {
     if (action.action_type === REFRESH_STT_PROMPT_ACTION) {
       parseRefreshSttPromptPayload(action);
       const campaignSlug = resolveCampaignSlugForGuild(db, action.guild_id);
       const refreshedPrompt = buildSttPromptFromRegistry({
+        guildId: action.guild_id,
         campaignSlug,
         fallbackPrompt: cfg.stt.prompt,
       });
@@ -1225,6 +1427,7 @@ export async function processOneMeepoContextAction(
         cause: error,
       })
       : toMeepoError(error, "ERR_UNKNOWN");
+    const failurePayload = formatUserFacingError(boundaryError);
     const now = Date.now();
     const message = `${boundaryError.code}:${String(boundaryError.message ?? "unknown_error")}`;
     const terminalFailure = action.attempts >= options.maxAttempts;
@@ -1261,6 +1464,8 @@ export async function processOneMeepoContextAction(
         attempt: action.attempts,
         status: terminalFailure ? "failed" : "pending",
         error: message,
+        error_code: failurePayload.code,
+        failure_class: failurePayload.failureClass,
       });
     }
     return false;

@@ -12,6 +12,15 @@ vi.mock("../llm/client.js", () => ({
   chat: vi.fn(async () => "mock llm output"),
 }));
 
+vi.mock("../ledger/meepoMindRetrieveAction.js", () => ({
+  executeMeepoMindRetrieveAction: vi.fn(() => ({
+    artifactPath: "retrieval-artifact.json",
+    alwaysCount: 0,
+    rankedCount: 0,
+    dbMs: 0,
+  })),
+}));
+
 vi.mock("../config/env.js", () => ({
   cfg: {
     llm: {
@@ -101,6 +110,7 @@ function createTestDb(): any {
     CREATE TABLE sessions (
       session_id TEXT PRIMARY KEY,
       guild_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
       label TEXT
     );
   `);
@@ -133,6 +143,153 @@ function insertLedgerEntry(db: any, args: {
 }
 
 describe("meepo context action queue", () => {
+  test("retrieval enqueue applies per-guild family queue backpressure", async () => {
+    const db = createTestDb();
+    const { enqueueMeepoMindRetrieveIfNeeded } = await import("../ledger/meepoContextActions.js");
+
+    for (let i = 0; i < 6; i += 1) {
+      db.prepare(
+        `INSERT INTO meepo_actions (
+          id, guild_id, scope, session_id, action_type, dedupe_key, payload_json,
+          status, lease_owner, lease_until_ms, attempts, last_error, created_at_ms, updated_at_ms, completed_at_ms
+        ) VALUES (?, 'guild-bp', 'canon', 'session-bp', 'meepo-mind-retrieve', ?, '{}', 'pending', NULL, NULL, 0, NULL, ?, ?, NULL)`
+      ).run(randomUUID(), `bp-seed-${i}`, 1_000 + i, 1_000 + i);
+    }
+
+    const queued = enqueueMeepoMindRetrieveIfNeeded(db, {
+      guildId: "guild-bp",
+      campaignSlug: "default",
+      scope: "canon",
+      sessionId: "session-bp",
+      anchorLedgerId: "line-999",
+      queryText: "hello",
+      queryHash: "hash-bp",
+      topK: 8,
+      algoVersion: "v1",
+      nowMs: 2_000,
+      runKind: "online",
+    });
+
+    expect(queued).toBe(false);
+    const rowCount = (db.prepare(`SELECT COUNT(*) AS n FROM meepo_actions`).get() as { n: number }).n;
+    expect(rowCount).toBe(6);
+  });
+
+  test("worker retries when same-family action is already processing in guild", async () => {
+    const db = createTestDb();
+
+    db.prepare(`INSERT INTO sessions (session_id, guild_id, label) VALUES (?, ?, ?)`)
+      .run("session-a", "guild-cap", "C2E20");
+
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO meepo_actions (
+        id, guild_id, scope, session_id, action_type, dedupe_key, payload_json,
+        status, lease_owner, lease_until_ms, attempts, last_error, created_at_ms, updated_at_ms, completed_at_ms
+      ) VALUES (?, 'guild-cap', 'canon', 'session-a', 'meepo-mind-retrieve', 'inflight-existing', '{}', 'processing', 'other-worker', ?, 1, NULL, ?, ?, NULL)`
+    ).run(randomUUID(), now + 60_000, now - 10, now - 10);
+
+    db.prepare(
+      `INSERT INTO meepo_actions (
+        id, guild_id, scope, session_id, action_type, dedupe_key, payload_json,
+        status, lease_owner, lease_until_ms, attempts, last_error, created_at_ms, updated_at_ms, completed_at_ms
+      ) VALUES (?, 'guild-cap', 'canon', 'session-a', 'meepo-mind-retrieve', 'pending-under-cap', ?, 'pending', NULL, NULL, 0, NULL, ?, ?, NULL)`
+    ).run(
+      "pending-action",
+      JSON.stringify({
+        guild_id: "guild-cap",
+        campaign_slug: "default",
+        scope: "canon",
+        session_id: "session-a",
+        anchor_ledger_id: "line-1",
+        query_hash: "hash-1",
+        top_k: 8,
+        algo_version: "v1",
+        include_always_tier: true,
+        include_identity_context: false,
+      }),
+      now,
+      now
+    );
+
+    const processed = await processOneMeepoContextAction(db, "test-worker", {
+      leaseTtlMs: 30_000,
+      maxAttempts: 4,
+      retryBaseMs: 500,
+      runKind: "online",
+    });
+
+    expect(processed).toBe(false);
+    const row = db
+      .prepare(`SELECT status, lease_owner, lease_until_ms, last_error FROM meepo_actions WHERE id = ?`)
+      .get("pending-action") as {
+      status: string;
+      lease_owner: string | null;
+      lease_until_ms: number | null;
+      last_error: string | null;
+    };
+
+    expect(row.status).toBe("pending");
+    expect(row.lease_owner).toBeNull();
+    expect(typeof row.lease_until_ms).toBe("number");
+    expect(String(row.last_error ?? "")).toContain("BACKPRESSURE");
+  });
+
+  test("backpressure is isolated by guild for expensive families", async () => {
+    const db = createTestDb();
+
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO meepo_actions (
+        id, guild_id, scope, session_id, action_type, dedupe_key, payload_json,
+        status, lease_owner, lease_until_ms, attempts, last_error, created_at_ms, updated_at_ms, completed_at_ms
+      ) VALUES (?, 'guild-hot', 'canon', 'session-hot', 'meepo-mind-retrieve', 'hot-processing', '{}', 'processing', 'other-worker', ?, 1, NULL, ?, ?, NULL)`
+    ).run(randomUUID(), now + 60_000, now - 10, now - 10);
+
+    db.prepare(
+      `INSERT INTO meepo_actions (
+        id, guild_id, scope, session_id, action_type, dedupe_key, payload_json,
+        status, lease_owner, lease_until_ms, attempts, last_error, created_at_ms, updated_at_ms, completed_at_ms
+      ) VALUES (?, 'guild-cool', 'canon', 'session-cool', 'meepo-mind-retrieve', 'cool-pending', ?, 'pending', NULL, NULL, 0, NULL, ?, ?, NULL)`
+    ).run(
+      "cool-pending",
+      JSON.stringify({
+        guild_id: "guild-cool",
+        campaign_slug: "default",
+        scope: "canon",
+        session_id: "session-cool",
+        anchor_ledger_id: "line-1",
+        query_hash: "hash-cool",
+        top_k: 8,
+        algo_version: "v1",
+        include_always_tier: true,
+        include_identity_context: false,
+      }),
+      now,
+      now
+    );
+
+    let processed = false;
+    for (let i = 0; i < 3; i += 1) {
+      const tickProcessed = await processOneMeepoContextAction(db, "test-worker", {
+        leaseTtlMs: 30_000,
+        maxAttempts: 4,
+        retryBaseMs: 500,
+        runKind: "online",
+      });
+      if (tickProcessed) {
+        processed = true;
+        break;
+      }
+    }
+
+    expect(processed).toBe(true);
+    const row = db
+      .prepare(`SELECT status FROM meepo_actions WHERE id = ?`)
+      .get("cool-pending") as { status: string };
+    expect(row.status).toBe("done");
+  });
+
   test("compacts canon context at 250 lines with replay-safe dedupe", async () => {
     const db = createTestDb();
     const guildId = "guild-1";

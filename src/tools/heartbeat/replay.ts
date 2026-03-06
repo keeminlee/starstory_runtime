@@ -550,6 +550,7 @@ async function runCli(): Promise<void> {
   const session = resolveSessionRow(baseDb, args.sessionRef);
 
   const meecapPaths = resolveSessionMegameecapPaths({
+    guildId: session.guild_id,
     campaignSlug: args.campaign,
     sessionId: session.session_id,
     sessionLabel: session.label,

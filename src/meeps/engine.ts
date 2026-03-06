@@ -17,8 +17,12 @@ export const MEEP_MAX_BALANCE = 3;
 /**
  * Get current meep balance
  */
-export function getBalance(guildId: string, targetDiscordId: string): number {
-  return queryBalance(guildId, targetDiscordId);
+export function getBalance(scope: { guildId: string; campaignSlug: string }, targetDiscordId: string): number {
+  return queryBalance(scope, targetDiscordId);
+}
+
+export function getBalanceScoped(scope: { guildId: string; campaignSlug: string }, targetDiscordId: string): number {
+  return getBalance(scope, targetDiscordId);
 }
 
 /**
@@ -27,12 +31,13 @@ export function getBalance(guildId: string, targetDiscordId: string): number {
  */
 export function spendMeep(opts: {
   guildId: string;
+  campaignSlug: string;
   invokerDiscordId: string;
   invokerName: string;
   reason?: string;
   meta?: Record<string, unknown>;
 }): boolean {
-  const balance = getBalance(opts.guildId, opts.invokerDiscordId);
+  const balance = getBalanceScoped({ guildId: opts.guildId, campaignSlug: opts.campaignSlug }, opts.invokerDiscordId);
   
   if (balance < 1) {
     return false;
@@ -40,6 +45,7 @@ export function spendMeep(opts: {
 
   createMeepTx({
     guild_id: opts.guildId,
+    campaign_slug: opts.campaignSlug,
     target_discord_id: opts.invokerDiscordId,
     delta: -1,
     issuer_type: "player",
@@ -61,6 +67,7 @@ export function spendMeep(opts: {
  */
 export function creditMeep(opts: {
   guildId: string;
+  campaignSlug: string;
   targetDiscordId: string;
   issuerType: "dm" | "meepo" | "system";
   issuerDiscordId?: string;
@@ -76,17 +83,17 @@ export function creditMeep(opts: {
   meta?: Record<string, unknown>;
 }): { success: boolean; balance?: number; txId?: string; reason?: string } {
   try {
-    const balance = getBalance(opts.guildId, opts.targetDiscordId);
+    const scopedBalance = getBalanceScoped({ guildId: opts.guildId, campaignSlug: opts.campaignSlug }, opts.targetDiscordId);
 
     // Check cap
-    if (balance >= MEEP_MAX_BALANCE) {
+    if (scopedBalance >= MEEP_MAX_BALANCE) {
       meepsLog.info(
-        `Credit blocked (capped): target=${opts.targetDiscordId}, balance=${balance}, source=${opts.sourceType}`
+        `Credit blocked (capped): target=${opts.targetDiscordId}, balance=${scopedBalance}, source=${opts.sourceType}`
       );
       return {
         success: false,
         reason: "capped",
-        balance,
+        balance: scopedBalance,
       };
     }
 
@@ -103,6 +110,7 @@ export function creditMeep(opts: {
     // Create transaction
     const txId = createMeepTx({
       guild_id: opts.guildId,
+      campaign_slug: opts.campaignSlug,
       target_discord_id: opts.targetDiscordId,
       delta: 1,
       issuer_type: opts.issuerType,
@@ -117,9 +125,9 @@ export function creditMeep(opts: {
       anchor_line_index: opts.anchor?.lineIndex,
     });
 
-    const newBalance = balance + 1;
+    const newBalance = scopedBalance + 1;
     meepsLog.info(
-      `Credit succeeded: target=${opts.targetDiscordId}, source=${opts.sourceType}, balance=${balance} → ${newBalance}`
+      `Credit succeeded: target=${opts.targetDiscordId}, source=${opts.sourceType}, balance=${scopedBalance} → ${newBalance}`
     );
 
     return {

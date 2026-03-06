@@ -1,9 +1,9 @@
-# Meepo Bot - Current State (March 4, 2026)
+# Meepo Bot - Current State (March 6, 2026)
 
 For documentation navigation, start at [README.md](README.md).
 
-**Status:** V0 complete, MeepoMind (V0.1) Phase 2-3 in progress + Tier S/A interaction memory  
-**Last Updated:** March 4, 2026
+**Status:** V0 complete, MeepoMind (V0.1) Phase 2-3 in progress + Sprint 3 hardening closure complete  
+**Last Updated:** March 6, 2026
 
 ---
 
@@ -59,6 +59,18 @@ http://localhost:7777/overlay            # Browser Source for speaking indicator
 ---
 
 ## Architecture Overview
+
+### Foundational Hardening Substrate (Sprint 3)
+
+Meepo now runs on a hardened multi-guild/session/ops substrate focused on reliability and operational legibility:
+
+- recap/request protection: edge + engine dedupe, cooldown, and capacity rails
+- recall safety: request throttling + retrieval-shape bounds
+- expensive worker safety: keyed back-pressure for hot guild scopes
+- failure contract stability: canonical taxonomy + user-safe formatter across command and voice boundaries
+- observability enforcement: strict-zone runtime stopline against raw `console.*` plus structured runtime logging in critical paths
+
+This closes the foundational reliability loop before further feature expansion.
 
 ### Awakening Runtime (v1.6)
 

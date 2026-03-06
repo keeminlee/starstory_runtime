@@ -148,6 +148,9 @@ export function registerHandlers(client: Client) {
       commandLog.error("Command error", {
         command: commandName,
         error_code: payload.code,
+        failure_class: payload.failureClass,
+        retryable: payload.retryable,
+        corrective_action_required: payload.correctiveActionRequired,
         error: err instanceof Error ? err.message : String(err),
         stack: err instanceof Error ? err.stack : undefined,
       }, {

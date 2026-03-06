@@ -11,13 +11,19 @@
 import { randomUUID } from 'crypto';
 import { log } from '../utils/logger.js';
 import { getDbForCampaign } from '../db.js';
-import { resolveCampaignSlug } from '../campaign/guildConfig.js';
 
 const meepsLog = log.withScope("meeps");
 
-function getMeepsDbForGuild(guildId: string) {
-  const campaignSlug = resolveCampaignSlug({ guildId });
-  return getDbForCampaign(campaignSlug);
+export type MeepsScope = {
+  guildId: string;
+  campaignSlug: string;
+};
+
+function getMeepsDbForScope(scope: MeepsScope) {
+  if (!scope?.guildId?.trim() || !scope?.campaignSlug?.trim()) {
+    throw new Error("Meeps scope requires explicit guildId and campaignSlug");
+  }
+  return getDbForCampaign(scope.campaignSlug);
 }
 
 export type IssuerType = 'dm' | 'player' | 'meepo' | 'system';
@@ -47,6 +53,7 @@ export interface MeepTransaction {
  */
 export function createMeepTx(opts: {
   guild_id: string;
+  campaign_slug: string;
   target_discord_id: string;
   delta: number;  // Always ±1
   issuer_type: IssuerType;
@@ -60,7 +67,7 @@ export function createMeepTx(opts: {
   anchor_session_id?: string;
   anchor_line_index?: number;
 }): string {
-  const db = getMeepsDbForGuild(opts.guild_id);
+  const db = getMeepsDbForScope({ guildId: opts.guild_id, campaignSlug: opts.campaign_slug });
   const tx_id = randomUUID();
   const now = Date.now();
 
@@ -97,13 +104,13 @@ export function createMeepTx(opts: {
  * Get current meep balance for a PC (sum of all transactions)
  * @returns balance (0 if no transactions)
  */
-export function getMeepBalance(guild_id: string, target_discord_id: string): number {
-  const db = getMeepsDbForGuild(guild_id);
+export function getMeepBalance(scope: MeepsScope, target_discord_id: string): number {
+  const db = getMeepsDbForScope(scope);
   const result = db.prepare(`
     SELECT COALESCE(SUM(delta), 0) as balance
     FROM meep_transactions
     WHERE guild_id = ? AND target_discord_id = ?
-  `).get(guild_id, target_discord_id) as { balance: number } | undefined;
+  `).get(scope.guildId, target_discord_id) as { balance: number } | undefined;
 
   return result?.balance ?? 0;
 }
@@ -112,17 +119,17 @@ export function getMeepBalance(guild_id: string, target_discord_id: string): num
  * Get transaction history for a PC (most recent first)
  */
 export function getMeepHistory(
-  guild_id: string,
+  scope: MeepsScope,
   target_discord_id: string,
   limit: number = 10
 ): MeepTransaction[] {
-  const db = getMeepsDbForGuild(guild_id);
+  const db = getMeepsDbForScope(scope);
   const rows = db.prepare(`
     SELECT * FROM meep_transactions
     WHERE guild_id = ? AND target_discord_id = ?
     ORDER BY created_at_ms DESC
     LIMIT ?
-  `).all(guild_id, target_discord_id, limit) as MeepTransaction[];
+  `).all(scope.guildId, target_discord_id, limit) as MeepTransaction[];
 
   return rows;
 }
@@ -189,6 +196,7 @@ function formatRelativeTime(ms: number): string {
 export function autoRewardMeep(opts: {
   target_discord_id: string;
   guild_id: string;
+  campaign_slug: string;
   reason?: string;
   meta?: Record<string, unknown>;
 }): string {
@@ -201,6 +209,7 @@ export function autoRewardMeep(opts: {
 
   return createMeepTx({
     guild_id: opts.guild_id,
+    campaign_slug: opts.campaign_slug,
     target_discord_id: opts.target_discord_id,
     delta: 1,
     issuer_type: 'meepo',

@@ -2,6 +2,7 @@ import type { ObservabilityContext } from "../observability/context.js";
 
 export const MEEPO_ERROR_CODES = [
   "ERR_UNKNOWN",
+  "ERR_INTERNAL_RUNTIME_FAILURE",
   "ERR_DISCORD_REPLY_FAILED",
   "ERR_DB_BUSY",
   "ERR_WORKER_STALE_LEASE",
@@ -11,6 +12,13 @@ export const MEEPO_ERROR_CODES = [
   "ERR_TTS_FAILED",
   "ERR_ARTIFACT_WRITE_FAILED",
   "ERR_INVALID_STATE",
+  "ERR_SESSION_CONFLICT",
+  "ERR_RECAP_IN_PROGRESS",
+  "ERR_RECAP_RATE_LIMITED",
+  "ERR_RECAP_CAPACITY_REACHED",
+  "ERR_STALE_INTERACTION",
+  "ERR_TRANSCRIPT_UNAVAILABLE",
+  "ERR_NO_ACTIVE_SESSION",
 ] as const;
 
 export type MeepoErrorCode = (typeof MEEPO_ERROR_CODES)[number];

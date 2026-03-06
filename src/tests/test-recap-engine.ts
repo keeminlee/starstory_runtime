@@ -140,11 +140,17 @@ test("generateSessionRecap returns non-empty text and stable metadata fields", a
   expect(result.sourceRange?.lineCount).toBeGreaterThan(0);
   expect(result.cacheHit).toBe(false);
 
-  const basePathsByLabel = resolveMegameecapBasePaths("default", sessionId, "Arc Test");
+  const basePathsByLabel = resolveMegameecapBasePaths(guildId, "default", sessionId, "Arc Test");
   expect(fs.existsSync(basePathsByLabel.basePath)).toBe(true);
   expect(fs.existsSync(basePathsByLabel.metaPath)).toBe(true);
 
-  const finalPathsByLabel = resolveMegameecapFinalPaths("default", sessionId, "balanced", "Arc Test");
+  const finalPathsByLabel = resolveMegameecapFinalPaths(
+    guildId,
+    "default",
+    sessionId,
+    "balanced",
+    "Arc Test"
+  );
   expect(fs.existsSync(finalPathsByLabel.recapPath)).toBe(true);
   expect(fs.existsSync(finalPathsByLabel.metaPath)).toBe(true);
 });
@@ -176,6 +182,33 @@ test("final style regeneration reuses base cache and avoids base rerun", async (
   const callsAfterSecond = llmCall.mock.calls.length;
 
   expect(callsAfterSecond - callsAfterFirst).toBe(1);
+});
+
+test("concurrent same-key recap requests share one in-flight generation", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-recap-inflight-dedupe-"));
+  tempDirs.push(tempDir);
+  configureHermeticEnv(tempDir);
+  vi.resetModules();
+
+  const { generateSessionRecap } = await import("../sessions/recapEngine.js");
+  const guildId = "guild-recap-inflight";
+  const sessionId = "session-recap-inflight";
+  await seedSessionFixture(guildId, sessionId);
+
+  const llmCall = vi.fn(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return "llm-output";
+  });
+
+  const [first, second] = await Promise.all([
+    generateSessionRecap({ guildId, sessionId, strategy: "balanced" }, { callLlm: llmCall }),
+    generateSessionRecap({ guildId, sessionId, strategy: "balanced" }, { callLlm: llmCall }),
+  ]);
+
+  // A single recap generation should perform one base pass and one final pass.
+  expect(llmCall).toHaveBeenCalledTimes(2);
+  expect(second.sourceTranscriptHash).toBe(first.sourceTranscriptHash);
+  expect(second.finalVersion).toBe(first.finalVersion);
 });
 
 test("base hash mismatch triggers base regeneration", async () => {

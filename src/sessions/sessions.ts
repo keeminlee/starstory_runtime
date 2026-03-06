@@ -3,7 +3,7 @@ import { getDbForCampaign } from "../db.js";
 import { resolveCampaignSlug } from "../campaign/guildConfig.js";
 import { resolveCampaignDbPath } from "../dataPaths.js";
 import { enqueueActionIfMissing, REFRESH_STT_PROMPT_ACTION } from "../ledger/meepoContextRepo.js";
-import { setActiveSessionId, clearActiveSessionId } from "./sessionRuntime.js";
+import { markRuntimeSessionEnded, markRuntimeSessionStarted } from "./sessionRuntime.js";
 import { cfg } from "../config/env.js";
 import type { MeepoMode } from "../config/types.js";
 import { resolveEffectiveMode, sessionKindForMode } from "./sessionRuntime.js";
@@ -24,6 +24,7 @@ export type Session = {
   guild_id: string;
   kind: SessionKindStored;
   mode_at_start: MeepoMode;
+  status?: "active" | "completed" | "interrupted";
   label: string | null;             // User-provided label (e.g., "C2E03") for reference
   created_at_ms: number;            // When session record was created (immutable, for ordering)
   started_at_ms: number;            // When session content began
@@ -130,7 +131,7 @@ export function startSession(
     });
   }
 
-  setActiveSessionId(guildId, sessionId);
+  markRuntimeSessionStarted(guildId, sessionId);
 
   return {
     session_id: sessionId,
@@ -156,11 +157,13 @@ export function endSession(guildId: string, reason: string | null = null): numbe
   const now = Date.now();
 
   const info = db
-    .prepare("UPDATE sessions SET ended_at_ms = ?, ended_reason = ? WHERE guild_id = ? AND ended_at_ms IS NULL")
+    .prepare(
+      "UPDATE sessions SET ended_at_ms = ?, ended_reason = ?, status = 'completed' WHERE guild_id = ? AND status = 'active'"
+    )
     .run(now, reason, guildId);
 
   if (info.changes > 0) {
-    clearActiveSessionId(guildId);
+    markRuntimeSessionEnded(guildId);
     scopedSessionLog.info("Session ended", {
       ended_reason: reason,
       changes: info.changes,
@@ -172,7 +175,7 @@ export function endSession(guildId: string, reason: string | null = null): numbe
 export function getActiveSession(guildId: string): Session | null {
   const { db } = getSessionDbForGuild(guildId);
   const row = db
-    .prepare("SELECT * FROM sessions WHERE guild_id = ? AND ended_at_ms IS NULL ORDER BY started_at_ms DESC LIMIT 1")
+    .prepare("SELECT * FROM sessions WHERE guild_id = ? AND status = 'active' ORDER BY started_at_ms DESC LIMIT 1")
     .get(guildId) as Session | undefined;
 
   return row ?? null;

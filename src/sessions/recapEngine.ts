@@ -21,6 +21,9 @@ import {
   resolveMegameecapFinalPaths,
   type RecapPassStrategy,
 } from "./megameecapArtifactLocator.js";
+import { log } from "../utils/logger.js";
+import { formatUserFacingError } from "../errors/formatUserFacingError.js";
+import { toMeepoError } from "../errors/meepoError.js";
 
 const MEGAMEECAP_ENGINE = "megameecap";
 const MEGAMEECAP_BASE_VERSION = "megameecap-base-v1";
@@ -31,6 +34,26 @@ const SILVER_TARGET_NARRATIVE_LINES = 250;
 const SILVER_MIN_NARRATIVE_LINES = 200;
 const SILVER_MAX_NARRATIVE_LINES = 313;
 const SILVER_SNAP_WINDOW = 25;
+const inFlightRecaps = new Map<string, Promise<RecapResult>>();
+const recapEngineLog = log.withScope("session", {
+  requireGuildContext: true,
+  callsite: "sessions/recapEngine.ts",
+});
+
+function buildRecapInFlightKey(args: {
+  guildId: string;
+  campaignSlug: string;
+  sessionId: string;
+  strategy: RecapStrategy;
+}): string {
+  return [
+    args.guildId.trim().toLowerCase(),
+    args.campaignSlug.trim().toLowerCase(),
+    args.sessionId.trim().toLowerCase(),
+    "recap_final",
+    args.strategy,
+  ].join("|");
+}
 
 export type RecapStrategy = RecapPassStrategy;
 
@@ -137,6 +160,68 @@ export async function generateSessionRecap(
   const strategy = args.strategy ?? "balanced";
 
   const campaignSlug = resolveCampaignSlug({ guildId: args.guildId });
+  const recapKey = buildRecapInFlightKey({
+    guildId: args.guildId,
+    campaignSlug,
+    sessionId: args.sessionId,
+    strategy,
+  });
+  const existing = inFlightRecaps.get(recapKey);
+  if (existing) {
+    return existing;
+  }
+
+  const generationPromise = (async () => {
+    try {
+      const result = await generateSessionRecapInternal(args, strategy, campaignSlug, deps);
+      recapEngineLog.debug("Session recap generated", {
+        event_type: "SESSION_RECAP_GENERATED",
+        session_id: args.sessionId,
+        strategy,
+        cache_hit: result.cacheHit,
+      }, {
+        guild_id: args.guildId,
+        campaign_slug: campaignSlug,
+        session_id: args.sessionId,
+      });
+      return result;
+    } catch (error) {
+      const boundaryError = toMeepoError(error, "ERR_INTERNAL_RUNTIME_FAILURE");
+      const payload = formatUserFacingError(boundaryError);
+      recapEngineLog.error("Session recap generation failed", {
+        event_type: "SESSION_RECAP_FAILED",
+        session_id: args.sessionId,
+        strategy,
+        error_code: payload.code,
+        failure_class: payload.failureClass,
+        trace_id: payload.trace_id,
+        error: boundaryError.message,
+      }, {
+        guild_id: args.guildId,
+        campaign_slug: campaignSlug,
+        session_id: args.sessionId,
+        trace_id: payload.trace_id,
+      });
+      throw error;
+    }
+  })();
+  inFlightRecaps.set(recapKey, generationPromise);
+
+  try {
+    return await generationPromise;
+  } finally {
+    if (inFlightRecaps.get(recapKey) === generationPromise) {
+      inFlightRecaps.delete(recapKey);
+    }
+  }
+}
+
+async function generateSessionRecapInternal(
+  args: GenerateSessionRecapArgs,
+  strategy: RecapStrategy,
+  campaignSlug: string,
+  deps?: { callLlm?: LlmCall; now?: () => number }
+): Promise<RecapResult> {
   const db = getDbForCampaign(campaignSlug);
   const session = getSessionById(args.guildId, args.sessionId);
   if (!session) {
@@ -265,8 +350,8 @@ export async function ensureMegameecapBase(
   }
 ): Promise<BaseEnsureResult> {
   const sourceHash = hashTranscript(deps.lines);
-  const paths = resolveMegameecapBasePaths(deps.campaignSlug, args.sessionId, deps.sessionLabel);
-  const baseStatus = getBaseStatus(deps.campaignSlug, args.sessionId, deps.sessionLabel);
+  const paths = resolveMegameecapBasePaths(args.guildId, deps.campaignSlug, args.sessionId, deps.sessionLabel);
+  const baseStatus = getBaseStatus(args.guildId, deps.campaignSlug, args.sessionId, deps.sessionLabel);
   const hashMatches = baseStatus.sourceHash === sourceHash;
   const versionMatches = baseStatus.baseVersion === MEGAMEECAP_BASE_VERSION;
   const baseDbArtifact = getSessionArtifact(args.guildId, args.sessionId, "megameecap_base");
@@ -392,12 +477,14 @@ export async function generateFinalRecapFromBase(
 ): Promise<FinalFromBaseResult> {
   const existingFinal = getSessionArtifact(args.guildId, args.sessionId, "recap_final");
   const expectedPaths = resolveMegameecapFinalPaths(
+    args.guildId,
     deps.campaignSlug,
     args.sessionId,
     args.style,
     deps.sessionLabel
   );
   const finalFileStatus = getFinalStatus(
+    args.guildId,
     deps.campaignSlug,
     args.sessionId,
     args.style,

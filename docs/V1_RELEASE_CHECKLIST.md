@@ -11,6 +11,9 @@ This checklist is the source of truth for shipping `v1.0.0`.
   - `npm run test:smoke`
   - `npm run test`
   - `npm run stopline:no-getdb-runtime`
+  - `npm run stopline:active-session-boundary`
+  - `npm run stopline:runtime-scope-fallbacks`
+  - `npm run stopline:observability-runtime`
   - `npm run stopline:no-raw-env`
   - `npm run stopline:repo-hygiene`
 
@@ -106,6 +109,9 @@ This debut release stabilizes the core runtime loop, introduces deterministic of
   - `npm run test:smoke`
   - `npm run test`
   - `npm run stopline:no-getdb-runtime`
+  - `npm run stopline:active-session-boundary`
+  - `npm run stopline:runtime-scope-fallbacks`
+  - `npm run stopline:observability-runtime`
   - `npm run stopline:no-raw-env`
   - `npm run stopline:repo-hygiene`
 - Added deterministic fixture-backed smoke coverage for MegaMeecap + Silver-Seq.

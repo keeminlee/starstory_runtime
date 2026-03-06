@@ -9,7 +9,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import * as path from 'path';
 import { log } from '../utils/logger.js';
 import { setSpeaking, getSpeakingState, onSpeakingStateChange, setPresence, getPresenceState, onPresenceStateChange } from './speakingState.js';
-import { loadRegistry } from '../registry/loadRegistry.js';
+import { loadRegistryForScope } from '../registry/loadRegistry.js';
+import { resolveCampaignSlug } from '../campaign/guildConfig.js';
 import { cfg } from '../config/env.js';
 
 const overlayLog = log.withScope("overlay");
@@ -28,8 +29,8 @@ const activeBroadcasters = new Set<WebSocket>();
  * Build token configuration from registry
  * Returns {order: [...], tokens: {...}} structure
  */
-function buildTokensFromRegistry() {
-  const registry = loadRegistry();
+function buildTokensFromRegistry(scope: { guildId: string; campaignSlug: string }) {
+  const registry = loadRegistryForScope(scope);
   const tokens: Record<string, { label: string; img: string }> = {};
   const order: string[] = [];
 
@@ -81,7 +82,13 @@ function setupRoutes(router: Router) {
   // Serve tokens.json (dynamically loaded from registry)
   router.get('/tokens.json', (req: Request, res: Response) => {
     try {
-      const tokens = buildTokensFromRegistry();
+      const overlayGuildId = cfg.discord.guildId;
+      if (!overlayGuildId) {
+        throw new Error('OVERLAY runtime scope missing guildId (cfg.discord.guildId)');
+      }
+
+      const campaignSlug = resolveCampaignSlug({ guildId: overlayGuildId });
+      const tokens = buildTokensFromRegistry({ guildId: overlayGuildId, campaignSlug });
       res.json(tokens);
     } catch (error) {
       overlayLog.error(`Failed to build tokens: ${error}`);

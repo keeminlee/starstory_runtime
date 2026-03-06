@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ContextScope } from "./meepoContextRepo.js";
+import { buildSessionArtifactStem } from "../dataPaths.js";
 
 export type MeepoActionRunKind = "online" | "offline_replay";
 
@@ -38,6 +39,8 @@ export type MeepoActionLogEvent = {
   ranked_count?: number;
   db_ms?: number;
   error?: string;
+  error_code?: string;
+  failure_class?: string;
   transcript_line?: TranscriptLine;
   prompt?: {
     system?: string;
@@ -106,15 +109,6 @@ function maybeAnnounceConsoleMirror(): void {
 
 function includeTranscriptLinesInMergedLog(): boolean {
   return boolFromEnv("MEEPO_ACTION_LOGGING_INCLUDE_TRANSCRIPT_LINES", true);
-}
-
-function buildSessionArtifactStem(sessionId: string, sessionLabel?: string | null): string {
-  const safeLabel = (sessionLabel ?? "")
-    .trim()
-    .replace(/[^a-zA-Z0-9._-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-  return `session-${safeLabel.length > 0 ? safeLabel : sessionId}`;
 }
 
 function writeFileAtomic(filePath: string, content: string): void {
@@ -248,6 +242,8 @@ function normalizeMeepoActionLogEvent(db: any, event: MeepoActionLogEvent): Meep
     "ranked_count",
     "db_ms",
     "error",
+    "error_code",
+    "failure_class",
     "prompt",
     "transcript_line",
   ] as const;
@@ -288,17 +284,6 @@ function resolveCampaignSlugForGuild(db: any, guildId: string): string {
   }
 }
 
-function readSessionLabel(db: any, guildId: string, sessionId: string): string | null {
-  try {
-    const row = db
-      .prepare(`SELECT label FROM sessions WHERE guild_id = ? AND session_id = ? LIMIT 1`)
-      .get(guildId, sessionId) as { label: string | null } | undefined;
-    return row?.label ?? null;
-  } catch {
-    return null;
-  }
-}
-
 function resolveMeecapOutputDir(campaignSlug: string): string {
   const replayArtifactOverride = opt("MEEPO_HEARTBEAT_REPLAY_ARTIFACT_DIR");
   if (replayArtifactOverride) {
@@ -320,8 +305,11 @@ export function resolveMeepoActionLogPaths(db: any, args: {
   runKind: MeepoActionRunKind;
 }): { jsonlPath: string; mergedLogPath: string } {
   const campaignSlug = resolveCampaignSlugForGuild(db, args.guildId);
-  const sessionLabel = readSessionLabel(db, args.guildId, args.sessionId);
-  const stem = buildSessionArtifactStem(args.sessionId, sessionLabel);
+  const stem = buildSessionArtifactStem({
+    guildId: args.guildId,
+    campaignSlug,
+    sessionId: args.sessionId,
+  });
   const suffix = args.runKind === "offline_replay" ? "offline-replay" : "online";
   const outputDir = resolveMeecapOutputDir(campaignSlug);
   return {

@@ -230,6 +230,7 @@ function createTestDb(): any {
     CREATE TABLE sessions (
       session_id TEXT PRIMARY KEY,
       guild_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
       label TEXT
     );
 

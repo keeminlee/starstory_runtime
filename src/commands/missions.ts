@@ -12,14 +12,17 @@ import { creditMeep, MEEP_MAX_BALANCE } from "../meeps/engine.js";
 import { getMissionById, listMissions } from "../missions/loadMissions.js";
 import { getActiveSessionId } from "../sessions/sessionRuntime.js";
 import { isElevated } from "../security/isElevated.js";
+import { loadRegistryForScope } from "../registry/loadRegistry.js";
 import type { CommandCtx } from "./index.js";
 
 const missionsLog = log.withScope("missions");
 
-function resolvePcFromUser(user: any): { canonical_name: string; discord_user_id: string } | null {
+function resolvePcFromUser(
+  user: any,
+  scope: { guildId: string; campaignSlug: string }
+): { canonical_name: string; discord_user_id: string } | null {
   try {
-    const { loadRegistry } = require("../registry/loadRegistry.js");
-    const registry = loadRegistry();
+    const registry = loadRegistryForScope(scope);
     const pc = registry.byDiscordUserId.get(user.id);
     if (!pc) return null;
     return { canonical_name: pc.canonical_name, discord_user_id: pc.discord_user_id! };
@@ -28,7 +31,12 @@ function resolvePcFromUser(user: any): { canonical_name: string; discord_user_id
   }
 }
 
-async function handleClaim(interaction: any, guildId: string, db: any): Promise<void> {
+async function handleClaim(
+  interaction: any,
+  guildId: string,
+  campaignSlug: string,
+  db: any
+): Promise<void> {
   if (!isElevated(interaction.member as GuildMember | null)) {
     await interaction.reply({
       content: "Not authorized.",
@@ -59,7 +67,7 @@ async function handleClaim(interaction: any, guildId: string, db: any): Promise<
     return;
   }
 
-  const targetPC = resolvePcFromUser(target);
+  const targetPC = resolvePcFromUser(target, { guildId, campaignSlug });
 
   const existing = db
     .prepare(
@@ -76,7 +84,7 @@ async function handleClaim(interaction: any, guildId: string, db: any): Promise<
     return;
   }
 
-  const currentBalance = getMeepBalance(guildId, target.id);
+  const currentBalance = getMeepBalance({ guildId, campaignSlug }, target.id);
 
   const claimId = db
     .prepare(`
@@ -99,6 +107,7 @@ async function handleClaim(interaction: any, guildId: string, db: any): Promise<
   } else {
     const creditResult = creditMeep({
       guildId,
+      campaignSlug,
       targetDiscordId: target.id,
       issuerType: "system",
       issuerName: "Meepo",
@@ -246,7 +255,7 @@ export const missions = {
 
     switch (subcommand) {
       case "claim":
-        await handleClaim(interaction, guildId, db);
+        await handleClaim(interaction, guildId, ctx.campaignSlug, db);
         break;
       case "status":
         await handleStatus(interaction, guildId, db);
