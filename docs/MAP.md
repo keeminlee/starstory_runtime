@@ -25,6 +25,35 @@ This map is system-first. It answers:
 - Config loading + redacted snapshot: `src/config/env.ts`, `src/config/redact.ts`, `src/config/types.ts`
 - Voice attach and connection lifecycle: `src/voice/connection.ts`
 
+## 1.5 Awakening Runtime
+
+Awakening Runtime is the deterministic onboarding interpreter lane.
+
+Primary runtime modules:
+
+- Engine: `src/awakening/AwakenEngine.ts`
+- Prompt runtime: `src/awakening/prompts/*`
+- Commit runtime: `src/awakening/commitActions/*`
+- Action runtime: `src/awakening/actions/*`
+- Script schema/loader: `src/scripts/awakening/*`
+
+Primary docs:
+
+- `docs/awakening/ARCHITECTURE.md`
+- `docs/awakening/SCRIPTS.md`
+
+Common failure modes:
+
+- Stale interaction rejection due to nonce mismatch.
+- Capability-gated scene skips when required features are unavailable.
+- Prompt/commit/action ordering confusion when debugging resume behavior.
+
+Where to debug:
+
+- `src/awakening/AwakenEngine.ts`
+- `src/commands/meepo.ts` (interaction submit handlers)
+- `src/awakening/prompts/index.ts`
+
 ## 2. Live Loop (Voice)
 
 Discord voice -> receiver -> STT -> wake/trigger -> prompts -> LLM -> TTS -> speaker
@@ -249,6 +278,8 @@ Artifact location:
 ## 8. Docs Index and Deprecation Rules
 
 - Operational snapshot: `docs/CURRENT_STATE.md`
+- Awakening architecture: `docs/awakening/ARCHITECTURE.md`
+- Awakening scripts guide: `docs/awakening/SCRIPTS.md`
 - MegaMeecap worker ops: `docs/MEGAMEECAP_WORKER.md`
 - Philosophy / north star: `docs/Project_Meepo.md`
 - System map (this file): `docs/MAP.md`

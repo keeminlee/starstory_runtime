@@ -6,7 +6,9 @@ import {
   COMPACT_MINI_ACTION,
   MEEPO_MIND_RETRIEVE_ACTION,
   MEGAMEECAP_UPDATE_CHUNK_ACTION,
+  REFRESH_STT_PROMPT_ACTION,
   MINI_MEECAP_KIND,
+  type RefreshSttPromptPayload,
   type MeepoMindRetrievePayload,
   RAW_LINES_KIND,
   RECEIPT_KIND,
@@ -36,11 +38,18 @@ import {
   type MeepoActionRunKind,
 } from "./meepoActionLogging.js";
 import { log } from "../utils/logger.js";
+import { cfg } from "../config/env.js";
+import { buildSttPromptFromRegistry, setGuildSttPrompt } from "../voice/stt/promptState.js";
+import { MeepoError, toMeepoError } from "../errors/meepoError.js";
 
 export const CANON_MINI_TRIGGER_LINES = 250;
 export const MEGAMEECAP_ALGO_VERSION = "megameecap-chunk-v1";
 const DEFAULT_MEGAMEECAP_MODEL = process.env.MEGAMEECAP_MODEL?.trim() || "gpt-4o-mini";
 const DEFAULT_MEGAMEECAP_CALL_MAX_TOKENS = 6_000;
+const actionsLog = log.withScope("meepo-actions", {
+  requireGuildContext: true,
+  callsite: "ledger/meepoContextActions.ts",
+});
 
 export type MeepoContextActionExecutionOptions = {
   leaseTtlMs: number;
@@ -144,6 +153,8 @@ export function enqueueMiniCompactionIfNeeded(db: any, args: {
   guildId: string;
   scope: ContextScope;
   sessionId: string;
+  trace_id?: string;
+  interaction_id?: string;
   cursorTotal: number;
   cursorWatermark: number;
   nowMs: number;
@@ -166,6 +177,8 @@ export function enqueueMiniCompactionIfNeeded(db: any, args: {
     guild_id: args.guildId,
     scope: args.scope,
     session_id: args.sessionId,
+    trace_id: args.trace_id,
+    interaction_id: args.interaction_id,
     start_line: startLine,
     end_line: endLine,
   };
@@ -200,6 +213,8 @@ export function enqueueMegameecapChunkIfNeeded(db: any, args: {
   guildId: string;
   scope: ContextScope;
   sessionId: string;
+  trace_id?: string;
+  interaction_id?: string;
   cursorTotal: number;
   cursorWatermark: number;
   nowMs: number;
@@ -226,6 +241,8 @@ export function enqueueMegameecapChunkIfNeeded(db: any, args: {
     guild_id: args.guildId,
     scope: args.scope,
     session_id: args.sessionId,
+    trace_id: args.trace_id,
+    interaction_id: args.interaction_id,
     range_start_ledger_id: startLine.id,
     range_end_ledger_id: endLine.id,
     chunk_index: nextRange.chunkIndex,
@@ -263,11 +280,14 @@ export function enqueueMeepoMindRetrieveIfNeeded(db: any, args: {
   campaignSlug: string;
   scope: ContextScope;
   sessionId: string;
+  trace_id?: string;
+  interaction_id?: string;
   anchorLedgerId: string;
   queryText?: string;
   queryHash: string;
   topK: number;
   algoVersion: string;
+  includeIdentityContext?: boolean;
   nowMs: number;
   runKind?: MeepoActionRunKind;
 }): boolean {
@@ -276,12 +296,15 @@ export function enqueueMeepoMindRetrieveIfNeeded(db: any, args: {
     campaign_slug: args.campaignSlug,
     scope: args.scope,
     session_id: args.sessionId,
+    trace_id: args.trace_id,
+    interaction_id: args.interaction_id,
     anchor_ledger_id: args.anchorLedgerId,
     query_text: args.queryText,
     query_hash: args.queryHash,
     top_k: args.topK,
     algo_version: args.algoVersion,
     include_always_tier: true,
+    include_identity_context: Boolean(args.includeIdentityContext),
   };
 
   const dedupeKey = buildMeepoMindRetrieveDedupeKey({
@@ -380,8 +403,21 @@ function parseMeepoMindRetrievePayload(action: MeepoActionRow): MeepoMindRetriev
     || typeof payload.algo_version !== "string"
     || payload.algo_version.trim().length === 0
     || payload.include_always_tier !== true
+    || (payload.include_identity_context !== undefined && typeof payload.include_identity_context !== "boolean")
   ) {
     throw new Error("Invalid meepo mind retrieval payload");
+  }
+  return payload;
+}
+
+function parseRefreshSttPromptPayload(action: MeepoActionRow): RefreshSttPromptPayload {
+  const payload = JSON.parse(action.payload_json) as RefreshSttPromptPayload;
+  if (
+    payload == null
+    || typeof payload !== "object"
+    || (payload.reason !== undefined && payload.reason !== "session_start")
+  ) {
+    throw new Error("Invalid refresh stt prompt payload");
   }
   return payload;
 }
@@ -444,15 +480,29 @@ function resolveCampaignSlugForGuild(db: any, guildId: string): string {
 }
 
 function writeFileAtomic(filePath: string, content: string): void {
-  const absPath = path.resolve(filePath);
-  const dir = path.dirname(absPath);
-  fs.mkdirSync(dir, { recursive: true });
-  const tmpPath = path.join(
-    dir,
-    `.${path.basename(absPath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
-  );
-  fs.writeFileSync(tmpPath, content, "utf8");
-  fs.renameSync(tmpPath, absPath);
+  try {
+    const absPath = path.resolve(filePath);
+    const dir = path.dirname(absPath);
+    fs.mkdirSync(dir, { recursive: true });
+    const tmpPath = path.join(
+      dir,
+      `.${path.basename(absPath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
+    );
+    fs.writeFileSync(tmpPath, content, "utf8");
+    fs.renameSync(tmpPath, absPath);
+  } catch (error) {
+    throw new MeepoError("ERR_ARTIFACT_WRITE_FAILED", {
+      message: `Artifact write failed: ${filePath}`,
+      cause: error,
+      metadata: { file_path: filePath },
+    });
+  }
+}
+
+function isDbBusyError(error: unknown): boolean {
+  const code = String((error as any)?.code ?? "").toUpperCase();
+  const message = String((error as any)?.message ?? error ?? "").toUpperCase();
+  return code.includes("SQLITE_BUSY") || message.includes("SQLITE_BUSY") || message.includes("DATABASE IS LOCKED");
 }
 
 function performCompactMiniAction(db: any, action: MeepoActionRow, nowMs: number): void {
@@ -625,6 +675,9 @@ function resolveActionAnchorLedgerId(db: any, action: MeepoActionRow): string | 
       });
       return allRawLines[payload.end_line - 1]?.id ?? null;
     }
+    if (action.action_type === REFRESH_STT_PROMPT_ACTION) {
+      return null;
+    }
   } catch {
     return null;
   }
@@ -764,6 +817,11 @@ async function prepareMegameecapChunkCommit(
       userMessage: input.userPrompt,
       model: input.model,
       maxTokens: input.maxTokens ?? DEFAULT_MEGAMEECAP_CALL_MAX_TOKENS,
+      trace_id: payload.trace_id,
+      interaction_id: payload.interaction_id,
+      guild_id: payload.guild_id,
+      campaign_slug: campaignSlug,
+      session_id: payload.session_id,
     });
   };
 
@@ -806,6 +864,8 @@ async function prepareMegameecapChunkCommit(
         line_count: range.selected.length,
         generated_at_ms: Date.now(),
         model: DEFAULT_MEGAMEECAP_MODEL,
+        trace_id: payload.trace_id,
+        interaction_id: payload.interaction_id,
       },
       null,
       2
@@ -845,6 +905,8 @@ async function prepareMegameecapChunkCommit(
         algo_version: payload.algo_version,
         model: DEFAULT_MEGAMEECAP_MODEL,
         generated_at_ms: Date.now(),
+        trace_id: payload.trace_id,
+        interaction_id: payload.interaction_id,
       },
       null,
       2
@@ -881,6 +943,8 @@ async function prepareMegameecapChunkCommit(
         model: DEFAULT_MEGAMEECAP_MODEL,
         final_pass_ms: final.finalPassMs,
         generated_at_ms: Date.now(),
+        trace_id: payload.trace_id,
+        interaction_id: payload.interaction_id,
       },
       null,
       2
@@ -1011,6 +1075,52 @@ export async function processOneMeepoContextAction(
   }
 
   try {
+    if (action.action_type === REFRESH_STT_PROMPT_ACTION) {
+      parseRefreshSttPromptPayload(action);
+      const campaignSlug = resolveCampaignSlugForGuild(db, action.guild_id);
+      const refreshedPrompt = buildSttPromptFromRegistry({
+        campaignSlug,
+        fallbackPrompt: cfg.stt.prompt,
+      });
+      setGuildSttPrompt(action.guild_id, refreshedPrompt);
+
+      actionsLog.info("refresh-stt-prompt processed", {
+        guildId: action.guild_id,
+        sessionId: action.session_id,
+        actionId: action.id,
+        campaignSlug,
+        sttPromptLen: refreshedPrompt?.length ?? 0,
+      }, {
+        guild_id: action.guild_id,
+        campaign_slug: campaignSlug,
+        session_id: action.session_id,
+      });
+
+      withImmediateTransaction(db, () => {
+        markActionDone(db, { actionId: action.id, nowMs: Date.now() });
+      });
+
+      appendMeepoActionLogEvent(db, {
+        ts_ms: Date.now(),
+        run_kind: runKind,
+        guild_id: action.guild_id,
+        scope: action.scope,
+        session_id: action.session_id,
+        event_type: "action_done",
+        anchor_ledger_id: null,
+        action_id: action.id,
+        action_type: action.action_type,
+        dedupe_key: action.dedupe_key,
+        attempt: action.attempts,
+        status: "done",
+        data: {
+          campaign_slug: campaignSlug,
+          stt_prompt_len: refreshedPrompt?.length ?? 0,
+        },
+      });
+      return true;
+    }
+
     if (action.action_type === MEEPO_MIND_RETRIEVE_ACTION) {
       const payload = parseMeepoMindRetrievePayload(action);
       const { executeMeepoMindRetrieveAction } = await import("./meepoMindRetrieveAction.js");
@@ -1073,7 +1183,7 @@ export async function processOneMeepoContextAction(
         markActionDone(db, { actionId: action.id, nowMs: Date.now() });
       });
       if (commit.llmDispatchLogCount > 1) {
-        log.warn("Duplicate LLM dispatch detected for action", "ledger", {
+        actionsLog.warn("Duplicate LLM dispatch detected for action", {
           sessionId: action.session_id,
           rangeStartLedgerId: commit.startLedgerId,
           rangeEndLedgerId: commit.endLedgerId,
@@ -1081,6 +1191,9 @@ export async function processOneMeepoContextAction(
           attempt: commit.attempt,
           dispatchCount: commit.llmDispatchLogCount,
           actionId: action.id,
+        }, {
+          guild_id: action.guild_id,
+          session_id: action.session_id,
         });
       }
       appendMeepoActionLogEvent(db, {
@@ -1106,8 +1219,14 @@ export async function processOneMeepoContextAction(
 
     throw new Error(`Unknown action_type: ${action.action_type}`);
   } catch (error: any) {
+    const boundaryError = isDbBusyError(error)
+      ? new MeepoError("ERR_DB_BUSY", {
+        message: "Meepo context action failed due to DB busy state",
+        cause: error,
+      })
+      : toMeepoError(error, "ERR_UNKNOWN");
     const now = Date.now();
-    const message = String(error?.message ?? error ?? "unknown_error");
+    const message = `${boundaryError.code}:${String(boundaryError.message ?? "unknown_error")}`;
     const terminalFailure = action.attempts >= options.maxAttempts;
     withImmediateTransaction(db, () => {
       if (terminalFailure) {

@@ -1,4 +1,8 @@
 import { cfg } from "../config/env.js";
+import {
+  getObservabilityContext,
+  type ObservabilityContext,
+} from "../observability/context.js";
 
 /**
  * Centralized logging system for Meepo.
@@ -45,6 +49,12 @@ interface LogEntry {
   data?: unknown;
 }
 
+type ScopedLoggerOptions = {
+  context?: ObservabilityContext;
+  requireGuildContext?: boolean;
+  callsite?: string;
+};
+
 const LOG_LEVELS: Record<LogLevel, number> = {
   trace: 0,
   debug: 1,
@@ -58,6 +68,7 @@ class Logger {
   private scopes: Set<string>;
   private format: "pretty" | "json";
   private deprecationWarnings: Set<string> = new Set();
+  private missingGuildContextWarnings: Map<string, number> = new Map();
 
   constructor() {
     this.level = LOG_LEVELS[cfg.logging.level] ?? LOG_LEVELS.info;
@@ -137,6 +148,52 @@ class Logger {
     return new Date().toISOString();
   }
 
+  private normalizeContext(context?: ObservabilityContext): ObservabilityContext {
+    if (!context) return {};
+    const out: ObservabilityContext = {};
+    if (typeof context.trace_id === "string" && context.trace_id.length > 0) out.trace_id = context.trace_id;
+    if (typeof context.interaction_id === "string" && context.interaction_id.length > 0) {
+      out.interaction_id = context.interaction_id;
+    }
+    if (typeof context.guild_id === "string" && context.guild_id.length > 0) out.guild_id = context.guild_id;
+    if (typeof context.campaign_slug === "string" && context.campaign_slug.length > 0) {
+      out.campaign_slug = context.campaign_slug;
+    }
+    if (typeof context.session_id === "string" && context.session_id.length > 0) out.session_id = context.session_id;
+    return out;
+  }
+
+  private mergeLogData(data: unknown, context: ObservabilityContext): unknown {
+    const hasContext = Object.keys(context).length > 0;
+    if (!hasContext) return data;
+    if (data === undefined) return context;
+    if (data && typeof data === "object" && !Array.isArray(data)) {
+      return { ...context, ...(data as Record<string, unknown>) };
+    }
+    return {
+      ...context,
+      data,
+    };
+  }
+
+  private maybeEmitMissingGuildWarning(scope: string | undefined, callsite: string | undefined): void {
+    const key = `${scope ?? "global"}:${callsite ?? "unknown"}`;
+    const now = Date.now();
+    const last = this.missingGuildContextWarnings.get(key) ?? 0;
+    const throttleMs = 60_000;
+    if (now - last < throttleMs) return;
+    this.missingGuildContextWarnings.set(key, now);
+    this.warn(
+      "Missing required guild logging context",
+      scope,
+      {
+        guild_ctx_missing: true,
+        callsite: callsite ?? "unknown",
+        throttle_ms: throttleMs,
+      }
+    );
+  }
+
   private emit(entry: LogEntry): void {
     const output = this.formatOutput(entry);
 
@@ -160,63 +217,59 @@ class Logger {
   }
 
   trace(message: string, scope?: LogScope, data?: unknown): void {
-    if (this.shouldLog("trace", scope)) {
-      this.emit({
-        timestamp: this.getTimestamp(),
-        level: "trace",
-        scope,
-        message,
-        data,
-      });
-    }
+    this.emitWithContext({ level: "trace", message, scope, data });
   }
 
   debug(message: string, scope?: LogScope, data?: unknown): void {
-    if (this.shouldLog("debug", scope)) {
-      this.emit({
-        timestamp: this.getTimestamp(),
-        level: "debug",
-        scope,
-        message,
-        data,
-      });
-    }
+    this.emitWithContext({ level: "debug", message, scope, data });
   }
 
   info(message: string, scope?: LogScope, data?: unknown): void {
-    if (this.shouldLog("info", scope)) {
-      this.emit({
-        timestamp: this.getTimestamp(),
-        level: "info",
-        scope,
-        message,
-        data,
-      });
-    }
+    this.emitWithContext({ level: "info", message, scope, data });
   }
 
   warn(message: string, scope?: LogScope, data?: unknown): void {
-    if (this.shouldLog("warn", scope)) {
-      this.emit({
-        timestamp: this.getTimestamp(),
-        level: "warn",
-        scope,
-        message,
-        data,
-      });
-    }
+    this.emitWithContext({ level: "warn", message, scope, data });
   }
 
   error(message: string, scope?: LogScope, data?: unknown): void {
-    if (this.shouldLog("error", scope)) {
-      this.emit({
-        timestamp: this.getTimestamp(),
-        level: "error",
-        scope,
-        message,
-        data,
-      });
+    this.emitWithContext({ level: "error", message, scope, data });
+  }
+
+  emitWithContext(args: {
+    level: LogLevel;
+    message: string;
+    scope?: LogScope;
+    data?: unknown;
+    context?: ObservabilityContext;
+    requireGuildContext?: boolean;
+    callsite?: string;
+  }): void {
+    if (!this.shouldLog(args.level, args.scope)) return;
+
+    const current = this.normalizeContext(getObservabilityContext());
+    const explicit = this.normalizeContext(args.context);
+    const mergedContext = {
+      ...current,
+      ...explicit,
+    } satisfies ObservabilityContext;
+
+    let enforcedContext = mergedContext;
+    if (args.requireGuildContext && !mergedContext.guild_id) {
+      enforcedContext = {
+        ...mergedContext,
+        guild_ctx_missing: true,
+      } as ObservabilityContext & { guild_ctx_missing: true };
+      this.maybeEmitMissingGuildWarning(args.scope, args.callsite);
     }
+
+    this.emit({
+      timestamp: this.getTimestamp(),
+      level: args.level,
+      scope: args.scope,
+      message: args.message,
+      data: this.mergeLogData(args.data, enforcedContext),
+    });
   }
 
   /**
@@ -224,8 +277,8 @@ class Logger {
    * Usage: const voiceLog = log.withScope("voice");
    *        voiceLog.debug("message") -> logs with scope="voice"
    */
-  withScope(scope: LogScope): ScopedLogger {
-    return new ScopedLogger(this, scope);
+  withScope(scope: LogScope, options?: ScopedLoggerOptions): ScopedLogger {
+    return new ScopedLogger(this, scope, options);
   }
 }
 
@@ -236,27 +289,53 @@ class Logger {
 class ScopedLogger {
   constructor(
     private logger: Logger,
-    private scope: LogScope
+    private scope: LogScope,
+    private options?: ScopedLoggerOptions
   ) {}
 
-  trace(message: string, data?: unknown): void {
-    this.logger.trace(message, this.scope, data);
+  withContext(context: ObservabilityContext): ScopedLogger {
+    return new ScopedLogger(this.logger, this.scope, {
+      ...this.options,
+      context: {
+        ...(this.options?.context ?? {}),
+        ...context,
+      },
+    });
   }
 
-  debug(message: string, data?: unknown): void {
-    this.logger.debug(message, this.scope, data);
+  private emit(level: LogLevel, message: string, data?: unknown, context?: ObservabilityContext): void {
+    this.logger.emitWithContext({
+      level,
+      message,
+      scope: this.scope,
+      data,
+      context: {
+        ...(this.options?.context ?? {}),
+        ...(context ?? {}),
+      },
+      requireGuildContext: this.options?.requireGuildContext,
+      callsite: this.options?.callsite,
+    });
   }
 
-  info(message: string, data?: unknown): void {
-    this.logger.info(message, this.scope, data);
+  trace(message: string, data?: unknown, context?: ObservabilityContext): void {
+    this.emit("trace", message, data, context);
   }
 
-  warn(message: string, data?: unknown): void {
-    this.logger.warn(message, this.scope, data);
+  debug(message: string, data?: unknown, context?: ObservabilityContext): void {
+    this.emit("debug", message, data, context);
   }
 
-  error(message: string, data?: unknown): void {
-    this.logger.error(message, this.scope, data);
+  info(message: string, data?: unknown, context?: ObservabilityContext): void {
+    this.emit("info", message, data, context);
+  }
+
+  warn(message: string, data?: unknown, context?: ObservabilityContext): void {
+    this.emit("warn", message, data, context);
+  }
+
+  error(message: string, data?: unknown, context?: ObservabilityContext): void {
+    this.emit("error", message, data, context);
   }
 }
 

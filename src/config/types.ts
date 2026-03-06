@@ -101,7 +101,6 @@ export interface Config {
   features: {
     memoryEnabled: boolean;
     goldMemoryEnabled: boolean;
-    labCommandsEnabled: boolean;
     contextMiniFirst: boolean;
     contextInlineActionsDev: boolean;
     contextWorkerEnabled: boolean;
@@ -123,7 +122,6 @@ export interface Config {
 
   access: {
     devUserIds: string[];
-    devGuildIds: string[];
   };
 
   logging: {

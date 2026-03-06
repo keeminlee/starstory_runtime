@@ -127,7 +127,7 @@ export const metaMeepoVoice = {
     blockedDueToSetup(setupSummaryLines: string[]): string {
       const lines = truthyLines([
         header("I can’t wake up *yet*"),
-        "Something in setup is blocking me, meep. Fix these and try `/meepo wake` again:",
+        "Something in setup is blocking me, meep. Fix these and try `/meepo awaken` again:",
         setupSummaryLines.length ? indent(bullets(setupSummaryLines, "•")) : indent("• (no details provided)"),
         "",
         "Quick command reference: `/meepo help`.",
@@ -154,7 +154,7 @@ export const metaMeepoVoice = {
     },
 
     voiceConnectSkipped(): string {
-      return "🎧 I’m staying out of voice for now, meep... I don’t have Connect/Speak permission in the home voice channel. Fix that, then run `/meepo wake` again. Quick reference: `/meepo help`.";
+      return "🎧 I’m staying out of voice for now, meep... I don’t have Connect/Speak permission in the home voice channel. Fix that, then run `/meepo awaken` again. Quick reference: `/meepo help`.";
     },
 
     stayPutNotice(channelRef: string): string {
@@ -162,11 +162,15 @@ export const metaMeepoVoice = {
     },
 
     notInVoiceNotice(): string {
-      return "Join a voice channel and run /meepo wake again if you want me to connect, meep. Need the full command map? Run /meepo help.";
+      return "Join a voice channel and run /meepo awaken again if you want me to connect, meep. Need the full command map? Run /meepo help.";
+    },
+
+    pausedContinuePrompt(): string {
+      return "Awakening paused: run /meepo awaken and press Continue to proceed.";
     },
 
     talkTip(): string {
-      return "💬 Tip: after wake, run /meepo talk if you want voice replies, meep.";
+      return "💬 Tip: after awakening, run /meepo talk if you want voice replies, meep.";
     },
 
     replyLines(input: WakeReplyInput): string[] {
@@ -225,7 +229,7 @@ export const metaMeepoVoice = {
 
   status: {
     hintJoinVoice(): string {
-      return "Join voice and run /meepo wake to connect voice.";
+      return "Join voice and run /meepo awaken to connect voice.";
     },
 
     hintEnableTts(): string {
@@ -233,7 +237,7 @@ export const metaMeepoVoice = {
     },
 
     hintSetHomeText(): string {
-      return "Set home text by running /meepo wake in your preferred text channel.";
+      return "Set home text by running /meepo awaken in your preferred text channel.";
     },
 
     snapshot(input: StatusSnapshotInput): string {
@@ -433,9 +437,13 @@ export const metaMeepoVoice = {
       campaignSlug: string;
       homeTextChannel: string;
       homeVoiceChannel: string;
-      canonMode: CanonPersonaMode;
-      canonPersona: string;
-      defaultRecapStyle: RecapStyle;
+      dmRole: string;
+      dmDisplayName: string;
+      defaultTalkMode: string;
+      dmUser: string;
+      sttPromptCurrent: string;
+      awakened: boolean;
+      awakenKeys: string;
     }): string {
       const lines = [
         header("Settings"),
@@ -443,9 +451,13 @@ export const metaMeepoVoice = {
         `campaign_slug: ${input.campaignSlug}`,
         `home_text_channel: ${input.homeTextChannel}`,
         `home_voice_channel: ${input.homeVoiceChannel}`,
-        `canon_mode: ${input.canonMode}`,
-        `canon_persona: ${input.canonPersona}`,
-        `default_recap_style: ${input.defaultRecapStyle}`,
+        `dm_role_id: ${input.dmRole}`,
+        `dm_display_name (memory): ${input.dmDisplayName}`,
+        `default_talk_mode: ${input.defaultTalkMode}`,
+        `dm_user_id (read-only): ${input.dmUser}`,
+        `stt_prompt_current (read-only): ${input.sttPromptCurrent}`,
+        `awakened (read-only): ${input.awakened ? "true" : "false"}`,
+        `awaken_keys: ${input.awakenKeys}`,
       ];
       return lines.join("\n");
     },
@@ -484,6 +496,34 @@ export const metaMeepoVoice = {
       return `Home text set to ${channelRef}. I’ll report there when you wake me, meep!`;
     },
 
+    selectTextChannel(): string {
+      return "Select a text channel.";
+    },
+
+    selectVoiceChannel(): string {
+      return "Select a voice channel.";
+    },
+
+    updatedDmRole(roleId: string): string {
+      return `Dungeon Master role set to <@&${roleId}>.`;
+    },
+
+    invalidTalkMode(): string {
+      return "Talk mode must be hush or talk.";
+    },
+
+    updatedTalkMode(mode: "hush" | "talk"): string {
+      return `Default talk mode set to **${mode}**.`;
+    },
+
+    emptyDmName(): string {
+      return "DM name cannot be empty.";
+    },
+
+    updatedDmName(): string {
+      return "Dungeon Master display name updated.";
+    },
+
     clearedHomeText(): string {
       return "Cleared home text channel.";
     },
@@ -513,7 +553,7 @@ export const metaMeepoVoice = {
     summary(): string {
       const lines = [
         header("/meepo Command Help"),
-        "`/meepo wake [session]` — Wake Meepo, run setup checks, and optionally start a canon session.",
+        "`/meepo awaken` — Awaken Meepo and run setup checks.",
         "`/meepo sleep` — Put Meepo to sleep and end the active session.",
         "`/meepo talk` — Enable voice replies (requires awake + connected voice + TTS).",
         "`/meepo hush` — Disable voice replies (listen-only mode).",
@@ -522,12 +562,12 @@ export const metaMeepoVoice = {
         "`/meepo sessions list [limit]` — List recent sessions.",
         "`/meepo sessions view <session>` — View session details and cached artifacts.",
         "`/meepo sessions recap <session> [style] [force]` — Generate/regenerate a canon recap.",
-        "`/meepo settings show` — Show saved home channel settings.",
-        "`/meepo settings set key:<key> channel:<channel>` — Set `home_text_channel` or `home_voice_channel`.",
-        "`/meepo settings set canon_mode:<meta|diegetic>` — Set canon persona mode.",
-        "`/meepo settings set canon_persona:<id>` — Set explicit canon persona id.",
-        "`/meepo settings set dm_user:<user>` — Bind canonical DM identity.",
-        "`/meepo settings clear <key>` — Clear `home_text_channel`, `home_voice_channel`, or `dm_user_id`.",
+        "`/meepo settings show` — Show awakening settings.",
+        "`/meepo settings home_text_channel channel:<channel>` — Set home text channel.",
+        "`/meepo settings home_voice_channel channel:<channel>` — Set home voice channel.",
+        "`/meepo settings dm_role role:<role>` — Set Dungeon Master role.",
+        "`/meepo settings talk_mode mode:<hush|talk>` — Set default awaken talk mode.",
+        "`/meepo settings dm_name name:<text>` — Set Dungeon Master display name memory.",
       ];
       return lines.join("\n");
     },
@@ -549,11 +589,11 @@ export const metaMeepoVoice = {
 
   talk: {
     requiresWake(): string {
-      return "Meepo is asleep. Use /meepo wake first.";
+      return "Meepo is asleep. Use /meepo awaken first.";
     },
 
     requiresVoiceConnection(): string {
-      return "Meepo is not connected to voice. Use /meepo wake while you are in voice.";
+      return "Meepo is not connected to voice. Use /meepo awaken while you are in voice.";
     },
 
     ttsUnavailable(providerName: string): string {
@@ -570,7 +610,7 @@ export const metaMeepoVoice = {
 
   hush: {
     requiresWake(): string {
-      return "Meepo is asleep. Use /meepo wake first.";
+      return "Meepo is asleep. Use /meepo awaken first.";
     },
 
     enabled(): string {

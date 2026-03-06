@@ -5,16 +5,28 @@ import { log } from "../utils/logger.js";
 import { getMeepoContextQueueStatus, processMeepoContextActionsTick } from "./meepoContextActions.js";
 
 const workerLog = log.withScope("meepo-context-worker");
+
+function getWorkerScopedLogger(guildId?: string | null) {
+  return log.withScope("meepo-context-worker", {
+    requireGuildContext: Boolean(guildId),
+    callsite: "ledger/meepoContextWorker.ts",
+    context: {
+      guild_id: guildId ?? undefined,
+      campaign_slug: resolveCampaignSlug({ guildId: guildId ?? undefined }),
+    },
+  });
+}
 let workerTimer: NodeJS.Timeout | null = null;
 
 function getWorkerDb(guildId?: string | null): any {
-  const campaignSlug = resolveCampaignSlug({ guildId: guildId ?? cfg.discord.guildId ?? undefined });
+  const campaignSlug = resolveCampaignSlug({ guildId: guildId ?? undefined });
   return getDbForCampaign(campaignSlug);
 }
 
 export async function runMeepoContextActionWorkerTick(guildId?: string | null): Promise<void> {
   if (!cfg.features.contextWorkerEnabled) return;
   const db = getWorkerDb(guildId);
+  const workerTickLog = getWorkerScopedLogger(guildId);
   const result = await processMeepoContextActionsTick(db, "worker", {
     maxActionsPerTick: cfg.meepoContextActions.maxActionsPerTick,
     maxTotalRuntimeMs: cfg.meepoContextActions.maxTotalRuntimeMs,
@@ -23,7 +35,7 @@ export async function runMeepoContextActionWorkerTick(guildId?: string | null): 
     retryBaseMs: cfg.meepoContextActions.retryBaseMs,
   });
   if (result.processed > 0) {
-    workerLog.debug(
+    workerTickLog.debug(
       `tick processed=${result.processed} succeeded=${result.succeeded} failed=${result.failed} timedOut=${result.timedOut} elapsedMs=${result.elapsedMs}`
     );
   }
@@ -36,14 +48,15 @@ export function startMeepoContextActionWorker(guildId?: string | null): void {
   }
   if (workerTimer) return;
   const intervalMs = cfg.meepoContextActions.pollMs;
+  const scopedWorkerLog = getWorkerScopedLogger(guildId);
   workerTimer = setInterval(async () => {
     try {
       await runMeepoContextActionWorkerTick(guildId);
     } catch (error: any) {
-      workerLog.error(`tick_error ${error?.message ?? error}`);
+      scopedWorkerLog.error(`tick_error ${error?.message ?? error}`);
     }
   }, intervalMs);
-  workerLog.info(`started pollMs=${intervalMs}`);
+  scopedWorkerLog.info(`started pollMs=${intervalMs}`);
 }
 
 export function stopMeepoContextActionWorker(): void {

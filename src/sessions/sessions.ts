@@ -2,11 +2,18 @@ import { randomUUID } from "node:crypto";
 import { getDbForCampaign } from "../db.js";
 import { resolveCampaignSlug } from "../campaign/guildConfig.js";
 import { resolveCampaignDbPath } from "../dataPaths.js";
+import { enqueueActionIfMissing, REFRESH_STT_PROMPT_ACTION } from "../ledger/meepoContextRepo.js";
 import { setActiveSessionId, clearActiveSessionId } from "./sessionRuntime.js";
 import { cfg } from "../config/env.js";
 import type { MeepoMode } from "../config/types.js";
 import { resolveEffectiveMode, sessionKindForMode } from "./sessionRuntime.js";
 import { logRuntimeContextBanner } from "../runtime/runtimeContextBanner.js";
+import { log } from "../utils/logger.js";
+
+const sessionLog = log.withScope("session", {
+  requireGuildContext: true,
+  callsite: "sessions/sessions.ts",
+});
 
 export type SessionKind = "canon" | "noncanon";
 
@@ -76,6 +83,11 @@ export function startSession(
   const sessionLabel = opts?.label ?? null;
   const modeAtStart: MeepoMode = opts?.modeAtStart ?? resolveEffectiveMode(guildId);
   const sessionKind: SessionKind = opts?.kind ?? sessionKindForMode(modeAtStart);
+  const scopedSessionLog = sessionLog.withContext({
+    guild_id: guildId,
+    campaign_slug: resolveCampaignSlug({ guildId }),
+    session_id: sessionId,
+  });
 
   logRuntimeContextBanner({
     entrypoint: "session:start",
@@ -87,6 +99,36 @@ export function startSession(
   db.prepare(
     "INSERT INTO sessions (session_id, guild_id, kind, mode_at_start, label, created_at_ms, started_at_ms, ended_at_ms, ended_reason, started_by_id, started_by_name, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ).run(sessionId, guildId, sessionKind, modeAtStart, sessionLabel, now, now, null, null, startedById, startedByName, sessionSource);
+
+  try {
+    const dedupeKey = [REFRESH_STT_PROMPT_ACTION, guildId, "canon", sessionId, "session_start"].join(":");
+    const enqueueResult = enqueueActionIfMissing(db, {
+      id: randomUUID(),
+      guildId,
+      scope: "canon",
+      sessionId,
+      actionType: REFRESH_STT_PROMPT_ACTION,
+      dedupeKey,
+      payloadJson: JSON.stringify({ reason: "session_start" }),
+      nowMs: now,
+      runKind: "online",
+      reason: "session_start",
+    });
+
+    scopedSessionLog.info("refresh-stt-prompt enqueue at session start", {
+      guildId,
+      sessionId,
+      queued: enqueueResult.queued,
+      dedupeKey,
+      reason: "session_start",
+    });
+  } catch (error) {
+    scopedSessionLog.warn("Failed to enqueue refresh-stt-prompt action", {
+      guildId,
+      sessionId,
+      error: String((error as any)?.message ?? error ?? "unknown_error"),
+    });
+  }
 
   setActiveSessionId(guildId, sessionId);
 
@@ -107,6 +149,10 @@ export function startSession(
 
 export function endSession(guildId: string, reason: string | null = null): number {
   const { db } = getSessionDbForGuild(guildId);
+  const scopedSessionLog = sessionLog.withContext({
+    guild_id: guildId,
+    campaign_slug: resolveCampaignSlug({ guildId }),
+  });
   const now = Date.now();
 
   const info = db
@@ -115,6 +161,10 @@ export function endSession(guildId: string, reason: string | null = null): numbe
 
   if (info.changes > 0) {
     clearActiveSessionId(guildId);
+    scopedSessionLog.info("Session ended", {
+      ended_reason: reason,
+      changes: info.changes,
+    });
   }
   return info.changes;
 }

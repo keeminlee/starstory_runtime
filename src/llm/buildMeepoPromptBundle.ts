@@ -12,6 +12,9 @@ import type {
   PromptBundle,
   RetrievalContext,
 } from "./promptBundleTypes.js";
+import { shouldInjectIdentityContext } from "./promptPolicy.js";
+import { DM_DISPLAY_NAME_KEY } from "../meepoMind/meepoMindWriter.js";
+import { getGuildMemoryByKey } from "../meepoMind/meepoMindMemoryRepo.js";
 
 const DEFAULT_RETRIEVAL_TOP_K = 8;
 const DEFAULT_RETRIEVAL_ALGO_VERSION = "v1.2.1";
@@ -43,6 +46,11 @@ function formatRetrievalSection(ctx?: RetrievalContext): string {
   return lines.length > 0
     ? `\n\nMEEPO MIND RETRIEVAL CONTEXT:\n${lines.join("\n")}`
     : "";
+}
+
+function formatIdentitySection(dmIdentityText: string | null): string {
+  if (!dmIdentityText) return "";
+  return `\n\nIDENTITY CONTEXT:\n- ${dmIdentityText}`;
 }
 
 function buildSystemPrompt(args: {
@@ -117,6 +125,21 @@ export function buildMeepoPromptBundle(input: BuildMeepoPromptBundleInput): Prom
 
   const db = getDbForCampaign(input.campaign_slug);
   const artifact = artifactPath ? loadRetrievalArtifact({ artifactPath }) : null;
+  const includeIdentityContext = shouldInjectIdentityContext({
+    personaId: input.persona.id,
+    modeAtStart: input.mode_at_start ?? null,
+    isMetaPrompt: Boolean(input.is_meta_prompt),
+  });
+
+  const dmIdentityMemory = includeIdentityContext
+    ? getGuildMemoryByKey({
+      db,
+      guildId: input.guild_id,
+      key: DM_DISPLAY_NAME_KEY,
+    })
+    : null;
+
+  const identitySection = formatIdentitySection(dmIdentityMemory?.text?.trim() || null);
 
   let retrieval: RetrievalContext | undefined;
   if (artifact) {
@@ -158,17 +181,20 @@ export function buildMeepoPromptBundle(input: BuildMeepoPromptBundleInput): Prom
       campaignSlug: input.campaign_slug,
       scope: "canon",
       sessionId: input.session_id,
+      trace_id: input.trace_id,
+      interaction_id: input.interaction_id,
       anchorLedgerId: input.anchor_ledger_id,
       queryText: input.user_text,
       queryHash,
       topK,
       algoVersion,
+      includeIdentityContext,
       nowMs: Date.now(),
       runKind: "online",
     });
   }
 
-  const retrievalSection = formatRetrievalSection(retrieval);
+  const retrievalSection = `${formatRetrievalSection(retrieval)}${identitySection}`;
   const system = buildSystemPrompt({ input, retrievalSection });
 
   const bundle: PromptBundle = {

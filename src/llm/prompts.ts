@@ -42,6 +42,8 @@ export async function buildMeepoPrompt(opts: {
       campaign_slug: resolveCampaignSlug({ guildId: opts.guildId }),
       session_id: opts.sessionId,
       anchor_ledger_id: opts.sessionId,
+      mode_at_start: opts.personaId === "meta_meepo" ? "ambient" : "canon",
+      is_meta_prompt: opts.personaId === "meta_meepo",
       user_text: opts.recentContext ?? "",
       meepo_context_snapshot: {
         context: opts.recentContext,

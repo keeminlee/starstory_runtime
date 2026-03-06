@@ -13,8 +13,10 @@ This is the only guide needed for first-time setup.
 ## 2) Deploy Commands
 
 ```bash
-npm run dev:deploy
+npm run deploy:commands
 ```
+
+This deploys global commands by default. For guild-only deploys, see [ops/ENV.md](ops/ENV.md).
 
 ## 3) Start the Bot
 
@@ -22,15 +24,15 @@ npm run dev:deploy
 npm run dev:bot
 ```
 
-## 4) Wake Meepo
+## 4) Awaken Meepo
 
 In your preferred text channel:
 
 ```text
-/meepo wake
+/meepo awaken
 ```
 
-On first wake, Meepo auto-runs guild setup:
+On first awaken, Meepo auto-runs guild setup:
 - binds home text channel,
 - binds home voice if you are currently in voice,
 - initializes canon mode + default recap style.

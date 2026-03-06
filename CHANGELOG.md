@@ -1,5 +1,94 @@
 # Changelog
 
+## v1.8 - 2026-03-04
+
+### Changed
+
+- Renamed user-facing awakening command from `/meepo wake` to `/meepo awaken`.
+- Removed public `/meepo awaken session:<...>` surface; awakening no longer accepts manual session option.
+- Added dev fallback/debug routes under `/lab awaken`:
+  - `/lab awaken respond text:<...>`
+  - `/lab awaken status`
+- Kept deprecated response alias behavior for stale `/meepo ... response` invocations behind `DEV_USER_IDS` gate, otherwise returns moved guidance.
+
+### Awakening Runtime
+
+- Enforced defer-first interaction pattern for awaken flow (`deferReply` first, prompt UI via `editReply`).
+- Ensured prompt rendering occurs after scene say sequence completion.
+- Added computed template variables in awakening context assembly:
+  - `home_channel` from `home_channel_id` as channel mention
+  - `current_channel` from `current_channel_id` as channel mention
+- Seeded runtime `current_channel_id` from `interaction.channelId` at run start.
+
+### Tests
+
+- Added regression ordering test for awaken flow interaction sequencing.
+- Updated command manifest and lab-gating tests for `/meepo awaken` and `/lab awaken` surface.
+
+## v1.7 - 2026-03-04
+
+### Changed
+
+- Moved dev/maintenance command surface behind `/lab`:
+  - `/meepo doctor` → `/lab doctor`
+  - `/meepo sleep` → `/lab sleep`
+  - `/goldmem` → `/lab goldmem run`
+  - `/meeps ...` → `/lab meeps ...`
+  - `/missions ...` → `/lab missions ...`
+- Public `/meepo` surface now excludes `doctor` and `sleep` subcommands.
+- Added stale-command redirect replies for legacy top-level `/goldmem`, `/meeps`, and `/missions` invocations.
+
+### Security
+
+- All moved `/lab` routes remain gated by `DEV_USER_IDS` user allowlist.
+
+## v1.6 - 2026-03-04
+
+### Added
+
+- Completed Awakening Runtime interactive surface for onboarding and ritual-style workflows.
+- Prompt primitives: `choice`, `modal_text`, `role_select`, `channel_select`, `registry_builder`.
+- Nonce-protected interaction submission model (`scene_id`, `key`, `nonce` validation).
+- Ordered runtime action dispatcher with stable grep-friendly action logs.
+- Best-effort `join_voice_and_speak` action support.
+- Deterministic resume behavior across pending prompts and scene progression.
+
+### Changed
+
+- Channel drift is executed as `channel_select` prompt post-processing with runtime-only channel context switching.
+- Typed fallback `/meepo wake response:<text>` now targets pending `modal_text` prompts under DM identity gating.
+
+## v1.5 - 2026-03-04
+
+### Added
+
+- Dynamic STT prompt refresh pipeline via `refresh-stt-prompt` action.
+- Per-guild STT prompt generation from campaign registry references.
+- Runtime STT prompt state support and provider forwarding by guild.
+
+### Changed
+
+- OpenAI STT path accepts runtime prompt overrides.
+- Session start enqueues STT prompt refresh in canonical runtime flow.
+
+## v1.4 - 2026-03-04
+
+### Added
+
+- Setup registry system with append-only YAML writes.
+- Setup-phase guardrail for registry mutation safety.
+- Atomic registry persistence for deterministic write behavior.
+
+## v1.3 - 2026-03-04
+
+### Added
+
+- Awakening Engine foundations for deterministic onboarding execution.
+- Versioned YAML scene scripts and loader path.
+- Resumable onboarding state model in onboarding progress storage.
+- Engine-owned commit execution model.
+- Prompt capability gating with deterministic skip semantics.
+
 ## v1.2 - 2026-03-04
 
 ### Added

@@ -14,6 +14,8 @@ import { pcmToWav } from "./wav.js";
 import { toFile } from "openai/uploads";
 import { cfg } from "../../config/env.js";
 import type { SttTranscriptionMeta } from "./provider.js";
+import { getGuildSttPrompt } from "./promptState.js";
+import { MeepoError } from "../../errors/meepoError.js";
 
 const sttLog = log.withScope("stt");
 
@@ -41,16 +43,14 @@ function sleep(ms: number): Promise<void> {
 export class OpenAiSttProvider implements SttProvider {
   private model: string;
   private language: string;
-  private prompt?: string;
 
   constructor() {
     this.model = cfg.stt.model;
     this.language = cfg.stt.language;
-    this.prompt = cfg.stt.prompt;
 
     if (cfg.voice.debug) {
       sttLog.debug(
-        `OpenAI provider initialized: model=${this.model}, language=${this.language}${this.prompt ? ", prompt enabled" : ""}`
+        `OpenAI provider initialized: model=${this.model}, language=${this.language}${cfg.stt.prompt ? ", prompt enabled" : ""}`
       );
     }
   }
@@ -98,7 +98,8 @@ export class OpenAiSttProvider implements SttProvider {
 
   async transcribePcm(
     pcm: Buffer,
-    sampleRate: number
+    sampleRate: number,
+    opts?: { guildId?: string }
   ): Promise<{ text: string; confidence?: number; meta?: SttTranscriptionMeta }> {
     // Task 3.5: Retry once on transient errors (429/5xx/network)
     let lastError: any;
@@ -124,9 +125,11 @@ export class OpenAiSttProvider implements SttProvider {
           language: this.language,
         };
 
+        const effectivePrompt = getGuildSttPrompt(opts?.guildId) ?? cfg.stt.prompt;
+
         // Add prompt if configured (guides vocabulary/style)
-        if (this.prompt) {
-          transcribeRequest.prompt = this.prompt;
+        if (effectivePrompt) {
+          transcribeRequest.prompt = effectivePrompt;
         }
 
         const response = await client.audio.transcriptions.create(transcribeRequest);
@@ -136,7 +139,7 @@ export class OpenAiSttProvider implements SttProvider {
 
         // Filter out the prompt if it was returned verbatim by Whisper
         // (known issue: Whisper sometimes hallucinates the prompt on ambiguous audio)
-        if (this.prompt && text === this.prompt) {
+        if (effectivePrompt && text === effectivePrompt) {
           sttLog.warn(
             `Whisper returned the prompt verbatim; filtering out (likely hallucination on ambiguous audio)`
           );
@@ -171,7 +174,15 @@ export class OpenAiSttProvider implements SttProvider {
           sttLog.error(
             `OpenAI transcription failed (attempt ${attempt + 1}, ${status}): ${message}`
           );
-          throw err;
+          throw new MeepoError("ERR_STT_FAILED", {
+            message: `STT transcription failed: ${message}`,
+            cause: err,
+            metadata: {
+              status,
+              attempt: attempt + 1,
+              model: this.model,
+            },
+          });
         }
 
         // Transient error on first attempt; retry after backoff
@@ -184,8 +195,12 @@ export class OpenAiSttProvider implements SttProvider {
     }
 
     // Shouldn't reach here, but just in case
-    throw (
-      lastError ?? new Error("[STT] Unknown transcription error")
-    );
+    throw new MeepoError("ERR_STT_FAILED", {
+      message: "STT transcription failed: unknown error",
+      cause: lastError,
+      metadata: {
+        model: this.model,
+      },
+    });
   }
 }

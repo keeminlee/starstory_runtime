@@ -22,6 +22,10 @@ export type BuildMeepoPromptBundleInput = {
   campaign_slug: string;
   session_id: string;
   anchor_ledger_id: string;
+  trace_id?: string;
+  interaction_id?: string;
+  mode_at_start?: "canon" | "ambient" | "lab" | "dormant" | null;
+  is_meta_prompt?: boolean;
   user_text: string;
   meepo_context_snapshot: MeepoContextSnapshot;
   persona: Persona;

@@ -236,6 +236,7 @@ function createTestDb(): any {
     CREATE TABLE guild_config (
       guild_id TEXT PRIMARY KEY,
       campaign_slug TEXT NOT NULL,
+      awakened INTEGER NOT NULL DEFAULT 0,
       dm_user_id TEXT,
       dm_role_id TEXT,
       default_persona_id TEXT,

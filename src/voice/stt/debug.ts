@@ -13,7 +13,12 @@ import type { SttProvider } from "./provider.js";
 export class DebugSttProvider implements SttProvider {
   private counter = 0;
 
-  async transcribePcm(pcm: Buffer, sampleRate: number): Promise<{ text: string; confidence?: number; meta?: { noSpeechProb?: number; avgLogprob?: number } }> {
+  async transcribePcm(
+    pcm: Buffer,
+    sampleRate: number,
+    opts?: { guildId?: string }
+  ): Promise<{ text: string; confidence?: number; meta?: { noSpeechProb?: number; avgLogprob?: number } }> {
+    void opts;
     this.counter++;
     
     // Calculate duration from PCM bytes

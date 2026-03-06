@@ -1,9 +1,9 @@
-# Meepo Bot - Current State (March 3, 2026)
+# Meepo Bot - Current State (March 4, 2026)
 
 For documentation navigation, start at [README.md](README.md).
 
 **Status:** V0 complete, MeepoMind (V0.1) Phase 2-3 in progress + Tier S/A interaction memory  
-**Last Updated:** March 3, 2026
+**Last Updated:** March 4, 2026
 
 ---
 
@@ -11,16 +11,16 @@ For documentation navigation, start at [README.md](README.md).
 
 ```bash
 npm run dev:bot        # Start bot with hot-reload
-npm run dev:deploy     # Register/update slash commands in Discord
+npm run deploy:commands # Register/update slash commands in Discord (global default)
 npx tsc --noEmit      # Type-check code
 ```
 
 ### Test in Discord
 
 ```
-/meepo wake                              # Wake + bind home channels (hush default)
+/meepo awaken                            # Begin awakening ritual + bind home channels
 /meepo status                            # Public status + fix hints
-/meepo doctor                            # Deterministic diagnostics + next actions
+/lab doctor                              # Dev diagnostics + next actions (DEV_USER_IDS only)
 /meepo settings view                     # Show persisted setup/persona/recap defaults
 /meepo sessions list                      # List recent sessions with recap status
 /meepo sessions view session:<id>         # Session hub + artifact availability
@@ -59,6 +59,108 @@ http://localhost:7777/overlay            # Browser Source for speaking indicator
 ---
 
 ## Architecture Overview
+
+### Awakening Runtime (v1.6)
+
+Awakening Runtime is the deterministic onboarding interpreter used by `/meepo awaken` and future ritual-style flows.
+
+Execution lifecycle per scene:
+
+1. Render scene
+2. Await prompt (when present)
+3. Persist prompt input
+4. Execute commits
+5. Execute runtime actions
+6. Transition to next scene
+
+Core guarantees:
+
+- deterministic scene execution
+- resumable runtime checkpoints
+- engine-owned persistent mutation
+- nonce-validated interaction safety
+
+Capabilities currently supported:
+
+Prompts:
+
+- `choice`
+- `modal_text`
+- `role_select`
+- `channel_select`
+- `registry_builder`
+
+Runtime actions:
+
+- `join_voice_and_speak`
+
+Script/runtime features:
+
+- template variable rendering
+- capability gating
+- deterministic resume
+- pending prompt nonce validation
+
+State separation:
+
+- `onboarding_progress.progress_json` for prompt/runtime checkpoint state.
+- `memory` for canonical long-lived identity state.
+
+Progress examples:
+
+- `progress_json.dm_display_name`
+- `progress_json.home_channel_id`
+- `progress_json.players`
+- `progress_json._rb_pending_character_name`
+
+Memory examples:
+
+- `memory.dm_display_name`
+- `memory.dm_user_id`
+
+Commit model:
+
+- scripts declare commit intent
+- engine executes commit mutation
+- append-only setup registry writes (`append_registry_yaml`)
+
+Action model:
+
+- actions execute after commits
+- actions execute in script order
+- actions never mutate progress state directly
+- action failures are non-blocking
+
+Action logs:
+
+- `AWAKEN_ACTION ok type=<type> scene=<scene_id>`
+- `AWAKEN_ACTION fail type=<type> scene=<scene_id> code=<error_code>`
+
+Channel drift behavior:
+
+- triggered by `channel_select` post-processing when selected channel changes
+- emits departure lines in old channel and arrival lines in new channel
+- updates runtime channel context for current run only
+- persists selected channel key; runtime channel context is not persisted
+
+See [docs/awakening/ARCHITECTURE.md](awakening/ARCHITECTURE.md) and [docs/awakening/SCRIPTS.md](awakening/SCRIPTS.md).
+
+### Dynamic STT Prompt Refresh (v1.5)
+
+Purpose:
+
+- adapt STT recognition to current campaign vocabulary
+
+Trigger:
+
+- canonical session start enqueues `refresh-stt-prompt`
+
+Behavior:
+
+- reads campaign registry names
+- builds deduplicated prompt terms (PC names + Meepo/persona context)
+- persists current prompt in guild config runtime state
+- forwards prompt override to STT provider at runtime
 
 ### DB Routing Guardrail (Campaign Isolation)
 
@@ -107,7 +209,7 @@ Recap      Emotion Beats         LLM Response
 - **Voice Loop:** Closed STT → LLM → TTS with feedback loop protection
 - **Anti-noise Gating:** Configurable threshold to filter background noise
 - **Voice State Tracking:** Guild-scoped connection management
-- **Auto-join Voice:** Meepo automatically joins General voice when waking (via `/meepo wake` or auto-wake)
+- **Auto-join Voice:** Meepo automatically joins General voice when awakening (via `/meepo awaken` or auto-awaken)
 - **STT Always-On:** STT automatically enabled when Meepo joins any voice channel
 
 #### Text I/O
@@ -129,7 +231,7 @@ Recap      Emotion Beats         LLM Response
 #### Session Management
 - **Meepo State Persistence:** Active state (`is_active=1`) persists across bot restarts; Meepo auto-restores and rejoins voice
 - **Session Lifecycle:**
-  - **Auto-start:** `/meepo wake` generates UUID session, auto-grouped text+voice
+  - **Auto-start:** `/meepo awaken` generates UUID session, auto-grouped text+voice
   - **Manual start:** `/session new [--label C2E20]` starts a new session (ends active session first)
   - **Auto-end:** `/meepo sleep` or inactivity timeout (`MEEPO_AUTO_SLEEP_MS`)
 - **Session Announcements:** `/meepo announce [--dry_run] [--timestamp] [--label] [--message]` posts Discord reminders with auto-incremented labels
@@ -175,8 +277,8 @@ Recap      Emotion Beats         LLM Response
 - **Disk Export:** JSON files for git diffing and Discord review
 
 #### Commands
-- `/meepo wake|sleep|talk|hush|status` — Phase 1A clean Meepo surface
-- `/meepo status` + `/meepo doctor` internal debug/trace view includes Meepo context queue telemetry:
+- `/meepo awaken|talk|hush|status` — Phase 1A clean Meepo surface
+- `/meepo status` internal debug/trace view includes Meepo context queue telemetry:
   - counts: `queued`, `leased`, `failed`
   - `oldest queued age`
   - `last completed timestamp`
@@ -201,8 +303,11 @@ Recap      Emotion Beats         LLM Response
 
 #### Dev-only Commands
 - `/lab ...` is development-only and normally hidden from production users.
-- Registration gate: `ENABLE_LAB_COMMANDS=true`
-- Runtime allowlist gate: `DEV_USER_IDS=<comma-separated-user-ids>` (optional `DEV_GUILD_IDS=<comma-separated-guild-ids>`)
+- Moved from public surface: `/meepo doctor`, `/meepo sleep`, `/goldmem`, `/meeps ...`, `/missions ...`.
+- Awakening fallback/debug: `/lab awaken respond text:<...>`, `/lab awaken status`.
+- Runtime allowlist gate: `DEV_USER_IDS=<comma-separated-user-ids>`
+- Deploy scope gate: `/lab` is deployed only to guilds listed in `DEV_GUILD_IDS=<comma-separated-guild-ids>`.
+- Product surface: `/meepo` remains global.
 
 #### Tools (CLI)
 - `tools/ingest-media.ts` — Offline media ingestion (extract audio, transcribe, generate session)

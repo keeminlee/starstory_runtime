@@ -1,29 +1,31 @@
 import fs from "node:fs";
-import { AttachmentBuilder, GuildMember, SlashCommandBuilder } from "discord.js";
+import { AttachmentBuilder, GuildMember, InteractionType, SlashCommandBuilder } from "discord.js";
 import {
   getGuildCanonPersonaId,
   getGuildCanonPersonaMode,
   getGuildConfig,
+  getGuildDmRoleId,
   getGuildDmUserId,
+  getGuildDefaultTalkMode,
   getGuildDefaultRecapStyle,
   getGuildHomeTextChannelId,
   getGuildHomeVoiceChannelId,
   getGuildSetupVersion,
   resolveGuildHomeVoiceChannelId,
-  setGuildCanonPersonaId,
-  setGuildCanonPersonaMode,
-  setGuildDefaultRecapStyle,
-  setGuildDmUserId,
+  setGuildDefaultTalkMode,
+  setGuildDmRoleId,
   setGuildHomeTextChannelId,
   setGuildHomeVoiceChannelId,
 } from "../campaign/guildConfig.js";
 import { ensureGuildSetup, type SetupReport } from "../campaign/ensureGuildSetup.js";
 import { cfg } from "../config/env.js";
-import { getAvailablePersonaIds, getPersona } from "../personas/index.js";
+import { AwakenEngine, type AwakenRunResult } from "../awakening/AwakenEngine.js";
+import { getPersona } from "../personas/index.js";
 import { logSystemEvent } from "../ledger/system.js";
 import { wakeMeepo, getActiveMeepo, sleepMeepo } from "../meepo/state.js";
 import { getEffectivePersonaId } from "../meepo/personaState.js";
 import { isElevated } from "../security/isElevated.js";
+import { isDevUser } from "../security/devAccess.js";
 import {
   endSession,
   getActiveSession,
@@ -36,6 +38,7 @@ import {
 } from "../sessions/sessions.js";
 import { generateSessionRecap } from "../sessions/recapEngine.js";
 import type { RecapStrategy } from "../sessions/recapEngine.js";
+import { ensureBronzeTranscriptExportCached } from "../sessions/transcriptExport.js";
 import {
   buildSessionArtifactStem,
   getAllFinalStatuses,
@@ -56,9 +59,48 @@ import { getSttProviderInfo } from "../voice/stt/provider.js";
 import { getTtsProviderInfo } from "../voice/tts/provider.js";
 import { voicePlaybackController } from "../voice/voicePlaybackController.js";
 import { getMeepoContextWorkerStatus } from "../ledger/meepoContextWorker.js";
+import { initState, loadState, saveProgress } from "../ledger/awakeningStateRepo.js";
 import { metaMeepoVoice, type DoctorCheck } from "../ui/metaMeepoVoice.js";
 import type { CommandCtx } from "./index.js";
 import { PermissionFlagsBits } from "discord.js";
+import { loadAwakenScript } from "../scripts/awakening/_loader.js";
+import {
+  AWAKEN_INVOKER_USER_ID_KEY,
+  clearPendingPromptPatch,
+  getPendingPromptFromState,
+  resolveModalTextFallback,
+  repairDmDisplayNameMemory,
+} from "../awakening/wakeIdentity.js";
+import {
+  DM_DISPLAY_NAME_KEY,
+  upsertDmDisplayNameMemory,
+} from "../meepoMind/meepoMindWriter.js";
+import {
+  getGuildMemoryByKey,
+} from "../meepoMind/meepoMindMemoryRepo.js";
+import {
+  getGuildSttPrompt,
+} from "../voice/stt/promptState.js";
+import {
+  AWAKEN_GUILD_CONFIG_KEYS,
+} from "../campaign/awakenKeys.js";
+import {
+  parseChannelSelectCustomId,
+  parseContinueCustomId,
+  parseChoicePromptCustomId,
+  parseModalOpenCustomId,
+  parseModalSubmitCustomId,
+  parseRegistryAddCustomId,
+  parseRegistryDoneCustomId,
+  parseRegistryNameModalCustomId,
+  parseRegistryUserSelectCustomId,
+  parseRoleSelectPromptCustomId,
+  renderPendingAwakeningPrompt,
+  resolveChoicePromptValue,
+} from "../awakening/prompts/index.js";
+import { AWAKEN_MODAL_INPUT_ID, buildModalTextSubmitModal } from "../awakening/prompts/modalTextPrompt.js";
+import { AWAKEN_REGISTRY_NAME_INPUT_ID } from "../awakening/prompts/registryBuilderPrompt.js";
+import { AWAKEN_CONTINUE_KEY } from "../awakening/prompts/continuePrompt.js";
 
 type SessionRow = {
   session_id: string;
@@ -87,6 +129,8 @@ type SessionArtifactRow = {
 const DEFAULT_RECAP_STRATEGY: RecapStrategy = "balanced";
 const RECAP_STRATEGIES: RecapStrategy[] = ["detailed", "balanced", "concise"];
 const setupWarningDigestByGuild = new Map<string, string>();
+const TRANSCRIPT_EXPORT_TIME_BUDGET_MS = 1500;
+const MAX_INLINE_ATTACHMENT_BYTES = 24 * 1024 * 1024;
 
 function setReplyMode(db: any, guildId: string, mode: "voice" | "text"): void {
   db.prepare(
@@ -153,6 +197,562 @@ function renderSetupSummary(report: SetupReport): string[] {
   return metaMeepoVoice.wake.setupSummaryLines(report.applied, report.warnings, report.errors);
 }
 
+function formatAwakenStatus(runResult: AwakenRunResult): string {
+  if (runResult.status === "completed") {
+    return "Awakening complete.";
+  }
+  if (runResult.status === "advanced") {
+    return `Awakening advanced: ${runResult.fromScene} -> ${runResult.toScene}.`;
+  }
+  if (runResult.status === "blocked") {
+    if (runResult.reason === "prompt") {
+      return "Awakening paused: awaiting DM input.";
+    }
+    if (runResult.reason === "action" || runResult.reason === "commit") {
+      return `Awakening paused: ${runResult.reason} steps not implemented yet (Sprint 5).`;
+    }
+    if (runResult.reason === "budget") {
+      return "Awakening paused: beat budget reached for this run. Use /meepo awaken again to continue.";
+    }
+    if (runResult.reason === "budget_delay") {
+      return "Awakening paused: cinematic delay budget reached for this run. Use /meepo awaken again to continue.";
+    }
+    return "Awakening paused: next-step shape not supported yet.";
+  }
+  if (runResult.reason === "already_completed") {
+    return "Meepo is already awake in this world, meep.";
+  }
+  return "Awakening state not found.";
+}
+
+async function replyEphemeral(interaction: any, content: string): Promise<void> {
+  if (interaction.deferred || interaction.replied) {
+    await interaction.followUp({ content, ephemeral: true }).catch(() => {});
+    return;
+  }
+  await interaction.reply({ content, ephemeral: true }).catch(() => {});
+}
+
+function hasRoleOnInteractionMember(interaction: any, roleId: string): boolean {
+  const roles = interaction.member?.roles;
+  if (!roles) return false;
+  if (Array.isArray(roles)) return roles.includes(roleId);
+  if (Array.isArray(roles.cache)) return roles.cache.includes(roleId);
+  if (typeof roles.cache?.has === "function") return Boolean(roles.cache.has(roleId));
+  if (Array.isArray(roles.value)) return roles.value.includes(roleId);
+  return false;
+}
+
+function canAnswerAwakeningPrompt(guildId: string, interaction: any, state?: any, target?: PromptTarget): boolean {
+  if (target?.kind === "continue") {
+    const dmRoleId = getGuildDmRoleId(guildId);
+    if (dmRoleId) {
+      return hasRoleOnInteractionMember(interaction, dmRoleId);
+    }
+
+    const invokerUserId = typeof state?.progress_json?.[AWAKEN_INVOKER_USER_ID_KEY] === "string"
+      ? String(state.progress_json[AWAKEN_INVOKER_USER_ID_KEY]).trim()
+      : "";
+    if (invokerUserId.length > 0) {
+      return interaction.user?.id === invokerUserId;
+    }
+  }
+
+  const configuredDmUserId = getGuildDmUserId(guildId);
+  if (configuredDmUserId) {
+    return interaction.user?.id === configuredDmUserId;
+  }
+  return Boolean(interaction.memberPermissions?.has?.(PermissionFlagsBits.ManageGuild));
+}
+
+type PromptTarget = {
+  kind: "continue" | "choice" | "role_select" | "modal_text" | "channel_select" | "registry_builder";
+  sceneId: string;
+  key: string;
+  nonce: string;
+  guildId?: string;
+  onboardingId?: string;
+  source:
+    | "continue"
+    | "choice"
+    | "role_select"
+    | "modal_open"
+    | "modal_submit"
+    | "channel_select"
+    | "registry_add"
+    | "registry_done"
+    | "registry_user"
+    | "registry_name_modal";
+  optionIndex?: number;
+};
+
+function parsePromptTargetFromInteraction(interaction: any): PromptTarget | null {
+  const customId = String(interaction?.customId ?? "");
+
+  const continueTarget = parseContinueCustomId(customId);
+  if (continueTarget) {
+    return {
+      kind: "continue",
+      sceneId: continueTarget.sceneId,
+      key: AWAKEN_CONTINUE_KEY,
+      nonce: continueTarget.nonce,
+      guildId: continueTarget.guildId,
+      onboardingId: continueTarget.onboardingId,
+      source: "continue",
+    };
+  }
+
+  const choice = parseChoicePromptCustomId(customId);
+  if (choice) {
+    return {
+      kind: "choice",
+      sceneId: choice.sceneId,
+      key: choice.key,
+      nonce: choice.nonce,
+      source: "choice",
+      optionIndex: choice.optionIndex,
+    };
+  }
+
+  const role = parseRoleSelectPromptCustomId(customId);
+  if (role) {
+    return {
+      kind: "role_select",
+      sceneId: role.sceneId,
+      key: role.key,
+      nonce: role.nonce,
+      source: "role_select",
+    };
+  }
+
+  const modalOpen = parseModalOpenCustomId(customId);
+  if (modalOpen) {
+    return {
+      kind: "modal_text",
+      sceneId: modalOpen.sceneId,
+      key: modalOpen.key,
+      nonce: modalOpen.nonce,
+      source: "modal_open",
+    };
+  }
+
+  const modalSubmit = parseModalSubmitCustomId(customId);
+  if (modalSubmit) {
+    return {
+      kind: "modal_text",
+      sceneId: modalSubmit.sceneId,
+      key: modalSubmit.key,
+      nonce: modalSubmit.nonce,
+      source: "modal_submit",
+    };
+  }
+
+  const channelSelect = parseChannelSelectCustomId(customId);
+  if (channelSelect) {
+    return {
+      kind: "channel_select",
+      sceneId: channelSelect.sceneId,
+      key: channelSelect.key,
+      nonce: channelSelect.nonce,
+      source: "channel_select",
+    };
+  }
+
+  const registryAdd = parseRegistryAddCustomId(customId);
+  if (registryAdd) {
+    return {
+      kind: "registry_builder",
+      sceneId: registryAdd.sceneId,
+      key: registryAdd.key,
+      nonce: registryAdd.nonce,
+      source: "registry_add",
+    };
+  }
+
+  const registryDone = parseRegistryDoneCustomId(customId);
+  if (registryDone) {
+    return {
+      kind: "registry_builder",
+      sceneId: registryDone.sceneId,
+      key: registryDone.key,
+      nonce: registryDone.nonce,
+      source: "registry_done",
+    };
+  }
+
+  const registryUser = parseRegistryUserSelectCustomId(customId);
+  if (registryUser) {
+    return {
+      kind: "registry_builder",
+      sceneId: registryUser.sceneId,
+      key: registryUser.key,
+      nonce: registryUser.nonce,
+      source: "registry_user",
+    };
+  }
+
+  const registryNameModal = parseRegistryNameModalCustomId(customId);
+  if (registryNameModal) {
+    return {
+      kind: "registry_builder",
+      sceneId: registryNameModal.sceneId,
+      key: registryNameModal.key,
+      nonce: registryNameModal.nonce,
+      source: "registry_name_modal",
+    };
+  }
+
+  return null;
+}
+
+function currentPendingMatches(state: any, target: PromptTarget): boolean {
+  const pending = getPendingPromptFromState(state);
+  const pendingMatch = Boolean(
+    pending
+    && pending.kind === target.kind
+    && pending.sceneId === target.sceneId
+    && pending.key === target.key
+    && pending.nonce === target.nonce
+  );
+
+  if (!pendingMatch) return false;
+  if (target.kind !== "continue") return true;
+
+  return target.guildId === state.guild_id && target.onboardingId === state.script_id;
+}
+
+async function resumeAwakeningAfterPromptSubmit(args: {
+  interaction: any;
+  ctx: CommandCtx;
+  script: any;
+  guildId: string;
+  runtimeChannelId?: string;
+}): Promise<void> {
+  const runResult = await AwakenEngine.runWake(args.interaction, {
+    db: args.ctx.db,
+    script: args.script,
+    runtimeChannelId: args.runtimeChannelId,
+  });
+
+  const refreshedState = loadState(args.guildId, args.script.id, { db: args.ctx.db });
+  const refreshedPending = getPendingPromptFromState(refreshedState);
+  if (refreshedState && refreshedPending) {
+    const rendered = await renderPendingAwakeningPrompt({
+      interaction: args.interaction,
+      script: args.script,
+      state: refreshedState,
+      pending: refreshedPending,
+    });
+    if (rendered) return;
+  }
+
+  await args.interaction.editReply(formatAwakenStatus(runResult));
+}
+
+async function runChannelDriftBestEffort(args: {
+  interaction: any;
+  scene: any;
+  oldChannelId: string;
+  newChannelId: string;
+}): Promise<void> {
+  const onChange = args.scene?.on_change?.if_different_channel;
+  if (!onChange || args.oldChannelId === args.newChannelId) return;
+
+  const sendLines = async (channelRef: string, say: any): Promise<void> => {
+    const channelId = channelRef === "current_channel" ? args.oldChannelId : channelRef;
+    const beats = Array.isArray(say) ? say : say ? [say] : [];
+    for (const beat of beats) {
+      const text = typeof beat === "string"
+        ? beat
+        : typeof beat?.text === "string"
+          ? beat.text
+          : "";
+      if (!text.trim()) continue;
+
+      try {
+        const channel = await args.interaction.guild?.channels?.fetch?.(channelId);
+        if (channel?.send) {
+          await channel.send({ content: text.replaceAll("{{home_channel_id}}", args.newChannelId) });
+        }
+      } catch {
+        console.warn("AWAKEN_DRIFT_WARN code=DRIFT_SEND_FAILED");
+      }
+    }
+  };
+
+  try {
+    await sendLines(String(onChange.departure?.channel ?? args.oldChannelId), onChange.departure?.say);
+    await sendLines(String(onChange.arrival?.channel ?? args.newChannelId), onChange.arrival?.say);
+  } catch {
+    console.warn("AWAKEN_DRIFT_WARN code=DRIFT_PROCESS_FAILED");
+  }
+}
+
+async function handleAwakeningChoicePromptInteraction(interaction: any, ctx: CommandCtx | null): Promise<boolean> {
+  const target = parsePromptTargetFromInteraction(interaction);
+  if (!target) return false;
+
+  const guildId = interaction.guildId as string | null;
+  if (!guildId || !ctx?.db) {
+    await replyEphemeral(interaction, metaMeepoVoice.errors.notInGuild());
+    return true;
+  }
+
+  const script = await loadAwakenScript("meepo_awaken");
+  const state = loadState(guildId, script.id, { db: ctx.db });
+  if (!state || !currentPendingMatches(state, target)) {
+    await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo awaken again.");
+    return true;
+  }
+
+  if (!canAnswerAwakeningPrompt(guildId, interaction, state, target)) {
+    const denial = target.kind === "continue"
+      ? "Only the Dungeon Master may continue the ritual."
+      : "Only the Dungeon Master can answer this awakening prompt.";
+    await replyEphemeral(interaction, denial);
+    return true;
+  }
+
+  if (target.source === "continue") {
+    saveProgress(guildId, script.id, {
+      [AWAKEN_CONTINUE_KEY]: target.sceneId,
+      ...clearPendingPromptPatch(),
+    }, { db: ctx.db });
+
+    await resumeAwakeningAfterPromptSubmit({ interaction, ctx, script, guildId });
+    return true;
+  }
+
+  const scene = script.scenes[target.sceneId];
+  const prompt = scene?.prompt;
+  if (!scene || !prompt || prompt.key !== target.key) {
+    await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo awaken again.");
+    return true;
+  }
+
+  if (target.source === "modal_open") {
+    if (prompt.type !== "modal_text") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo awaken again.");
+      return true;
+    }
+    if (typeof interaction.showModal !== "function") {
+      await replyEphemeral(interaction, "This client cannot open the text prompt. Use /lab awaken respond text:<text>.");
+      return true;
+    }
+    await interaction.showModal(buildModalTextSubmitModal({
+      prompt,
+      sceneId: target.sceneId,
+      key: target.key,
+      nonce: target.nonce,
+    }));
+    return true;
+  }
+
+  if (!interaction.deferred && !interaction.replied && typeof interaction.deferReply === "function") {
+    await interaction.deferReply({ ephemeral: true });
+  }
+
+  if (target.source === "choice") {
+    if (prompt.type !== "choice") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo awaken again.");
+      return true;
+    }
+    const selectedValue = resolveChoicePromptValue(prompt, target.optionIndex ?? -1);
+    if (!selectedValue) {
+      await replyEphemeral(interaction, "Invalid awakening choice. Run /meepo awaken again.");
+      return true;
+    }
+    saveProgress(guildId, script.id, {
+      [prompt.key]: selectedValue,
+      ...clearPendingPromptPatch(),
+    }, { db: ctx.db });
+    await resumeAwakeningAfterPromptSubmit({ interaction, ctx, script, guildId });
+    return true;
+  }
+
+  if (target.source === "role_select") {
+    if (prompt.type !== "role_select") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo awaken again.");
+      return true;
+    }
+    const selectedRoleId = Array.isArray(interaction.values) && interaction.values.length === 1
+      ? String(interaction.values[0] ?? "").trim()
+      : "";
+    if (!selectedRoleId) {
+      await replyEphemeral(interaction, "Invalid awakening choice. Run /meepo awaken again.");
+      return true;
+    }
+    saveProgress(guildId, script.id, {
+      [prompt.key]: selectedRoleId,
+      ...clearPendingPromptPatch(),
+    }, { db: ctx.db });
+    await resumeAwakeningAfterPromptSubmit({ interaction, ctx, script, guildId });
+    return true;
+  }
+
+  if (target.source === "modal_submit") {
+    if (prompt.type !== "modal_text") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo awaken again.");
+      return true;
+    }
+    const text = String(interaction.fields?.getTextInputValue?.(AWAKEN_MODAL_INPUT_ID) ?? "");
+    let normalized = "";
+    try {
+      normalized = resolveModalTextFallback(text);
+    } catch {
+      await replyEphemeral(interaction, "Text prompt cannot be empty.");
+      return true;
+    }
+    saveProgress(guildId, script.id, {
+      [prompt.key]: normalized,
+      ...clearPendingPromptPatch(),
+    }, { db: ctx.db });
+    await resumeAwakeningAfterPromptSubmit({ interaction, ctx, script, guildId });
+    return true;
+  }
+
+  if (target.source === "channel_select") {
+    if (prompt.type !== "channel_select") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo awaken again.");
+      return true;
+    }
+    const selectedChannelId = Array.isArray(interaction.values) && interaction.values.length === 1
+      ? String(interaction.values[0] ?? "").trim()
+      : "";
+    if (!selectedChannelId) {
+      await replyEphemeral(interaction, "Invalid awakening choice. Run /meepo awaken again.");
+      return true;
+    }
+
+    const selectedChannel = await interaction.guild?.channels?.fetch?.(selectedChannelId).catch(() => null);
+    const filter = (prompt as Record<string, unknown>).filter === "voice" ? "voice" : "text";
+    const isValidForFilter = filter === "voice"
+      ? Boolean(selectedChannel?.isVoiceBased?.())
+      : Boolean(selectedChannel?.isTextBased?.()) && !selectedChannel?.isVoiceBased?.();
+    if (!isValidForFilter) {
+      await replyEphemeral(interaction, "Invalid awakening choice. Run /meepo awaken again.");
+      return true;
+    }
+
+    const oldChannelIdRaw = state.progress_json[prompt.key];
+    const oldChannelId = typeof oldChannelIdRaw === "string" ? oldChannelIdRaw : interaction.channelId;
+    saveProgress(guildId, script.id, {
+      [prompt.key]: selectedChannelId,
+      ...clearPendingPromptPatch(),
+    }, { db: ctx.db });
+
+    await runChannelDriftBestEffort({
+      interaction,
+      scene,
+      oldChannelId: String(oldChannelId ?? interaction.channelId ?? ""),
+      newChannelId: selectedChannelId,
+    });
+
+    await resumeAwakeningAfterPromptSubmit({
+      interaction,
+      ctx,
+      script,
+      guildId,
+      runtimeChannelId: selectedChannelId,
+    });
+    return true;
+  }
+
+  if (target.source === "registry_add") {
+    if (prompt.type !== "registry_builder" || typeof interaction.showModal !== "function") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo awaken again.");
+      return true;
+    }
+
+    const modal = buildModalTextSubmitModal({
+      prompt: { ...prompt, label: "Character name" },
+      sceneId: target.sceneId,
+      key: target.key,
+      nonce: target.nonce,
+    });
+    modal.setCustomId(`awaken:rb:name:${encodeURIComponent(target.sceneId)}:${encodeURIComponent(target.key)}:${encodeURIComponent(target.nonce)}`);
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  if (target.source === "registry_name_modal") {
+    if (prompt.type !== "registry_builder") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo awaken again.");
+      return true;
+    }
+    const text = String(interaction.fields?.getTextInputValue?.(AWAKEN_MODAL_INPUT_ID) ?? interaction.fields?.getTextInputValue?.(AWAKEN_REGISTRY_NAME_INPUT_ID) ?? "");
+    const characterName = text.trim();
+    if (!characterName) {
+      await replyEphemeral(interaction, "Character name cannot be empty.");
+      return true;
+    }
+
+    saveProgress(guildId, script.id, {
+      _rb_pending_character_name: characterName,
+    }, { db: ctx.db });
+
+    const refreshed = loadState(guildId, script.id, { db: ctx.db });
+    const refreshedPending = getPendingPromptFromState(refreshed);
+    if (refreshed && refreshedPending) {
+      await renderPendingAwakeningPrompt({
+        interaction,
+        script,
+        state: refreshed,
+        pending: refreshedPending,
+      });
+    }
+    return true;
+  }
+
+  if (target.source === "registry_user") {
+    if (prompt.type !== "registry_builder") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo awaken again.");
+      return true;
+    }
+    const selectedUserId = Array.isArray(interaction.values) && interaction.values.length === 1
+      ? String(interaction.values[0] ?? "").trim()
+      : "";
+    const characterNameRaw = state.progress_json._rb_pending_character_name;
+    const characterName = typeof characterNameRaw === "string" ? characterNameRaw.trim() : "";
+    if (!selectedUserId || !characterName) {
+      await replyEphemeral(interaction, "Registry entry is incomplete. Add player again.");
+      return true;
+    }
+    const existing = Array.isArray(state.progress_json[prompt.key]) ? state.progress_json[prompt.key] as any[] : [];
+    saveProgress(guildId, script.id, {
+      [prompt.key]: [...existing, { user_id: selectedUserId, character_name: characterName }],
+      _rb_pending_character_name: null,
+    }, { db: ctx.db });
+
+    const refreshed = loadState(guildId, script.id, { db: ctx.db });
+    const refreshedPending = getPendingPromptFromState(refreshed);
+    if (refreshed && refreshedPending) {
+      await renderPendingAwakeningPrompt({
+        interaction,
+        script,
+        state: refreshed,
+        pending: refreshedPending,
+      });
+    }
+    return true;
+  }
+
+  if (target.source === "registry_done") {
+    if (prompt.type !== "registry_builder") {
+      await replyEphemeral(interaction, "This awakening prompt is stale. Run /meepo awaken again.");
+      return true;
+    }
+    saveProgress(guildId, script.id, {
+      ...clearPendingPromptPatch(),
+      _rb_pending_character_name: null,
+    }, { db: ctx.db });
+    await resumeAwakeningAfterPromptSubmit({ interaction, ctx, script, guildId });
+    return true;
+  }
+
+  return false;
+}
+
 async function runDoctorChecks(interaction: any, ctx: CommandCtx): Promise<DoctorCheck[]> {
   const guildId = interaction.guildId as string;
   const channel = interaction.channel;
@@ -163,7 +763,7 @@ async function runDoctorChecks(interaction: any, ctx: CommandCtx): Promise<Docto
   checks.push(
     campaignSlug
       ? { icon: "✅", label: "Campaign slug resolved", action: "No action needed" }
-      : { icon: "❌", label: "Campaign slug missing", action: "Run /meepo wake to initialize guild setup" }
+      : { icon: "❌", label: "Campaign slug missing", action: "Run /meepo awaken to initialize guild setup" }
   );
 
   const textPerms = channel && botMember ? channel.permissionsFor(botMember) : null;
@@ -242,7 +842,7 @@ async function runDoctorChecks(interaction: any, ctx: CommandCtx): Promise<Docto
     checks.push({
       icon: "⚠️",
       label: "No session data yet",
-      action: "Run /meepo wake then start a session and generate a recap",
+      action: "Run /meepo awaken then start a session and generate a recap",
     });
   } else {
     const baseStatus = getBaseStatus(ctx.campaignSlug, session.session_id, session.label);
@@ -342,8 +942,157 @@ async function ensureVoiceConnection(interaction: any, guildId: string): Promise
   };
 }
 
-async function handleWake(interaction: any, ctx: CommandCtx): Promise<void> {
+export async function executeLabAwakenRespond(interaction: any, ctx: CommandCtx, responseTextRaw: string): Promise<void> {
   const guildId = interaction.guildId as string;
+  const script = await loadAwakenScript("meepo_awaken");
+  const state = loadState(guildId, script.id, { db: ctx.db });
+  const pending = getPendingPromptFromState(state);
+  if (!state || !pending || pending.kind !== "modal_text") {
+    await interaction.reply({
+      content: "No pending text prompt.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (!canAnswerAwakeningPrompt(guildId, interaction)) {
+    await interaction.reply({
+      content: "Only the Dungeon Master can answer this awakening prompt.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const normalized = resolveModalTextFallback(responseTextRaw);
+  saveProgress(guildId, script.id, {
+    [pending.key]: normalized,
+    ...clearPendingPromptPatch(),
+  }, { db: ctx.db });
+
+  repairDmDisplayNameMemory({
+    db: ctx.db,
+    guildId,
+    scriptId: script.id,
+  });
+
+  if (!interaction.deferred && !interaction.replied && typeof interaction.deferReply === "function") {
+    await interaction.deferReply({ ephemeral: true });
+  }
+
+  const result = await AwakenEngine.runWake(interaction, {
+    db: ctx.db,
+    script,
+    runtimeChannelId: interaction.channelId,
+  });
+
+  const refreshedAfterRun = loadState(guildId, script.id, { db: ctx.db });
+  const refreshedPending = getPendingPromptFromState(refreshedAfterRun);
+  if (refreshedAfterRun && refreshedPending) {
+    const rendered = await renderPendingAwakeningPrompt({
+      interaction,
+      script,
+      state: refreshedAfterRun,
+      pending: refreshedPending,
+    });
+    if (rendered) return;
+  }
+
+  await interaction.editReply(formatAwakenStatus(result));
+}
+
+async function handleAwaken(interaction: any, ctx: CommandCtx): Promise<void> {
+  if (interaction?.type === InteractionType.ApplicationCommand && typeof interaction?.showModal === "function") {
+    throw new Error("Invariant violation: slash command interactions must not render modal UI directly.");
+  }
+
+  const guildId = interaction.guildId as string;
+  if (ctx?.db && typeof ctx.db.exec === "function") {
+    const script = await loadAwakenScript("meepo_awaken");
+    const responseTextRaw = interaction.options.getString("response")?.trim() ?? "";
+    const hasResponseText = responseTextRaw.length > 0;
+
+    if (hasResponseText) {
+      if (!isDevUser(interaction.user?.id)) {
+        await interaction.reply({
+          content: "This fallback command has moved to /lab awaken respond.",
+          ephemeral: true,
+        });
+        return;
+      }
+      await executeLabAwakenRespond(interaction, ctx, responseTextRaw);
+      return;
+    }
+
+    repairDmDisplayNameMemory({
+      db: ctx.db,
+      guildId,
+      scriptId: script.id,
+    });
+
+    const refreshedState = loadState(guildId, script.id, { db: ctx.db });
+    if (refreshedState?.completed) {
+      await interaction.reply({
+        content: "Meepo is already awake in this world, meep.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (!refreshedState) {
+      initState(guildId, script.id, script.version, script.start_scene, { db: ctx.db });
+    }
+
+    saveProgress(guildId, script.id, {
+      [AWAKEN_INVOKER_USER_ID_KEY]: interaction.user?.id ?? null,
+    }, { db: ctx.db });
+
+    if (!interaction.deferred && !interaction.replied && typeof interaction.deferReply === "function") {
+      await interaction.deferReply({ ephemeral: true });
+    }
+
+    const result = await AwakenEngine.runWake(interaction, {
+      db: ctx.db,
+      script,
+      runtimeChannelId: interaction.channelId,
+    });
+
+    const editReply = async (content: string): Promise<void> => {
+      if (typeof interaction.editReply === "function" && (interaction.deferred || interaction.replied)) {
+        await interaction.editReply(content);
+        return;
+      }
+      if (typeof interaction.reply === "function" && !interaction.replied) {
+        await interaction.reply({ content, ephemeral: true });
+      }
+    };
+
+    const statusText = (runResult: AwakenRunResult): string => {
+      return formatAwakenStatus(runResult);
+    };
+
+    const stateAfterRun = loadState(guildId, script.id, { db: ctx.db });
+    const pendingPrompt = getPendingPromptFromState(stateAfterRun);
+    if (stateAfterRun && pendingPrompt) {
+      if (pendingPrompt.kind !== "continue") {
+        await editReply(metaMeepoVoice.wake.pausedContinuePrompt());
+        return;
+      }
+
+      const rendered = await renderPendingAwakeningPrompt({
+        interaction,
+        script,
+        state: stateAfterRun,
+        pending: pendingPrompt,
+      });
+      if (rendered) {
+        return;
+      }
+    }
+
+    await editReply(statusText(result));
+    return;
+  }
+
   const invocationChannelId = interaction.channelId as string;
   const requestedSessionLabel = interaction.options.getString("session")?.trim() ?? null;
 
@@ -672,12 +1421,31 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
     }
 
     const recap = getSessionArtifact(guildId, session.session_id, "recap_final") as SessionArtifactRow | null;
-    const transcriptArtifact = getSessionArtifact(
+    let transcriptArtifact = getSessionArtifact(
       guildId,
       session.session_id,
       "transcript_export"
     ) as SessionArtifactRow | null;
     const effectiveCampaignSlug = ctx.campaignSlug;
+
+    try {
+      ensureBronzeTranscriptExportCached({
+        guildId,
+        campaignSlug: effectiveCampaignSlug,
+        sessionId: session.session_id,
+        sessionLabel: session.label,
+        db: ctx.db,
+        timeBudgetMs: TRANSCRIPT_EXPORT_TIME_BUDGET_MS,
+      });
+      transcriptArtifact = getSessionArtifact(
+        guildId,
+        session.session_id,
+        "transcript_export"
+      ) as SessionArtifactRow | null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[sessions.view] transcript export unavailable session=${session.session_id}: ${message}`);
+    }
 
     const baseStatus = getBaseStatus(effectiveCampaignSlug, session.session_id, session.label);
     const finalFileForDbStyle =
@@ -688,7 +1456,7 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
     const hasAnyFinalFiles = allFinalFiles.some((status) => status.exists);
 
     const recapExists = Boolean(recap);
-    const transcriptStatus = transcriptArtifact ? "available" : "not cached yet";
+    let transcriptStatus = transcriptArtifact ? "available" : "unavailable";
 
     let recapMeta: Record<string, unknown> = {};
     try {
@@ -752,13 +1520,30 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
       }
     }
 
-    if (transcriptArtifact?.content_text) {
+    if (transcriptArtifact?.file_path && fs.existsSync(transcriptArtifact.file_path)) {
       const fileStem = buildSessionArtifactStem(session.session_id, session.label);
-      files.push(
-        new AttachmentBuilder(Buffer.from(transcriptArtifact.content_text, "utf8"), {
-          name: `${fileStem}-transcript.txt`,
-        })
-      );
+      const bytes = Number(transcriptArtifact.size_bytes ?? fs.statSync(transcriptArtifact.file_path).size);
+      if (bytes <= MAX_INLINE_ATTACHMENT_BYTES) {
+        files.push(
+          new AttachmentBuilder(transcriptArtifact.file_path, {
+            name: `${fileStem}-transcript-bronze.log`,
+          })
+        );
+      } else {
+        transcriptStatus = "cached (too large to attach inline)";
+      }
+    } else if (transcriptArtifact?.content_text) {
+      const fileStem = buildSessionArtifactStem(session.session_id, session.label);
+      const bytes = Buffer.byteLength(transcriptArtifact.content_text, "utf8");
+      if (bytes <= MAX_INLINE_ATTACHMENT_BYTES) {
+        files.push(
+          new AttachmentBuilder(Buffer.from(transcriptArtifact.content_text, "utf8"), {
+            name: `${fileStem}-transcript.txt`,
+          })
+        );
+      } else {
+        transcriptStatus = "cached (too large to attach inline)";
+      }
     }
 
     await interaction.reply({
@@ -777,139 +1562,119 @@ async function handleSessions(interaction: any, ctx: CommandCtx): Promise<void> 
   await interaction.reply({ content: metaMeepoVoice.sessions.unknownAction(), ephemeral: true });
 }
 
-async function handleSettings(interaction: any): Promise<void> {
+async function handleSettings(interaction: any, ctx: CommandCtx): Promise<void> {
   const guildId = interaction.guildId as string;
   const sub = interaction.options.getSubcommand();
 
+  const parseDmDisplayName = (memoryText: string | null | undefined): string | null => {
+    if (!memoryText || !memoryText.trim()) return null;
+    const match = memoryText.trim().match(/^The Dungeon Master is\s+(.+)\.$/i);
+    if (!match?.[1]) return memoryText.trim();
+    return match[1].trim() || null;
+  };
+
+  const formatSttPromptCurrent = (prompt: string | undefined): string => {
+    const value = (prompt ?? "").trim();
+    if (!value) return "(unset)";
+    if (value.length <= 180) return value;
+    return `${value.slice(0, 177)}...`;
+  };
+
+  const isDmAllowed = canAnswerAwakeningPrompt(guildId, interaction);
+  const isEditAction = sub !== "show" && sub !== "view";
+  if (isEditAction && !isDmAllowed) {
+    await interaction.reply({
+      content: "Only the Dungeon Master can edit awakening settings.",
+      ephemeral: true,
+    });
+    return;
+  }
+
   if (sub === "show" || sub === "view") {
     const config = getGuildConfig(guildId);
-    const homeText = getGuildHomeTextChannelId(guildId);
-    const homeVoice = resolveGuildHomeVoiceChannelId(guildId, cfg.overlay.homeVoiceChannelId ?? null);
-    const canonMode = getGuildCanonPersonaMode(guildId) ?? "meta";
-    const canonPersonaId = getGuildCanonPersonaId(guildId) ?? "(auto)";
-    const recapStyle = getGuildDefaultRecapStyle(guildId) ?? DEFAULT_RECAP_STRATEGY;
-    const setupVersion = getGuildSetupVersion(guildId) ?? 0;
+    const homeText = config?.home_text_channel_id ?? null;
+    const homeVoice = config?.home_voice_channel_id ?? null;
+    const dmRole = getGuildDmRoleId(guildId);
+    const talkMode = getGuildDefaultTalkMode(guildId) ?? "(unset)";
+    const dmUserId = config?.dm_user_id ?? null;
+    const dmNameMemory = getGuildMemoryByKey({ db: ctx.db, guildId, key: DM_DISPLAY_NAME_KEY });
+    const setupVersion = config?.setup_version ?? getGuildSetupVersion(guildId) ?? 0;
+    const sttPromptCurrent = formatSttPromptCurrent(getGuildSttPrompt(guildId) ?? cfg.stt.prompt);
     await interaction.reply({
       content: metaMeepoVoice.settings.viewSummary({
         setupVersion,
         campaignSlug: config?.campaign_slug ?? "(unset)",
         homeTextChannel: formatChannel(homeText),
         homeVoiceChannel: formatChannel(homeVoice),
-        canonMode,
-        canonPersona: canonPersonaId,
-        defaultRecapStyle: recapStyle,
+        dmRole: dmRole ? `<@&${dmRole}>` : "(unset)",
+        dmDisplayName: parseDmDisplayName(dmNameMemory?.text) ?? "(unset)",
+        defaultTalkMode: talkMode,
+        dmUser: dmUserId ? `<@${dmUserId}> (${dmUserId})` : "(unset)",
+        sttPromptCurrent,
+        awakened: config?.awakened === 1,
+        awakenKeys: AWAKEN_GUILD_CONFIG_KEYS.map((item) => `${item.key}${item.editable ? "" : " (read-only)"}`).join(", "),
       }),
       ephemeral: true,
     });
     return;
   }
 
-  if (sub === "set") {
-    const key = interaction.options.getString("key");
-    const channel = interaction.options.getChannel("channel");
-    const canonMode = interaction.options.getString("canon_mode") as "diegetic" | "meta" | null;
-    const canonPersona = interaction.options.getString("canon_persona");
-    const recapStyle = interaction.options.getString("recap_style") as RecapStrategy | null;
-    const homeVoice = interaction.options.getChannel("home_voice");
-    const dmUser = interaction.options.getUser("dm_user");
-
-    const keyOrChannelProvided = Boolean(key) || Boolean(channel);
-    const providedCount =
-      (keyOrChannelProvided ? 1 : 0) +
-      [canonMode, canonPersona, recapStyle, homeVoice, dmUser].filter(Boolean).length;
-
-    if (providedCount !== 1) {
-      await interaction.reply({
-        content: metaMeepoVoice.settings.setExactlyOneOptionError(),
-        ephemeral: true,
-      });
+  if (sub === "home_text_channel") {
+    const channel = interaction.options.getChannel("channel", true);
+    const isValid = Boolean(channel?.isTextBased?.()) && !Boolean(channel?.isVoiceBased?.());
+    if (!isValid) {
+      await interaction.reply({ content: metaMeepoVoice.settings.selectTextChannel(), ephemeral: true });
       return;
     }
-
-    if (keyOrChannelProvided && (!key || !channel)) {
-      await interaction.reply({
-        content: metaMeepoVoice.settings.keyAndChannelMustBePaired(),
-        ephemeral: true,
-      });
-      return;
-    }
-
-    if (key && channel) {
-      if (key === "home_text_channel") {
-        setGuildHomeTextChannelId(guildId, channel.id);
-        await interaction.reply({ content: metaMeepoVoice.settings.updatedHomeText(formatChannel(channel.id)), ephemeral: true });
-        return;
-      }
-
-      if (key === "home_voice_channel") {
-        setGuildHomeVoiceChannelId(guildId, channel.id);
-        await interaction.reply({ content: metaMeepoVoice.settings.updatedHomeVoice(formatChannel(channel.id)), ephemeral: true });
-        return;
-      }
-
-      await interaction.reply({ content: metaMeepoVoice.settings.invalidChannelSettingKey(key), ephemeral: true });
-      return;
-    }
-
-    if (canonMode) {
-      setGuildCanonPersonaMode(guildId, canonMode);
-      await interaction.reply({ content: metaMeepoVoice.settings.updatedCanonMode(canonMode), ephemeral: true });
-      return;
-    }
-
-    if (canonPersona) {
-      try {
-        getPersona(canonPersona);
-      } catch {
-        await interaction.reply({ content: metaMeepoVoice.settings.unknownPersona(canonPersona), ephemeral: true });
-        return;
-      }
-      setGuildCanonPersonaId(guildId, canonPersona);
-      await interaction.reply({ content: metaMeepoVoice.settings.updatedCanonPersona(canonPersona), ephemeral: true });
-      return;
-    }
-
-    if (recapStyle) {
-      setGuildDefaultRecapStyle(guildId, recapStyle);
-      await interaction.reply({ content: metaMeepoVoice.settings.updatedRecapStyle(recapStyle), ephemeral: true });
-      return;
-    }
-
-    if (homeVoice) {
-      setGuildHomeVoiceChannelId(guildId, homeVoice.id);
-      await interaction.reply({ content: metaMeepoVoice.settings.updatedHomeVoice(formatChannel(homeVoice.id)), ephemeral: true });
-      return;
-    }
-
-    if (dmUser) {
-      setGuildDmUserId(guildId, dmUser.id);
-      await interaction.reply({ content: metaMeepoVoice.settings.updatedDmUser(`<@${dmUser.id}> (${dmUser.id})`), ephemeral: true });
-      return;
-    }
+    setGuildHomeTextChannelId(guildId, channel.id);
+    await interaction.reply({ content: metaMeepoVoice.settings.updatedHomeText(formatChannel(channel.id)), ephemeral: true });
+    return;
   }
 
-  if (sub === "clear") {
-    const key = interaction.options.getString("key", true);
-
-    if (key === "home_text_channel") {
-      setGuildHomeTextChannelId(guildId, null);
-      await interaction.reply({ content: metaMeepoVoice.settings.clearedHomeText(), ephemeral: true });
+  if (sub === "home_voice_channel") {
+    const channel = interaction.options.getChannel("channel", true);
+    const isValid = Boolean(channel?.isVoiceBased?.());
+    if (!isValid) {
+      await interaction.reply({ content: metaMeepoVoice.settings.selectVoiceChannel(), ephemeral: true });
       return;
     }
+    setGuildHomeVoiceChannelId(guildId, channel.id);
+    await interaction.reply({ content: metaMeepoVoice.settings.updatedHomeVoice(formatChannel(channel.id)), ephemeral: true });
+    return;
+  }
 
-    if (key === "home_voice_channel") {
-      setGuildHomeVoiceChannelId(guildId, null);
-      await interaction.reply({ content: metaMeepoVoice.settings.clearedHomeVoice(), ephemeral: true });
+  if (sub === "dm_role") {
+    const role = interaction.options.getRole("role", true);
+    setGuildDmRoleId(guildId, role.id);
+    await interaction.reply({ content: metaMeepoVoice.settings.updatedDmRole(role.id), ephemeral: true });
+    return;
+  }
+
+  if (sub === "talk_mode") {
+    const mode = interaction.options.getString("mode", true) as "hush" | "talk";
+    if (mode !== "hush" && mode !== "talk") {
+      await interaction.reply({ content: metaMeepoVoice.settings.invalidTalkMode(), ephemeral: true });
       return;
     }
+    setGuildDefaultTalkMode(guildId, mode);
+    await interaction.reply({ content: metaMeepoVoice.settings.updatedTalkMode(mode), ephemeral: true });
+    return;
+  }
 
-    if (key === "dm_user_id") {
-      setGuildDmUserId(guildId, null);
-      await interaction.reply({ content: metaMeepoVoice.settings.clearedDmUser(), ephemeral: true });
+  if (sub === "dm_name") {
+    const raw = String(interaction.options.getString("name", true) ?? "");
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      await interaction.reply({ content: metaMeepoVoice.settings.emptyDmName(), ephemeral: true });
       return;
     }
-
-    await interaction.reply({ content: metaMeepoVoice.settings.invalidChannelSettingKey(key), ephemeral: true });
+    upsertDmDisplayNameMemory({
+      db: ctx.db,
+      guildId,
+      displayName: trimmed,
+      source: "settings_dm_name",
+    });
+    await interaction.reply({ content: metaMeepoVoice.settings.updatedDmName(), ephemeral: true });
     return;
   }
 
@@ -923,6 +1688,14 @@ async function handleHelp(interaction: any): Promise<void> {
 async function handleDoctor(interaction: any, ctx: CommandCtx): Promise<void> {
   const checks = await runDoctorChecks(interaction, ctx);
   await interaction.reply({ content: metaMeepoVoice.doctor.report(checks), ephemeral: true });
+}
+
+export async function executeLabSleep(interaction: any): Promise<void> {
+  await handleSleep(interaction);
+}
+
+export async function executeLabDoctor(interaction: any, ctx: CommandCtx): Promise<void> {
+  await handleDoctor(interaction, ctx);
 }
 
 async function handleStatus(interaction: any, ctx: CommandCtx): Promise<void> {
@@ -1037,16 +1810,9 @@ export const meepo = {
     .setDescription("Minimal Meepo controls.")
     .addSubcommand((sub) =>
       sub
-        .setName("wake")
-        .setDescription("Wake Meepo; optionally start a canon session.")
-        .addStringOption((opt) =>
-          opt
-            .setName("session")
-            .setDescription("Optional session label to start canon mode.")
-            .setRequired(false)
-        )
+        .setName("awaken")
+        .setDescription("Begin Meepo's awakening ritual.")
     )
-    .addSubcommand((sub) => sub.setName("sleep").setDescription("Put Meepo to sleep and end active session."))
     .addSubcommandGroup((group) =>
       group
         .setName("sessions")
@@ -1110,109 +1876,68 @@ export const meepo = {
     .addSubcommand((sub) => sub.setName("hush").setDescription("Disable voice replies (requires awake)."))
     .addSubcommand((sub) => sub.setName("help").setDescription("Show a command reference for /meepo."))
     .addSubcommand((sub) => sub.setName("status").setDescription("Show current Meepo state and diagnostics."))
-    .addSubcommand((sub) => sub.setName("doctor").setDescription("Run deterministic diagnostics with next actions."))
     .addSubcommandGroup((group) =>
       group
         .setName("settings")
-        .setDescription("Show or edit Meepo home channels.")
-        .addSubcommand((sub) => sub.setName("show").setDescription("Show saved home channels."))
+        .setDescription("Show or edit awakening settings.")
+        .addSubcommand((sub) => sub.setName("show").setDescription("Show awakening settings."))
         .addSubcommand((sub) =>
           sub
-            .setName("set")
-            .setDescription("Set one Meepo setting.")
-            .addStringOption((opt) =>
-              opt
-                .setName("key")
-                .setDescription("Channel setting key (requires channel)")
-                .setRequired(false)
-                .addChoices(
-                  { name: "home_text_channel", value: "home_text_channel" },
-                  { name: "home_voice_channel", value: "home_voice_channel" }
-                )
-            )
+            .setName("home_text_channel")
+            .setDescription("Set the home text channel.")
             .addChannelOption((opt) =>
-              opt.setName("channel").setDescription("Channel value for key").setRequired(false)
-            )
-            .addStringOption((opt) =>
-              opt
-                .setName("canon_mode")
-                .setDescription("Canon persona mode")
-                .setRequired(false)
-                .addChoices(
-                  { name: "diegetic", value: "diegetic" },
-                  { name: "meta", value: "meta" }
-                )
-            )
-            .addStringOption((opt) =>
-              opt
-                .setName("canon_persona")
-                .setDescription("Canon persona id")
-                .setAutocomplete(true)
-                .setRequired(false)
-            )
-            .addStringOption((opt) =>
-              opt
-                .setName("recap_style")
-                .setDescription("Default recap style")
-                .setRequired(false)
-                .addChoices(
-                  { name: "detailed", value: "detailed" },
-                  { name: "balanced", value: "balanced" },
-                  { name: "concise", value: "concise" }
-                )
-            )
-            .addChannelOption((opt) =>
-              opt
-                .setName("home_voice")
-                .setDescription("Set home voice channel directly")
-                .setRequired(false)
-            )
-            .addUserOption((opt) =>
-              opt
-                .setName("dm_user")
-                .setDescription("Bind canonical DM identity")
-                .setRequired(false)
+              opt.setName("channel").setDescription("Home text channel").setRequired(true)
             )
         )
         .addSubcommand((sub) =>
           sub
-            .setName("clear")
-            .setDescription("Clear a saved home channel.")
+            .setName("home_voice_channel")
+            .setDescription("Set the home voice channel.")
+            .addChannelOption((opt) =>
+              opt.setName("channel").setDescription("Home voice channel").setRequired(true)
+            )
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("dm_role")
+            .setDescription("Set the Dungeon Master role.")
+            .addRoleOption((opt) =>
+              opt.setName("role").setDescription("Dungeon Master role").setRequired(true)
+            )
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("talk_mode")
+            .setDescription("Set default awaken talk mode.")
             .addStringOption((opt) =>
               opt
-                .setName("key")
-                .setDescription("Setting key")
+                .setName("mode")
+                .setDescription("Default talk mode")
                 .setRequired(true)
                 .addChoices(
-                  { name: "home_text_channel", value: "home_text_channel" },
-                  { name: "home_voice_channel", value: "home_voice_channel" },
-                  { name: "dm_user_id", value: "dm_user_id" }
+                  { name: "hush", value: "hush" },
+                  { name: "talk", value: "talk" }
                 )
+            )
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("dm_name")
+            .setDescription("Set Dungeon Master display name memory.")
+            .addStringOption((opt) =>
+              opt.setName("name").setDescription("Dungeon Master display name").setRequired(true)
             )
         )
     ),
+
+  async handleComponentInteraction(interaction: any, ctx: CommandCtx | null): Promise<boolean> {
+    return handleAwakeningChoicePromptInteraction(interaction, ctx);
+  },
 
   async autocomplete(interaction: any) {
     const focused = interaction.options.getFocused(true);
     const subGroup = interaction.options.getSubcommandGroup(false);
     const sub = interaction.options.getSubcommand(false);
-
-    if (focused.name === "canon_persona" && subGroup === "settings" && sub === "set") {
-      const query = String(focused.value ?? "").trim().toLowerCase();
-      const options = getAvailablePersonaIds()
-        .map((id) => {
-          const persona = getPersona(id);
-          return {
-            name: `${persona.displayName} (${id})`.slice(0, 100),
-            value: id,
-          };
-        })
-        .filter((option) => (query ? option.value.toLowerCase().includes(query) || option.name.toLowerCase().includes(query) : true))
-        .slice(0, 25);
-
-      await interaction.respond(options);
-      return;
-    }
 
     const guildId = interaction.guildId as string | null;
     if (!guildId) {
@@ -1259,7 +1984,7 @@ export const meepo = {
     const subGroup = interaction.options.getSubcommandGroup(false);
     const sub = interaction.options.getSubcommand();
     const requiresElevated =
-      subGroup === "settings" || sub === "wake" || sub === "sleep" || sub === "talk" || sub === "hush" || sub === "doctor" ||
+      sub === "awaken" || sub === "wake" || sub === "talk" || sub === "hush" ||
       (subGroup === "sessions" && sub === "recap");
 
     if (requiresElevated && !isElevated(interaction.member as GuildMember | null)) {
@@ -1268,7 +1993,7 @@ export const meepo = {
     }
 
     if (subGroup === "settings") {
-      await handleSettings(interaction);
+      await handleSettings(interaction, ctx);
       return;
     }
 
@@ -1277,13 +2002,16 @@ export const meepo = {
       return;
     }
 
-    if (sub === "wake") {
-      await handleWake(interaction, ctx);
+    if (sub === "awaken" || sub === "wake") {
+      await handleAwaken(interaction, ctx);
       return;
     }
 
     if (sub === "sleep") {
-      await handleSleep(interaction);
+      await interaction.reply({
+        content: "Moved: use `/lab sleep`.",
+        ephemeral: true,
+      });
       return;
     }
 
@@ -1308,7 +2036,10 @@ export const meepo = {
     }
 
     if (sub === "doctor") {
-      await handleDoctor(interaction, ctx);
+      await interaction.reply({
+        content: "Moved: use `/lab doctor`.",
+        ephemeral: true,
+      });
       return;
     }
 

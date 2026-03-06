@@ -1294,6 +1294,34 @@ function applyMigrations(db: Database.Database) {
     db.exec("ALTER TABLE meep_usages ADD COLUMN mindspace TEXT");
   }
 
+  // Migration: keyed MeepoMind memory rows (Sprint 4 identity runtime writes)
+  const tablesForMeepoMindMemory = db.pragma("table_list") as any[];
+  const hasMeepoMindMemory = tablesForMeepoMindMemory.some((t: any) => t.name === "meepo_mind_memory");
+  if (!hasMeepoMindMemory) {
+    console.log("Migrating: Creating meepo_mind_memory table (Sprint 4 identity)");
+    db.exec(`
+      CREATE TABLE meepo_mind_memory (
+        scope_kind TEXT NOT NULL,
+        scope_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        text TEXT NOT NULL,
+        tags_json TEXT NOT NULL DEFAULT '[]',
+        source TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL,
+        updated_at_ms INTEGER NOT NULL,
+        UNIQUE(scope_kind, scope_id, key)
+      );
+
+      CREATE INDEX idx_meepo_mind_memory_scope
+      ON meepo_mind_memory(scope_kind, scope_id, key);
+    `);
+  } else {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_meepo_mind_memory_scope
+      ON meepo_mind_memory(scope_kind, scope_id, key);
+    `);
+  }
+
   // Migration: Create meepo_convo_log table (Layer 0 - Conversation Memory)
   const tablesForConvoLog = db.pragma("table_list") as any[];
   const hasConvoLog = tablesForConvoLog.some((t: any) => t.name === "meepo_convo_log");
@@ -1355,8 +1383,10 @@ function applyMigrations(db: Database.Database) {
       CREATE TABLE guild_config (
         guild_id TEXT PRIMARY KEY,
         campaign_slug TEXT NOT NULL,
+        awakened INTEGER,
         dm_user_id TEXT,
         dm_role_id TEXT,
+        default_talk_mode TEXT,
         default_persona_id TEXT,
         setup_version INTEGER,
         home_text_channel_id TEXT,
@@ -1374,6 +1404,18 @@ function applyMigrations(db: Database.Database) {
     console.log("Migrating: Adding dm_user_id to guild_config");
     db.exec("ALTER TABLE guild_config ADD COLUMN dm_user_id TEXT");
   }
+
+  const hasAwakened = guildConfigColumns.some((c: any) => c.name === "awakened");
+  if (!hasAwakened) {
+    console.log("Migrating: Adding awakened to guild_config");
+    db.exec("ALTER TABLE guild_config ADD COLUMN awakened INTEGER");
+  }
+
+  db.exec(`
+    UPDATE guild_config
+    SET awakened = 0
+    WHERE awakened IS NULL
+  `);
 
   const hasSetupVersion = guildConfigColumns.some((c: any) => c.name === "setup_version");
   if (!hasSetupVersion) {
@@ -1409,6 +1451,12 @@ function applyMigrations(db: Database.Database) {
   if (!hasDefaultRecapStyle) {
     console.log("Migrating: Adding default_recap_style to guild_config");
     db.exec("ALTER TABLE guild_config ADD COLUMN default_recap_style TEXT");
+  }
+
+  const hasDefaultTalkMode = guildConfigColumns.some((c: any) => c.name === "default_talk_mode");
+  if (!hasDefaultTalkMode) {
+    console.log("Migrating: Adding default_talk_mode to guild_config");
+    db.exec("ALTER TABLE guild_config ADD COLUMN default_talk_mode TEXT");
   }
 
   db.exec(`
@@ -1530,6 +1578,84 @@ function applyMigrations(db: Database.Database) {
 
       CREATE INDEX idx_meepo_actions_scope
       ON meepo_actions(guild_id, scope, session_id, action_type, status);
+    `);
+  }
+
+  // Migration: Awakening journey state (Sprint 1)
+  const tablesForAwakeningState = db.pragma("table_list") as any[];
+  const hasAwakeningState = tablesForAwakeningState.some((t: any) => t.name === "guild_onboarding_state");
+  if (!hasAwakeningState) {
+    console.log("Migrating: Creating guild_onboarding_state table (Awakening Sprint 1)");
+    db.exec(`
+      CREATE TABLE guild_onboarding_state (
+        guild_id TEXT NOT NULL,
+        script_id TEXT NOT NULL,
+        script_version INTEGER NOT NULL,
+        current_scene TEXT NOT NULL,
+        beat_index INTEGER NOT NULL DEFAULT 0,
+        progress_json TEXT NOT NULL DEFAULT '{}',
+        completed INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE UNIQUE INDEX idx_guild_onboarding_state_guild_script
+      ON guild_onboarding_state(guild_id, script_id);
+
+      CREATE INDEX idx_guild_onboarding_state_guild
+      ON guild_onboarding_state(guild_id);
+    `);
+  } else {
+    const awakeningStateColumns = db.pragma("table_info(guild_onboarding_state)") as any[];
+
+    const hasScriptVersion = awakeningStateColumns.some((c: any) => c.name === "script_version");
+    if (!hasScriptVersion) {
+      console.log("Migrating: Adding script_version to guild_onboarding_state");
+      db.exec("ALTER TABLE guild_onboarding_state ADD COLUMN script_version INTEGER NOT NULL DEFAULT 1");
+    }
+
+    const hasCurrentScene = awakeningStateColumns.some((c: any) => c.name === "current_scene");
+    if (!hasCurrentScene) {
+      console.log("Migrating: Adding current_scene to guild_onboarding_state");
+      db.exec("ALTER TABLE guild_onboarding_state ADD COLUMN current_scene TEXT NOT NULL DEFAULT 'cold_open'");
+    }
+
+    const hasBeatIndex = awakeningStateColumns.some((c: any) => c.name === "beat_index");
+    if (!hasBeatIndex) {
+      console.log("Migrating: Adding beat_index to guild_onboarding_state");
+      db.exec("ALTER TABLE guild_onboarding_state ADD COLUMN beat_index INTEGER NOT NULL DEFAULT 0");
+    }
+
+    const hasProgressJson = awakeningStateColumns.some((c: any) => c.name === "progress_json");
+    if (!hasProgressJson) {
+      console.log("Migrating: Adding progress_json to guild_onboarding_state");
+      db.exec("ALTER TABLE guild_onboarding_state ADD COLUMN progress_json TEXT NOT NULL DEFAULT '{}'");
+    }
+
+    const hasCompleted = awakeningStateColumns.some((c: any) => c.name === "completed");
+    if (!hasCompleted) {
+      console.log("Migrating: Adding completed to guild_onboarding_state");
+      db.exec("ALTER TABLE guild_onboarding_state ADD COLUMN completed INTEGER NOT NULL DEFAULT 0");
+    }
+
+    const hasCreatedAt = awakeningStateColumns.some((c: any) => c.name === "created_at");
+    if (!hasCreatedAt) {
+      console.log("Migrating: Adding created_at to guild_onboarding_state");
+      db.exec("ALTER TABLE guild_onboarding_state ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0");
+    }
+
+    const hasUpdatedAt = awakeningStateColumns.some((c: any) => c.name === "updated_at");
+    if (!hasUpdatedAt) {
+      console.log("Migrating: Adding updated_at to guild_onboarding_state");
+      db.exec("ALTER TABLE guild_onboarding_state ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0");
+    }
+
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_guild_onboarding_state_guild_script
+      ON guild_onboarding_state(guild_id, script_id);
+
+      CREATE INDEX IF NOT EXISTS idx_guild_onboarding_state_guild
+      ON guild_onboarding_state(guild_id);
     `);
   }
 

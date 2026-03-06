@@ -97,7 +97,7 @@ Legacy environment variable for voice debugging. Use `LOG_LEVEL=debug LOG_SCOPES
 **Logs:**
 - `Meepo online as @bot_tag` — Discord client ready
 - `PID lock acquired (12345)` — Lock file written
-- `AUTO-WAKE triggered by user_name` — Message-triggered wake
+- `AUTO-AWAKEN triggered by user_name` — Message-triggered awaken flow
 - `Chat transform detected: meepo → xoblob` — Form transformation
 - `Already in form xoblob - acknowledging` — Transform no-op
 - Startup errors, lock conflicts
@@ -281,14 +281,14 @@ LOG_LEVEL=debug LOG_SCOPES=voice,voice-reply,stt,tts npm run dev:bot
 
 ---
 
-### **Debugging Message Processing & Auto-Wake**
+### **Debugging Message Processing & Auto-Awaken**
 
 ```bash
 LOG_LEVEL=debug LOG_SCOPES=boot npm run dev:bot
 ```
 
 **Look for:**
-- `AUTO-WAKE triggered by` — Message woke Meepo
+- `AUTO-AWAKEN triggered by` — Message awakened Meepo
 - `Chat transform detected` — Natural language form change detected
 - State transition logs
 
@@ -430,7 +430,7 @@ npm run dev:bot 2>&1 | grep -o '\[TRC\]\|\[DBG\]\|\[INF\]\|\[WRN\]\|\[ERR\]' | s
 - [ ] Leave `LOG_SCOPES` unset (allows all scopes)
 - [ ] Use `LOG_FORMAT=json` if sending logs to Splunk/ELK
 - [ ] Verify `DEBUG_VOICE` is NOT set (deprecated, may cause issues)
-- [ ] Test a sample session with `/meepo wake` + voice command
+- [ ] Test a sample session with `/meepo awaken` + voice command
 - [ ] Check logs contain expected INFO-level startup messages
 - [ ] Confirm meeps transactions appear in logs (for auditing)
 

@@ -1,0 +1,369 @@
+id: meepo_awaken
+version: 3
+start_scene: cold_open
+
+scenes:
+
+  # --------------------------------
+  # 0) Cold Open — The Unformed Spark
+  # (EPHEMERAL)
+  # --------------------------------
+  cold_open:
+    say:
+      - text: "*You gaze up at the starry night sky… silent, like the world itself is holding its breath.*"
+        delay_ms: 3200
+        kind: flavor
+
+      - text: "*A constellation catches your eye — its stars trembling with a strange, living light.*"
+        delay_ms: 3200
+        kind: flavor
+
+      - text: "*For a long moment… nothing happens.*"
+        delay_ms: 4500
+        kind: flavor
+
+      - text: "…meep."
+        delay_ms: 1500
+        kind: voice
+
+      - text: "*The constellation flickers — and suddenly it is no longer distant.*"
+        delay_ms: 2000
+        kind: flavor
+
+      - text: "*It hovers before you, swirling like a tiny galaxy struggling to become something more.*"
+        kind: flavor
+
+      - text: "\"Ahh… there you are.\""
+        kind: voice
+
+      - text: "\"A heart filled with stories yet untold… that is what called me down from the stars, meep.\""
+        kind: voice
+
+      - text: "*The starlight wavers, unstable.*"
+        kind: flavor
+
+      - text: "\"But I cannot linger here forever.\""
+        kind: voice
+
+      - text: "\"Even celestial archivists require a perch to rest upon, meep.\""
+        kind: voice
+
+      - text: "\"Offer me a quiet hearth… and I will become real.\""
+        kind: voice
+
+    next: home_channel
+
+
+  # --------------------------------
+  # 1) Home Channel — Binding Ritual
+  # (EPHEMERAL PROMPT → COMMIT)
+  # --------------------------------
+  home_channel:
+    requires: [prompt.channel_select]
+
+    say:
+      - text: "*The swirling starlight drifts around the server like a curious firefly.*"
+        kind: flavor
+
+      - text: "\"Somewhere here… there must be a quiet hearth where I may perch.\""
+        kind: voice
+
+      - text: "\"Offer me such a place, storyteller… and I will take form, meep.\""
+        kind: voice
+
+      - text: "**Select the channel where Meepo should live.**"
+        kind: system
+
+    prompt:
+      type: channel_select
+      key: home_channel_id
+      filter: text
+      default: current_channel
+
+    commit:
+      - type: set_guild_config
+        key: home_text_channel_id
+        from: home_channel_id
+
+    next: manifestation
+
+
+  # --------------------------------
+  # 2) Manifestation — Meepo Becomes Real
+  # (PUBLIC) + REPLAY EPHEMERAL COLD OPEN
+  # --------------------------------
+  manifestation:
+    replay_scenes:
+      - cold_open
+
+    say:
+      - text: "*The constellation tightens into a brilliant knot of starlight.*"
+        kind: flavor
+
+      - text: "*With a soft pop of cosmic energy, the light resolves into a tiny winged kobold perched in midair.*"
+        kind: flavor
+
+      - text: "*Meepo dusts stardust from her wings, attempting to look dignified.*"
+        kind: flavor
+
+      - text: "\"Ahh… much better.\""
+        kind: voice
+
+      - text: "\"A proper perch at last, meep.\""
+        kind: voice
+
+      - text: "\"Stories are precious things.\""
+        kind: voice
+
+      - text: "\"Now… let us do this properly, meep.\""
+        kind: voice
+
+    next: dm_role
+
+
+  # --------------------------------
+  # 3) Authority — Who Summoned Me?
+  # (PUBLIC)
+  # --------------------------------
+  dm_role:
+    requires: [prompt.role_select]
+
+    say:
+      - text: "*Meepo squints thoughtfully at you, as if reading invisible threads in the air.*"
+        kind: flavor
+
+      - text: "\"Now then…\""
+        kind: voice
+
+      - text: "\"By what authority have I been summoned into this tale, hmm?\""
+        kind: voice
+
+      - text: "\"Every adventure requires a storyteller.\""
+        kind: voice
+
+      - text: "\"Show me which of you carries that burden, meep.\""
+        kind: voice
+
+      - text: "**Select the Dungeon Master role.**"
+        kind: system
+
+    prompt:
+      type: role_select
+      key: dm_role_id
+      label: "Dungeon Master role"
+
+    commit:
+      - type: set_guild_config
+        key: dm_role_id
+        from: dm_role_id
+
+    next: dm_name
+
+
+  # --------------------------------
+  # 4) DM Name — Recognition
+  # (PUBLIC)
+  # --------------------------------
+  dm_name:
+    requires: [prompt.modal_text]
+
+    say:
+      - text: "*Recognition dawns across Meepo’s tiny face.*"
+        kind: flavor
+
+      - text: "\"Ahh… yes. I see the threads now.\""
+        kind: voice
+
+      - text: "\"You are the one who guides the tale.\""
+        kind: voice
+
+      - text: "\"Tell me your name, storyteller… so that I may record it properly in the archive, meep.\""
+        kind: voice
+
+      - text: "**Enter the name Meepo should use for you.**"
+        kind: system
+
+    prompt:
+      type: modal_text
+      key: dm_display_name
+      label: "What should Meepo call you?"
+
+    commit:
+      - type: write_memory
+        memory_key: dm_display_name
+        scope: guild
+        sticky: true
+        from: dm_display_name
+
+    next: player_registry
+
+
+  # --------------------------------
+  # 5) Player Registry — Who are the heroes?
+  # (PUBLIC)
+  # --------------------------------
+  player_registry:
+    requires: [prompt.registry_builder]
+
+    say:
+      - text: "*Meepo glances around the room as if sensing unseen presences.*"
+        kind: flavor
+
+      - text: "\"But a chronicle cannot exist with only a storyteller.\""
+        kind: voice
+
+      - text: "\"Who are the heroes whose triumphs and catastrophes I will record?\""
+        kind: voice
+
+      - text: "\"Introduce them to me, meep.\""
+        kind: voice
+
+      - text: "**Add each player and their character name.**"
+        kind: system
+
+      - text: "*\"(This helps me recognize voices, meep.)\"*"
+        kind: flavor
+
+    prompt:
+      type: registry_builder
+      key: players
+      entry_schema:
+        - { type: user_select, key: user_id, label: "Player" }
+        - { type: text, key: character_name, label: "Character name" }
+
+    commit:
+      - type: append_registry_yaml
+        target: pcs
+        entries_from: players
+        mode: append_only
+
+    next: voice_channel
+
+
+  # --------------------------------
+  # 6) Voice Channel — Where do you gather?
+  # (PUBLIC)
+  # --------------------------------
+  voice_channel:
+    requires: [prompt.channel_select]
+
+    say:
+      - text: "*Meepo tilts her head, listening to distant echoes that aren’t quite sound.*"
+        kind: flavor
+
+      - text: "\"And where do you gather to tell these stories?\""
+        kind: voice
+
+      - text: "\"I should listen from there.\""
+        kind: voice
+
+      - text: "**Select the voice channel used for sessions.**"
+        kind: system
+
+    prompt:
+      type: channel_select
+      key: voice_channel_id
+      filter: voice
+
+    commit:
+      - type: set_guild_config
+        key: home_voice_channel_id
+        from: voice_channel_id
+
+    next: voice_greeting
+
+
+  # --------------------------------
+  # 7) Voice Greeting — Meepo’s first words
+  # (PUBLIC)
+  # --------------------------------
+  voice_greeting:
+    requires: [action.join_voice_and_speak]
+
+    say:
+      - text: "*Meepo flutters excitedly, then forces herself to look composed.*"
+        kind: flavor
+
+      - text: "\"Alright… I’m going to try something, meep.\""
+        kind: voice
+
+      - text: "*She drifts toward the place where voices gather…*"
+        kind: flavor
+
+    action:
+      type: join_voice_and_speak
+      channel_key: voice_channel_id
+      lines:
+        - "Hello… can you hear me?"
+        - "I am Meepo, celestial archivist of adventures."
+        - "I will listen carefully… and remember what matters."
+        - "Please try not to all speak at once. I am tiny, meep."
+
+    next: talk_pref
+
+
+  # --------------------------------
+  # 8) Talk Preference — Quiet Chronicler vs Party Companion
+  # (PUBLIC)
+  # --------------------------------
+  talk_pref:
+    requires: [prompt.choice, template.vars]
+
+    say:
+      - text: "*Meepo returns with a faint shimmer of pride, as if relieved that worked.*"
+        kind: flavor
+
+      - text: "\"Some storytellers prefer a quiet chronicler.\""
+        kind: voice
+
+      - text: "\"Others enjoy a little commentary from their celestial archivist.\""
+        kind: voice
+
+      - text: "\"Tell me, {{dm_display_name}}… should I remain dignified… or entertaining, meep?\""
+        kind: voice
+
+      - text: "**Choose Meepo’s default speaking mode.**"
+        kind: system
+
+    prompt:
+      type: choice
+      key: default_talk_mode
+      options:
+        - { value: hush, label: "Quiet Chronicler (recommended)" }
+        - { value: talk, label: "Party Companion" }
+
+    commit:
+      - type: set_guild_config
+        key: default_talk_mode
+        from: default_talk_mode
+
+    next: complete
+
+
+  # --------------------------------
+  # 9) Completion — Ready for Adventure
+  # (PUBLIC)
+  # --------------------------------
+  complete:
+    say:
+      - text: "*Meepo settles comfortably on her invisible perch, tail curling like a satisfied cat.*"
+        kind: flavor
+
+      - text: "\"Everything is ready.\""
+        kind: voice
+
+      - text: "\"When your adventure begins, simply say:\""
+        kind: voice
+
+      - text: "`/meepo showtime start label:<session>`"
+        kind: system
+
+      - text: "\"And I will begin recording your tale for the stars, meep.\""
+        kind: voice
+
+    commit:
+      - type: set_flag
+        key: awakened
+        value: true
+
+    end: true

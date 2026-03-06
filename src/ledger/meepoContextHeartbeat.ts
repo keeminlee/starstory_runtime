@@ -19,6 +19,7 @@ import {
 } from "./meepoContextActions.js";
 import { cfg } from "../config/env.js";
 import { appendMeepoActionLogEvent, flushDirtyMeepoActionMergedLogs, type MeepoActionRunKind } from "./meepoActionLogging.js";
+import { getObservabilityContext } from "../observability/context.js";
 
 function resolveCampaignSlugForGuild(db: any, guildId: string): string {
   try {
@@ -41,6 +42,7 @@ export function runHeartbeatAfterLedgerWrite(
     runKind?: MeepoActionRunKind;
   }
 ): void {
+  const obs = getObservabilityContext();
   let shouldProcessAction = false;
   const tickStartMs = Date.now();
   const runKind = args.runKind ?? "online";
@@ -205,6 +207,8 @@ export function runHeartbeatAfterLedgerWrite(
         guildId: args.guildId,
         scope: key.scope,
         sessionId: key.sessionId,
+        trace_id: obs.trace_id,
+        interaction_id: obs.interaction_id,
         cursorTotal: nextTotal,
         cursorWatermark: currentWatermark,
         nowMs,
@@ -219,6 +223,8 @@ export function runHeartbeatAfterLedgerWrite(
         guildId: args.guildId,
         scope: key.scope,
         sessionId: key.sessionId,
+        trace_id: obs.trace_id,
+        interaction_id: obs.interaction_id,
         cursorTotal: nextTotal,
         cursorWatermark: currentWatermark,
         nowMs,

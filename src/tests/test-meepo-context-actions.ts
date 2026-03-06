@@ -396,4 +396,84 @@ describe("meepo context action queue", () => {
       fs.rmSync(artifactDir, { recursive: true, force: true });
     }
   });
+
+  test("trace threading survives queue -> worker -> llm -> artifact metadata", async () => {
+    const previousArtifactDir = process.env.MEEPO_HEARTBEAT_REPLAY_ARTIFACT_DIR;
+    const previousDispatchOverride = process.env.MEEPO_TEST_ENABLE_LLM_DISPATCH_LOG;
+    const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-trace-thread-"));
+    process.env.MEEPO_HEARTBEAT_REPLAY_ARTIFACT_DIR = artifactDir;
+    process.env.MEEPO_TEST_ENABLE_LLM_DISPATCH_LOG = "1";
+
+    try {
+      const db = createTestDb();
+      const guildId = "guild-trace";
+      const sessionId = "session-trace";
+      const traceId = "traceabc123";
+      const interactionId = "discord-interaction-42";
+      const { runWithObservabilityContext } = await import("../observability/context.js");
+
+      db.prepare(`INSERT INTO sessions (session_id, guild_id, label) VALUES (?, ?, ?)`)
+        .run(sessionId, guildId, "C2E99");
+
+      for (let i = 1; i <= 250; i += 1) {
+        insertLedgerEntry(db, {
+          id: `line-${String(i).padStart(3, "0")}`,
+          guildId,
+          sessionId,
+          authorId: i % 2 === 0 ? "u2" : "u1",
+          authorName: i % 2 === 0 ? "Bob" : "Alice",
+          content: `trace test line ${i}`,
+          source: "text",
+          timestampMs: 20_000 + i,
+        });
+      }
+
+      runWithObservabilityContext(
+        {
+          trace_id: traceId,
+          interaction_id: interactionId,
+          guild_id: guildId,
+          campaign_slug: "default",
+        },
+        () => {
+          runHeartbeatAfterLedgerWrite(db, {
+            guildId,
+            sessionId,
+            ledgerEntryId: "line-250",
+          });
+        }
+      );
+
+      const chunkAction = db.prepare(
+        `SELECT payload_json FROM meepo_actions WHERE action_type = 'megameecap-update-chunk' LIMIT 1`
+      ).get() as { payload_json: string } | undefined;
+      expect(chunkAction).toBeTruthy();
+      const chunkPayload = JSON.parse(String(chunkAction?.payload_json ?? "{}")) as {
+        trace_id?: string;
+        interaction_id?: string;
+      };
+      expect(chunkPayload.trace_id).toBe(traceId);
+      expect(chunkPayload.interaction_id).toBe(interactionId);
+
+      for (let i = 0; i < 4; i += 1) {
+        const processed = await processOneMeepoContextAction(db, "trace-worker");
+        if (!processed) break;
+      }
+
+      const { chat } = await import("../llm/client.js");
+      const chatMock = chat as any;
+      const traceCall = Array.isArray(chatMock.mock?.calls)
+        ? chatMock.mock.calls.find((call: any[]) => call?.[0]?.trace_id === traceId)
+        : undefined;
+
+      expect(traceCall).toBeTruthy();
+      expect(traceCall?.[0]?.interaction_id).toBe(interactionId);
+    } finally {
+      if (previousArtifactDir === undefined) delete process.env.MEEPO_HEARTBEAT_REPLAY_ARTIFACT_DIR;
+      else process.env.MEEPO_HEARTBEAT_REPLAY_ARTIFACT_DIR = previousArtifactDir;
+      if (previousDispatchOverride === undefined) delete process.env.MEEPO_TEST_ENABLE_LLM_DISPATCH_LOG;
+      else process.env.MEEPO_TEST_ENABLE_LLM_DISPATCH_LOG = previousDispatchOverride;
+      fs.rmSync(artifactDir, { recursive: true, force: true });
+    }
+  });
 });

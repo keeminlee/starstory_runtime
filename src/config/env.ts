@@ -188,7 +188,6 @@ export function loadConfig(): Config {
     features: {
       memoryEnabled: optBool("MEEPO_MEMORY_ENABLED", true),
       goldMemoryEnabled: optBool("GOLD_MEMORY_ENABLED", false),
-      labCommandsEnabled: optBool("ENABLE_LAB_COMMANDS", false),
       contextMiniFirst: optBool("MEEPO_CONTEXT_MINI_FIRST", false),
       contextInlineActionsDev: optBool("MEEPO_CONTEXT_INLINE_ACTIONS_DEV", process.env.NODE_ENV !== "production"),
       contextWorkerEnabled: optBool("MEEPO_CONTEXT_WORKER_ENABLED", true),
@@ -210,10 +209,6 @@ export function loadConfig(): Config {
 
     access: {
       devUserIds: (opt("DEV_USER_IDS") ?? "")
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean),
-      devGuildIds: (opt("DEV_GUILD_IDS") ?? "")
         .split(",")
         .map((value) => value.trim())
         .filter(Boolean),
@@ -288,7 +283,6 @@ export function printConfigSnapshot(cfg: Config): void {
     FFMPEG_PATH: cfg.audioFx.ffmpegPath,
     MEEPO_MEMORY_ENABLED: cfg.features.memoryEnabled,
     GOLD_MEMORY_ENABLED: cfg.features.goldMemoryEnabled,
-    ENABLE_LAB_COMMANDS: cfg.features.labCommandsEnabled,
     MEEPO_CONTEXT_MINI_FIRST: cfg.features.contextMiniFirst,
     MEEPO_CONTEXT_INLINE_ACTIONS_DEV: cfg.features.contextInlineActionsDev,
     MEEPO_CONTEXT_WORKER_ENABLED: cfg.features.contextWorkerEnabled,
@@ -301,7 +295,6 @@ export function printConfigSnapshot(cfg: Config): void {
     MEEPO_ACTION_LOGGING_ENABLED: cfg.meepoActionLogging.enabled,
     MEEPO_ACTION_LOGGING_INCLUDE_PROMPTS: cfg.meepoActionLogging.includePromptBodies,
     DEV_USER_IDS: cfg.access.devUserIds.join(","),
-    DEV_GUILD_IDS: cfg.access.devGuildIds.join(","),
     LOG_LEVEL: cfg.logging.level,
     LOG_SCOPES: cfg.logging.scopes?.join(",") ?? "",
     LOG_FORMAT: cfg.logging.format,

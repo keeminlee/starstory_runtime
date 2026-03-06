@@ -295,7 +295,7 @@ export const meepo = {
     .addSubcommand((sub) =>
       sub
         .setName("join")
-        .setDescription("Join your voice channel (requires /meepo wake first).")
+        .setDescription("Join your voice channel (requires /meepo awaken first).")
     )
     .addSubcommand((sub) =>
       sub
@@ -666,7 +666,7 @@ export const meepo = {
         }
         setGuildDefaultPersonaId(guildId, value);
         await interaction.reply({
-          content: `Default persona set to **${value}**. Future /meepo wake will use this.`,
+          content: `Default persona set to **${value}**. Future /meepo awaken will use this.`,
           ephemeral: true,
         });
         return;
@@ -896,7 +896,7 @@ export const meepo = {
       
       const active = getActiveMeepo(guildId);
       if (!active) {
-        await interaction.reply({ content: "Meepo is asleep. Use /meepo wake first.", ephemeral: true });
+        await interaction.reply({ content: "Meepo is asleep. Use /meepo awaken first.", ephemeral: true });
         return;
       }
 
@@ -955,7 +955,7 @@ export const meepo = {
       const active = getActiveMeepo(guildId);
       if (!active) {
         await interaction.reply({
-          content: "Meepo is asleep. Use /meepo wake first.",
+          content: "Meepo is asleep. Use /meepo awaken first.",
           ephemeral: true,
         });
         return;
@@ -1220,7 +1220,7 @@ export const meepo = {
       // Preconditions
       const active = getActiveMeepo(guildId);
       if (!active) {
-        await interaction.reply({ content: "Meepo is asleep. Use /meepo wake first.", ephemeral: true });
+        await interaction.reply({ content: "Meepo is asleep. Use /meepo awaken first.", ephemeral: true });
         return;
       }
 
@@ -1378,7 +1378,7 @@ export const meepo = {
     if (sub === "reply") {
       const active = getActiveMeepo(guildId);
       if (!active) {
-        await interaction.reply({ content: "Meep! Meepo is asleep. Use `/meepo wake` first.", ephemeral: true });
+        await interaction.reply({ content: "Meep! Meepo is asleep. Use `/meepo awaken` first.", ephemeral: true });
         return;
       }
 

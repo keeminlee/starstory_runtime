@@ -44,6 +44,12 @@ import { incrementLatchTurn } from "../latch/latch.js";
 import { recordMeepoInteraction, trimToSnippet, classifyTrigger } from "../ledger/meepoInteractions.js";
 import { buildTranscript } from "../ledger/transcripts.js";
 import { cfg } from "../config/env.js";
+import {
+  getOrCreateTraceId,
+  runWithObservabilityContext,
+} from "../observability/context.js";
+import { formatUserFacingError } from "../errors/formatUserFacingError.js";
+import { MeepoError } from "../errors/meepoError.js";
 
 const voiceReplyLog = log.withScope("voice-reply");
 const DEBUG_VOICE = cfg.logging.level === "debug" || cfg.logging.level === "trace";
@@ -79,6 +85,18 @@ export async function respondToVoiceUtterance(
   }
 ): Promise<boolean> {
   const { guildId, channelId, speakerId, speakerName, utterance, textChannelId, replyViaTextOnly, tier: tierFromCaller, trigger } = opts;
+  const campaignSlug = resolveCampaignSlug({ guildId });
+  const traceId = getOrCreateTraceId();
+  const interactionId = `voice:${channelId}:${Date.now()}`;
+
+  return runWithObservabilityContext(
+    {
+      trace_id: traceId,
+      interaction_id: interactionId,
+      guild_id: guildId,
+      campaign_slug: campaignSlug,
+    },
+    async () => {
   const latchChannelId = textChannelId ?? channelId;
   // Precondition 1: Meepo must be awake
   const active = getActiveMeepo(guildId);
@@ -102,7 +120,6 @@ export async function respondToVoiceUtterance(
 
   // Precondition 4: Cooldown must have passed
   const now = Date.now();
-  const campaignSlug = resolveCampaignSlug({ guildId });
   const cooldownMs = cfg.voice.replyCooldownMs;
   const lastReply = guildLastVoiceReply.get(guildId) ?? 0;
   const timeSinceLastReply = now - lastReply;
@@ -266,6 +283,8 @@ export async function respondToVoiceUtterance(
       campaign_slug: campaignSlug,
       session_id: activeSession?.session_id ?? "__ambient__",
       anchor_ledger_id: anchorLedgerRow?.id ?? `voice:${now}`,
+      trace_id: traceId,
+      interaction_id: interactionId,
       user_text: utterance,
       meepo_context_snapshot: {
         context: recentContext || undefined,
@@ -311,6 +330,11 @@ export async function respondToVoiceUtterance(
       systemPrompt: promptBundle.system,
       userMessage,
       maxTokens: 100, // Shorter responses for voice
+      trace_id: traceId,
+      interaction_id: interactionId,
+      guild_id: guildId,
+      campaign_slug: campaignSlug,
+      session_id: activeSession?.session_id ?? undefined,
     });
 
     db.prepare(`
@@ -422,7 +446,21 @@ export async function respondToVoiceUtterance(
           return true;
         }
       } catch (err: any) {
-        voiceReplyLog.error(`Error sending text reply: ${err.message ?? err}`);
+        const boundaryErr = err instanceof MeepoError
+          ? err
+          : new MeepoError("ERR_DISCORD_REPLY_FAILED", {
+            message: "Failed to send voice text reply",
+            cause: err,
+            trace_id: traceId,
+            interaction_id: interactionId,
+          });
+        const payload = formatUserFacingError(boundaryErr, {
+          fallbackMessage: "⚠️ Meepo couldn't deliver that reply.",
+          trace_id: traceId,
+        });
+        voiceReplyLog.error(`Error sending text reply: ${String((err as any)?.message ?? err)}`, {
+          error_code: payload.code,
+        });
         return false;
       }
     }
@@ -457,7 +495,15 @@ export async function respondToVoiceUtterance(
     voiceReplyLog.info(`🔊 Meepo: "${responseText}"`);
     return true;
   } catch (err: any) {
-    voiceReplyLog.error(`Error generating reply: ${err.message ?? err}`);
+    const payload = formatUserFacingError(err, {
+      fallbackMessage: "⚠️ Meepo couldn't generate a voice reply.",
+      trace_id: traceId,
+    });
+    voiceReplyLog.error(`Error generating reply: ${err.message ?? err}`, {
+      error_code: payload.code,
+    });
     return false;
   }
+    }
+  );
 }

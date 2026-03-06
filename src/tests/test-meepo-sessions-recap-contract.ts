@@ -45,6 +45,14 @@ vi.mock("../config/env.js", () => ({
     tts: { enabled: false },
     overlay: { homeVoiceChannelId: null },
     data: { root: ".", campaignsDir: "campaigns" },
+    db: { filename: "db.sqlite", path: "db.sqlite" },
+    voice: { debug: false },
+    logging: {
+      level: "error",
+      scopes: [],
+      format: "pretty",
+      debugLatch: false,
+    },
   },
 }));
 

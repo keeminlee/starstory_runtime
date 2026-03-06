@@ -22,8 +22,7 @@ vi.mock("../commands/shared/sessionResolve.js", () => ({
 vi.mock("../config/env.js", () => ({
   cfg: {
     logging: { level: "warn", scopes: [], format: "pretty" },
-    features: { labCommandsEnabled: true },
-    access: { devUserIds: [], devGuildIds: [] },
+    access: { devUserIds: ["dev-user"] },
   },
 }));
 
@@ -59,6 +58,11 @@ const stubLegacyCommand = {
 };
 
 vi.mock("../commands/meepoLegacy.js", () => ({ meepo: stubLegacyCommand }));
+vi.mock("../commands/meepo.js", () => ({
+  executeLabAwakenRespond: vi.fn(async () => {}),
+  executeLabDoctor: vi.fn(async () => {}),
+  executeLabSleep: vi.fn(async () => {}),
+}));
 vi.mock("../commands/session.js", () => ({ session: stubLegacyCommand }));
 vi.mock("../commands/meeps.js", () => ({ meeps: stubLegacyCommand }));
 vi.mock("../commands/missions.js", () => ({ missions: stubLegacyCommand }));
@@ -70,6 +74,7 @@ describe("lab autocomplete routing", () => {
 
     const respond = vi.fn(async () => {});
     await lab.autocomplete({
+      user: { id: "dev-user" },
       guildId: "g1",
       guild: { name: "Guild" },
       channelId: "c1",
@@ -90,6 +95,7 @@ describe("lab autocomplete routing", () => {
 
     const respond = vi.fn(async () => {});
     await lab.autocomplete({
+      user: { id: "dev-user" },
       guildId: "g1",
       guild: { name: "Guild" },
       channelId: "c1",
