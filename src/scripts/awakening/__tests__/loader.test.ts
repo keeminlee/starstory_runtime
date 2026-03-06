@@ -7,7 +7,7 @@ describe("awakening script loader", () => {
     const script = await loadAwakenScript("meepo_awaken");
 
     expect(script.id).toBe("meepo_awaken");
-    expect(script.version).toBe(2);
+    expect(script.version).toBe(3);
     expect(script.start_scene).toBe("cold_open");
   });
 

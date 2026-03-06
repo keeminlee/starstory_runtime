@@ -165,6 +165,10 @@ export const metaMeepoVoice = {
       return "Join a voice channel and run /meepo awaken again if you want me to connect, meep. Need the full command map? Run /meepo help.";
     },
 
+    pausedContinuePrompt(): string {
+      return "Awakening paused: run /meepo awaken and press Continue to proceed.";
+    },
+
     talkTip(): string {
       return "💬 Tip: after awakening, run /meepo talk if you want voice replies, meep.";
     },
@@ -490,6 +494,34 @@ export const metaMeepoVoice = {
 
     updatedHomeText(channelRef: string): string {
       return `Home text set to ${channelRef}. I’ll report there when you wake me, meep!`;
+    },
+
+    selectTextChannel(): string {
+      return "Select a text channel.";
+    },
+
+    selectVoiceChannel(): string {
+      return "Select a voice channel.";
+    },
+
+    updatedDmRole(roleId: string): string {
+      return `Dungeon Master role set to <@&${roleId}>.`;
+    },
+
+    invalidTalkMode(): string {
+      return "Talk mode must be hush or talk.";
+    },
+
+    updatedTalkMode(mode: "hush" | "talk"): string {
+      return `Default talk mode set to **${mode}**.`;
+    },
+
+    emptyDmName(): string {
+      return "DM name cannot be empty.";
+    },
+
+    updatedDmName(): string {
+      return "Dungeon Master display name updated.";
     },
 
     clearedHomeText(): string {

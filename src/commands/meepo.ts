@@ -1074,7 +1074,7 @@ async function handleAwaken(interaction: any, ctx: CommandCtx): Promise<void> {
     const pendingPrompt = getPendingPromptFromState(stateAfterRun);
     if (stateAfterRun && pendingPrompt) {
       if (pendingPrompt.kind !== "continue") {
-        await editReply("Awakening paused: run /meepo awaken and press Continue to proceed.");
+        await editReply(metaMeepoVoice.wake.pausedContinuePrompt());
         return;
       }
 
@@ -1623,7 +1623,7 @@ async function handleSettings(interaction: any, ctx: CommandCtx): Promise<void> 
     const channel = interaction.options.getChannel("channel", true);
     const isValid = Boolean(channel?.isTextBased?.()) && !Boolean(channel?.isVoiceBased?.());
     if (!isValid) {
-      await interaction.reply({ content: "Select a text channel.", ephemeral: true });
+      await interaction.reply({ content: metaMeepoVoice.settings.selectTextChannel(), ephemeral: true });
       return;
     }
     setGuildHomeTextChannelId(guildId, channel.id);
@@ -1635,7 +1635,7 @@ async function handleSettings(interaction: any, ctx: CommandCtx): Promise<void> 
     const channel = interaction.options.getChannel("channel", true);
     const isValid = Boolean(channel?.isVoiceBased?.());
     if (!isValid) {
-      await interaction.reply({ content: "Select a voice channel.", ephemeral: true });
+      await interaction.reply({ content: metaMeepoVoice.settings.selectVoiceChannel(), ephemeral: true });
       return;
     }
     setGuildHomeVoiceChannelId(guildId, channel.id);
@@ -1646,18 +1646,18 @@ async function handleSettings(interaction: any, ctx: CommandCtx): Promise<void> 
   if (sub === "dm_role") {
     const role = interaction.options.getRole("role", true);
     setGuildDmRoleId(guildId, role.id);
-    await interaction.reply({ content: `Dungeon Master role set to <@&${role.id}>.`, ephemeral: true });
+    await interaction.reply({ content: metaMeepoVoice.settings.updatedDmRole(role.id), ephemeral: true });
     return;
   }
 
   if (sub === "talk_mode") {
     const mode = interaction.options.getString("mode", true) as "hush" | "talk";
     if (mode !== "hush" && mode !== "talk") {
-      await interaction.reply({ content: "Talk mode must be hush or talk.", ephemeral: true });
+      await interaction.reply({ content: metaMeepoVoice.settings.invalidTalkMode(), ephemeral: true });
       return;
     }
     setGuildDefaultTalkMode(guildId, mode);
-    await interaction.reply({ content: `Default talk mode set to **${mode}**.`, ephemeral: true });
+    await interaction.reply({ content: metaMeepoVoice.settings.updatedTalkMode(mode), ephemeral: true });
     return;
   }
 
@@ -1665,7 +1665,7 @@ async function handleSettings(interaction: any, ctx: CommandCtx): Promise<void> 
     const raw = String(interaction.options.getString("name", true) ?? "");
     const trimmed = raw.trim();
     if (!trimmed) {
-      await interaction.reply({ content: "DM name cannot be empty.", ephemeral: true });
+      await interaction.reply({ content: metaMeepoVoice.settings.emptyDmName(), ephemeral: true });
       return;
     }
     upsertDmDisplayNameMemory({
@@ -1674,7 +1674,7 @@ async function handleSettings(interaction: any, ctx: CommandCtx): Promise<void> 
       displayName: trimmed,
       source: "settings_dm_name",
     });
-    await interaction.reply({ content: "Dungeon Master display name updated.", ephemeral: true });
+    await interaction.reply({ content: metaMeepoVoice.settings.updatedDmName(), ephemeral: true });
     return;
   }
 

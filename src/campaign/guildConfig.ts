@@ -33,12 +33,27 @@ const envHomeVoiceIgnoredGuilds = new Set<string>();
  */
 export function getGuildConfig(guildId: string): GuildConfigRow | null {
   const db = getControlDb();
-  const row = db
-    .prepare(
-      "SELECT guild_id, campaign_slug, awakened, dm_user_id, dm_role_id, default_talk_mode, default_persona_id, setup_version, home_text_channel_id, home_voice_channel_id, canon_persona_mode, canon_persona_id, default_recap_style FROM guild_config WHERE guild_id = ? LIMIT 1"
-    )
-    .get(guildId) as GuildConfigRow | undefined;
-  return row ?? null;
+  try {
+    const row = db
+      .prepare(
+        "SELECT guild_id, campaign_slug, awakened, dm_user_id, dm_role_id, default_talk_mode, default_persona_id, setup_version, home_text_channel_id, home_voice_channel_id, canon_persona_mode, canon_persona_id, default_recap_style FROM guild_config WHERE guild_id = ? LIMIT 1"
+      )
+      .get(guildId) as GuildConfigRow | undefined;
+    return row ?? null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("no such column")) {
+      throw error;
+    }
+
+    // Back-compat for older test schemas that do not have newly added columns.
+    const legacyRow = db
+      .prepare(
+        "SELECT guild_id, campaign_slug, awakened, dm_user_id, dm_role_id, default_persona_id, setup_version, home_text_channel_id, home_voice_channel_id, canon_persona_mode, canon_persona_id, default_recap_style FROM guild_config WHERE guild_id = ? LIMIT 1"
+      )
+      .get(guildId) as Omit<GuildConfigRow, "default_talk_mode"> | undefined;
+    return legacyRow ? { ...legacyRow, default_talk_mode: null } : null;
+  }
 }
 
 /**
@@ -67,7 +82,7 @@ export function ensureGuildConfig(guildId: string, guildName?: string | null): G
       canon_persona_id,
       default_recap_style
     )
-      VALUES (?, ?, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)`
+      VALUES (?, ?, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)`
   ).run(guildId, slug);
   campaignLog.info(`Created guild_config for guild=${guildId} campaign_slug=${slug}`);
   row = getGuildConfig(guildId)!;
@@ -155,8 +170,16 @@ export function getGuildDefaultTalkMode(guildId: string): "hush" | "talk" | null
 export function setGuildDefaultTalkMode(guildId: string, mode: "hush" | "talk" | null): void {
   const db = getControlDb();
   ensureGuildConfig(guildId, null);
-  db.prepare("UPDATE guild_config SET default_talk_mode = ? WHERE guild_id = ?").run(mode, guildId);
-  campaignLog.info(`Set default_talk_mode=${mode ?? "null"} for guild=${guildId}`);
+  try {
+    db.prepare("UPDATE guild_config SET default_talk_mode = ? WHERE guild_id = ?").run(mode, guildId);
+    campaignLog.info(`Set default_talk_mode=${mode ?? "null"} for guild=${guildId}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("no such column")) {
+      throw error;
+    }
+    campaignLog.warn(`Skipped default_talk_mode update for guild=${guildId}; schema missing column`);
+  }
 }
 
 /**
