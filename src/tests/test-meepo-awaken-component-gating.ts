@@ -26,6 +26,7 @@ vi.mock("../campaign/guildConfig.js", () => ({
   getGuildCanonPersonaId: vi.fn(() => null),
   getGuildCanonPersonaMode: vi.fn(() => "meta"),
   getGuildConfig: vi.fn(() => ({ campaign_slug: "default" })),
+  getGuildDmRoleId: vi.fn(() => null),
   getGuildDmUserId: vi.fn(() => configuredDmUserId),
   getGuildDefaultRecapStyle: vi.fn(() => "balanced"),
   getGuildHomeTextChannelId: vi.fn(() => null),
@@ -193,7 +194,7 @@ describe("awakening choice component gating", () => {
     expect(handled).toBe(true);
     expect(runWakeMock).not.toHaveBeenCalled();
     expect(interaction.reply).toHaveBeenCalledWith({
-      content: "This awakening prompt is stale. Run /meepo wake again.",
+      content: "This awakening prompt is stale. Run /meepo awaken again.",
       ephemeral: true,
     });
     expect(after?.current_scene).toBe(before?.current_scene);
@@ -302,7 +303,7 @@ describe("awakening choice component gating", () => {
     expect(after?.progress_json.voice_mode).toBe("voice");
     expect(after?.progress_json.pending_prompt_kind).toBeNull();
     expect(after?.progress_json.pending_prompt_nonce).toBeNull();
-    expect(interaction.editReply).toHaveBeenCalledWith("Awakening paused: beat budget reached for this run. Use /meepo wake again to continue.");
+    expect(interaction.editReply).toHaveBeenCalledWith("Awakening paused: beat budget reached for this run. Use /meepo awaken again to continue.");
     expect(interaction.reply).not.toHaveBeenCalledWith({
       content: "Only the Dungeon Master can answer this awakening prompt.",
       ephemeral: true,
@@ -357,7 +358,7 @@ describe("awakening choice component gating", () => {
     expect(after?.progress_json.dm_role_id).toBe("role-123");
     expect(after?.progress_json.pending_prompt_kind).toBeNull();
     expect(after?.progress_json.pending_prompt_nonce).toBeNull();
-    expect(interaction.editReply).toHaveBeenCalledWith("Awakening paused: beat budget reached for this run. Use /meepo wake again to continue.");
+    expect(interaction.editReply).toHaveBeenCalledWith("Awakening paused: beat budget reached for this run. Use /meepo awaken again to continue.");
     db.close();
   });
 });

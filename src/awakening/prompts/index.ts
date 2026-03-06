@@ -2,6 +2,11 @@ import type { GuildOnboardingState } from "../../ledger/awakeningStateRepo.js";
 import type { AwakenScript } from "../../scripts/awakening/_schema.js";
 import type { PendingPromptState } from "../wakeIdentity.js";
 import {
+  AWAKEN_CONTINUE_KEY,
+  buildContinuePromptPayload,
+  parseContinueCustomId,
+} from "./continuePrompt.js";
+import {
   buildChoicePromptPayload,
   parseChoicePromptCustomId,
   resolveChoicePromptValue,
@@ -34,6 +39,7 @@ type ReplyLike = {
   deferred?: boolean;
   reply: (payload: unknown) => Promise<unknown>;
   editReply: (payload: unknown) => Promise<unknown>;
+  followUp?: (payload: unknown) => Promise<unknown>;
 };
 
 export async function renderPendingAwakeningPrompt(args: {
@@ -44,6 +50,29 @@ export async function renderPendingAwakeningPrompt(args: {
 }): Promise<boolean> {
   const scene = args.script.scenes[args.pending.sceneId];
   if (!scene) return false;
+  if (args.pending.kind === "continue") {
+    if (args.pending.key !== AWAKEN_CONTINUE_KEY) return false;
+
+    const payload = buildContinuePromptPayload({
+      guildId: args.state.guild_id,
+      onboardingId: args.state.script_id,
+      sceneId: args.pending.sceneId,
+      nonce: args.pending.nonce,
+    });
+
+    if (typeof args.interaction.followUp === "function") {
+      await args.interaction.followUp(payload);
+      return true;
+    }
+
+    if (args.interaction.deferred || args.interaction.replied) {
+      await args.interaction.editReply(payload);
+    } else {
+      await args.interaction.reply(payload);
+    }
+    return true;
+  }
+
   const prompt = scene.prompt;
   if (!prompt || prompt.key !== args.pending.key) return false;
 
@@ -196,6 +225,7 @@ export async function renderPendingAwakeningPrompt(args: {
 }
 
 export {
+  parseContinueCustomId,
   parseChannelSelectCustomId,
   parseChoicePromptCustomId,
   parseModalOpenCustomId,

@@ -13,6 +13,7 @@ This index is the entry point for project docs. It separates active references f
 ## Active References
 
 - [OVERLAY.md](OVERLAY.md) — OBS overlay architecture and setup
+- [ops/ENV.md](ops/ENV.md) — deploy/runtime env contract (prod-safe defaults)
 - [MISSIONS_V0.md](MISSIONS_V0.md) — mission economy design and command behavior
 - [CAUSAL_CORE_PHYSICS.md](CAUSAL_CORE_PHYSICS.md) — mass vs strength contract, rounds, and convergence behavior
 - Silver-Seq lane (`src/silver/seq/*`) — deterministic transcript segmentation for sequential summarization

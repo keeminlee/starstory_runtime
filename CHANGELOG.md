@@ -1,5 +1,47 @@
 # Changelog
 
+## v1.8 - 2026-03-04
+
+### Changed
+
+- Renamed user-facing awakening command from `/meepo wake` to `/meepo awaken`.
+- Removed public `/meepo awaken session:<...>` surface; awakening no longer accepts manual session option.
+- Added dev fallback/debug routes under `/lab awaken`:
+  - `/lab awaken respond text:<...>`
+  - `/lab awaken status`
+- Kept deprecated response alias behavior for stale `/meepo ... response` invocations behind `DEV_USER_IDS` gate, otherwise returns moved guidance.
+
+### Awakening Runtime
+
+- Enforced defer-first interaction pattern for awaken flow (`deferReply` first, prompt UI via `editReply`).
+- Ensured prompt rendering occurs after scene say sequence completion.
+- Added computed template variables in awakening context assembly:
+  - `home_channel` from `home_channel_id` as channel mention
+  - `current_channel` from `current_channel_id` as channel mention
+- Seeded runtime `current_channel_id` from `interaction.channelId` at run start.
+
+### Tests
+
+- Added regression ordering test for awaken flow interaction sequencing.
+- Updated command manifest and lab-gating tests for `/meepo awaken` and `/lab awaken` surface.
+
+## v1.7 - 2026-03-04
+
+### Changed
+
+- Moved dev/maintenance command surface behind `/lab`:
+  - `/meepo doctor` → `/lab doctor`
+  - `/meepo sleep` → `/lab sleep`
+  - `/goldmem` → `/lab goldmem run`
+  - `/meeps ...` → `/lab meeps ...`
+  - `/missions ...` → `/lab missions ...`
+- Public `/meepo` surface now excludes `doctor` and `sleep` subcommands.
+- Added stale-command redirect replies for legacy top-level `/goldmem`, `/meeps`, and `/missions` invocations.
+
+### Security
+
+- All moved `/lab` routes remain gated by `DEV_USER_IDS` user allowlist.
+
 ## v1.6 - 2026-03-04
 
 ### Added

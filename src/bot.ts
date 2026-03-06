@@ -50,6 +50,12 @@ import { startReceiver } from "./voice/receiver.js";
 import { setVoiceState } from "./voice/state.js";
 import { cfg, printConfigSnapshot } from "./config/env.js";
 import { getEnvBool } from "./config/rawEnv.js";
+import {
+  getOrCreateTraceId,
+  runWithObservabilityContext,
+} from "./observability/context.js";
+import { formatUserFacingError } from "./errors/formatUserFacingError.js";
+import { MeepoError } from "./errors/meepoError.js";
 
 const bootLog = log.withScope("boot");
 const overlayLog = log.withScope("overlay");
@@ -114,44 +120,45 @@ client.once("ready", async () => {
     bootLog.warn(`ANNOUNCEMENT_CHANNEL_ID not set. /meepo announce will reply with error.`);
   }
 
-  // Restore Meepo active state (if Meepo was active before shutdown)
-  const guildId = cfg.discord.guildId;
-  if (guildId) {
-    const activeMeepo = getActiveMeepo(guildId);
-    if (activeMeepo) {
-      bootLog.info(`Meepo restored: form=${activeMeepo.form_id}, channel=${activeMeepo.channel_id}, session continues`);
-      
-      // Auto-join General voice on redeploy (resume listening)
+  // Restore Meepo active state for connected guilds (no single-guild env dependency)
+  if (client.guilds.cache.size === 0) {
+    bootLog.info("Startup restore skipped: bot is not in any guilds.");
+  } else {
+    for (const guild of client.guilds.cache.values()) {
+      const activeMeepo = getActiveMeepo(guild.id);
+      if (!activeMeepo) continue;
+
+      bootLog.info(
+        `Meepo restored guild=${guild.id}: form=${activeMeepo.form_id}, channel=${activeMeepo.channel_id}, session continues`
+      );
+
       try {
         await autoJoinGeneralVoice({
           client,
-          guildId,
+          guildId: guild.id,
           channelId: activeMeepo.channel_id,
         });
       } catch (err: any) {
-        bootLog.warn(`Failed to auto-join voice on restore: ${err.message ?? err}`);
+        bootLog.warn(`Failed to auto-join voice on restore guild=${guild.id}: ${err.message ?? err}`);
       }
-    } else {
-      bootLog.info(`Startup restore skipped: no active Meepo state for guild ${guildId}.`);
     }
-  } else {
-    bootLog.info(`Startup restore skipped: GUILD_ID not configured.`);
   }
 
   // Start auto-sleep checker for inactive Meepo instances
   startAutoSleepChecker();
 
   // Start context action worker (separate from heartbeat enqueue path)
-  startMeepoContextActionWorker(guildId ?? null);
+  startMeepoContextActionWorker();
 
+  const configuredOverlayGuildId = cfg.discord.guildId;
   // Auto-join overlay voice channel (for speaking detection, independent of Meepo sessions)
   // Configurable via OVERLAY_AUTOJOIN=true (disabled by default)
   const overlayVoiceChannelId = cfg.overlay.voiceChannelId;
   const overlayAutoJoinEnabled = getEnvBool("OVERLAY_AUTOJOIN", false);
   
-  if (overlayAutoJoinEnabled && guildId && overlayVoiceChannelId) {
+  if (overlayAutoJoinEnabled && configuredOverlayGuildId && overlayVoiceChannelId) {
     try {
-      const guild = await client.guilds.fetch(guildId);
+      const guild = await client.guilds.fetch(configuredOverlayGuildId);
       const channel = await guild.channels.fetch(overlayVoiceChannelId);
       
       if (!channel || !channel.isVoiceBased()) {
@@ -160,13 +167,13 @@ client.once("ready", async () => {
       }
 
       const connection = await joinVoice({
-        guildId,
+        guildId: configuredOverlayGuildId,
         channelId: overlayVoiceChannelId,
         adapterCreator: guild.voiceAdapterCreator,
       });
 
       // Set voice state with STT enabled for overlay channel
-      setVoiceState(guildId, {
+      setVoiceState(configuredOverlayGuildId, {
         channelId: overlayVoiceChannelId,
         connection,
         guild,
@@ -175,7 +182,7 @@ client.once("ready", async () => {
         connectedAt: Date.now(),
       });
 
-      startReceiver(guildId);
+      startReceiver(configuredOverlayGuildId);
 
       // Set initial presence for users already in the channel
       if (channel.isVoiceBased()) {
@@ -247,6 +254,17 @@ client.on("messageCreate", async (message: any) => {
       guildName: message.guild?.name ?? undefined,
     });
     const db = getDbForCampaign(campaignSlug);
+    const traceId = getOrCreateTraceId();
+    const interactionId = message.id as string;
+
+    await runWithObservabilityContext(
+      {
+        trace_id: traceId,
+        interaction_id: interactionId,
+        guild_id: message.guildId,
+        campaign_slug: campaignSlug,
+      },
+      async () => {
 
     // Get active session if one exists (for session_id tracking)
     const activeSession = getActiveSession(message.guildId);
@@ -270,7 +288,7 @@ client.on("messageCreate", async (message: any) => {
       return;
     }
 
-    // 2) WAKE-ON-NAME: Auto-wake Meepo if message contains "meepo" and Meepo is not active
+    // 2) AWAKEN-ON-NAME: Auto-awaken Meepo if message contains "meepo" and Meepo is not active
     let active = getActiveMeepo(message.guildId);
     const contentLower = content.toLowerCase();
     
@@ -287,7 +305,7 @@ client.on("messageCreate", async (message: any) => {
       containsPersonaName(content, defaultPersonaId);
 
     if (!active && autoWakeHit) {
-      bootLog.info(`AUTO-WAKE triggered by ${message.author.username} in channel ${message.channelId}`);
+      bootLog.info(`AUTO-AWAKEN triggered by ${message.author.username} in channel ${message.channelId}`);
       
       // Wake Meepo and bind to this channel
       active = wakeMeepo({
@@ -311,7 +329,7 @@ client.on("messageCreate", async (message: any) => {
       
       // console.log("WAKE RESULT:", active);
 
-      // Log the auto-wake action
+      // Log the auto-awaken action
       appendLedgerEntry({
         guild_id: message.guildId,
         channel_id: message.channelId,
@@ -319,7 +337,7 @@ client.on("messageCreate", async (message: any) => {
         author_id: "system",
         author_name: "SYSTEM",
         timestamp_ms: Date.now(),
-        content: `Auto-wake triggered by text containing wakephrase/name (meepo or ${defaultPersonaName}).`,
+        content: `Auto-awaken triggered by text containing wakephrase/name (meepo or ${defaultPersonaName}).`,
         tags: "system,action,wake",
       });
 
@@ -672,6 +690,8 @@ client.on("messageCreate", async (message: any) => {
         campaign_slug: campaignSlug,
         session_id: activeSessionForPrompt?.session_id ?? "__ambient__",
         anchor_ledger_id: inboundLedgerId ?? message.id,
+        trace_id: traceId,
+        interaction_id: interactionId,
         user_text: content,
         meepo_context_snapshot: {
           context: recentContext || undefined,
@@ -719,6 +739,11 @@ client.on("messageCreate", async (message: any) => {
       const response = await chat({
         systemPrompt: promptBundle.system,
         userMessage,
+        trace_id: traceId,
+        interaction_id: interactionId,
+        guild_id: message.guildId,
+        campaign_slug: campaignSlug,
+        session_id: activeSessionForPrompt?.session_id ?? undefined,
       });
 
       // Layer 0: Log Meepo's response after LLM call
@@ -755,7 +780,14 @@ client.on("messageCreate", async (message: any) => {
         }
       }
 
-      const reply = await message.reply(response);
+      const reply = await message.reply(response).catch((replyErr: unknown) => {
+        throw new MeepoError("ERR_DISCORD_REPLY_FAILED", {
+          message: "Failed to send generated text reply",
+          cause: replyErr,
+          trace_id: traceId,
+          interaction_id: interactionId,
+        });
+      });
 
       // Tier = reply channel: S = voice actually sent, A = text
       const tier = actualVoiceSent ? "S" : "A";
@@ -819,12 +851,21 @@ client.on("messageCreate", async (message: any) => {
         tags: "npc,meepo,spoken",
       });
     } catch (llmErr: any) {
-      console.error("LLM error:", llmErr);
-      
-      // Fallback to meep on LLM failure
-      const fallbackReply = "meep (LLM unavailable)";
+      const payload = formatUserFacingError(llmErr, {
+        fallbackMessage: "meep (LLM unavailable)",
+      });
+
+      // Shared formatter keeps text and voice fallback policy consistent.
+      const fallbackReply = payload.content;
       textReplyLog.info(`💬 Meepo: "${fallbackReply}"`);
-      const reply = await message.reply(fallbackReply);
+      const reply = await message.reply(fallbackReply).catch((replyErr: unknown) => {
+        throw new MeepoError("ERR_DISCORD_REPLY_FAILED", {
+          message: "Failed to send fallback text reply",
+          cause: replyErr,
+          trace_id: traceId,
+          interaction_id: interactionId,
+        });
+      });
       appendLedgerEntry({
         guild_id: message.guildId,
         channel_id: message.channelId,
@@ -836,6 +877,9 @@ client.on("messageCreate", async (message: any) => {
         tags: "npc,meepo,spoken",
       });
     }
+
+      }
+    );
 
   } catch (err) {
     console.error("messageCreate error", err);

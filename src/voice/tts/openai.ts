@@ -18,6 +18,7 @@ import { getOpenAIClient } from "../../llm/client.js";
 import { log } from "../../utils/logger.js";
 import { TtsProvider } from "./provider.js";
 import { cfg } from "../../config/env.js";
+import { MeepoError } from "../../errors/meepoError.js";
 
 const ttsLog = log.withScope("tts");
 
@@ -117,7 +118,14 @@ export class OpenAiTtsProvider implements TtsProvider {
       ttsLog.error(
         `OpenAI synthesis failed for text "${text.substring(0, 50).replace(/\n/g, " ")}...": ${message}`
       );
-      throw err;
+      throw new MeepoError("ERR_TTS_FAILED", {
+        message: `TTS synthesis failed: ${message}`,
+        cause: err,
+        metadata: {
+          model: this.model,
+          voice: this.voice,
+        },
+      });
     }
   }
 }

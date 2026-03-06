@@ -8,6 +8,7 @@ import {
   getPendingPromptFromState,
   resolveAwaitInputFromScene,
 } from "./wakeIdentity.js";
+import { AWAKEN_CONTINUE_KEY } from "./prompts/continuePrompt.js";
 import { buildCommitContext, executeCommitAction } from "./commitActions/commitActionRegistry.js";
 import { executeSceneActions } from "./actions/index.js";
 import { renderTemplateTree } from "./template.js";
@@ -116,43 +117,70 @@ function parseDmDisplayNameFromMemory(text: string): string | null {
 }
 
 function resolveTemplateValue(args: {
+  context: Record<string, unknown>;
+  key: string;
+}): string | undefined {
+  const value = args.context[args.key];
+  if (value !== undefined && value !== null) return String(value);
+  return undefined;
+}
+
+function buildTemplateContext(args: {
   db: any;
   guildId: string;
   progress: Record<string, unknown>;
-  key: string;
-}): string | undefined {
-  const progressValue = args.progress[args.key];
-  if (progressValue !== undefined && progressValue !== null) {
-    return String(progressValue);
-  }
-
-  try {
-    const memory = getGuildMemoryByKey({
-      db: args.db,
-      guildId: args.guildId,
-      key: args.key,
-    });
-    if (memory?.text) {
-      if (args.key === DM_DISPLAY_NAME_KEY) {
-        return parseDmDisplayNameFromMemory(memory.text) ?? memory.text;
-      }
-      return memory.text;
-    }
-  } catch {
-    // no-op
-  }
+  runtimeChannelId?: string;
+}): Record<string, unknown> {
+  const context: Record<string, unknown> = {};
 
   try {
     const config = getGuildConfig(args.guildId) as Record<string, unknown> | null;
-    const value = config?.[args.key];
-    if (value !== undefined && value !== null) {
-      return String(value);
+    if (config) {
+      Object.assign(context, config);
     }
   } catch {
     // no-op
   }
 
-  return undefined;
+  context[DM_DISPLAY_NAME_KEY] = (() => {
+    const progressValue = args.progress[DM_DISPLAY_NAME_KEY];
+    if (typeof progressValue === "string" && progressValue.trim().length > 0) {
+      return progressValue;
+    }
+    try {
+      const memory = getGuildMemoryByKey({
+        db: args.db,
+        guildId: args.guildId,
+        key: DM_DISPLAY_NAME_KEY,
+      });
+      if (memory?.text) {
+        return parseDmDisplayNameFromMemory(memory.text) ?? memory.text;
+      }
+    } catch {
+      // no-op
+    }
+    return context[DM_DISPLAY_NAME_KEY];
+  })();
+
+  Object.assign(context, args.progress);
+
+  const homeChannelIdRaw = context.home_channel_id;
+  const homeChannelId = typeof homeChannelIdRaw === "string" ? homeChannelIdRaw.trim() : "";
+  if (homeChannelId) {
+    context.home_channel = `<#${homeChannelId}>`;
+  }
+
+  const runtimeCurrentChannelId =
+    (typeof args.runtimeChannelId === "string" && args.runtimeChannelId.trim().length > 0)
+      ? args.runtimeChannelId.trim()
+      : (typeof context.current_channel_id === "string" ? context.current_channel_id.trim() : "");
+
+  if (runtimeCurrentChannelId) {
+    context.current_channel_id = runtimeCurrentChannelId;
+    context.current_channel = `<#${runtimeCurrentChannelId}>`;
+  }
+
+  return context;
 }
 
 function applySceneTemplates(scene: Scene, args: {
@@ -160,14 +188,17 @@ function applySceneTemplates(scene: Scene, args: {
   guildId: string;
   progress: Record<string, unknown>;
   sceneId: string;
+  runtimeChannelId?: string;
 }): Scene {
-  const unresolved = new Set<string>();
-  const rendered = renderTemplateTree(scene, (key) => resolveTemplateValue({
+  const templateContext = buildTemplateContext({
     db: args.db,
     guildId: args.guildId,
     progress: args.progress,
-    key,
-  }), unresolved);
+    runtimeChannelId: args.runtimeChannelId,
+  });
+
+  const unresolved = new Set<string>();
+  const rendered = renderTemplateTree(scene, (key) => resolveTemplateValue({ context: templateContext, key }), unresolved);
 
   if (unresolved.size > 0) {
     const vars = [...unresolved].sort().join(",");
@@ -204,6 +235,10 @@ function hasResolvedPromptInput(state: GuildOnboardingState, scene: Scene): bool
     return value.trim().length > 0;
   }
   return value !== undefined && value !== null;
+}
+
+function hasContinueMarkerForScene(state: GuildOnboardingState, sceneId: string): boolean {
+  return state.progress_json[AWAKEN_CONTINUE_KEY] === sceneId;
 }
 
 async function executeCommits(args: {
@@ -247,9 +282,6 @@ async function ensureAck(interaction: InteractionLike): Promise<void> {
   if (interaction.deferred || interaction.replied) return;
   if (typeof interaction.deferReply === "function") {
     await interaction.deferReply({ ephemeral: true });
-    if (typeof interaction.editReply === "function") {
-      await interaction.editReply("Awakening...");
-    }
   }
 }
 
@@ -303,6 +335,7 @@ export async function runCurrentScene(
       guildId: state.guild_id,
       progress: state.progress_json,
       sceneId: state.current_scene,
+      runtimeChannelId: opts.runtimeChannelId,
     })
     : undefined;
   if (!scene) {
@@ -390,6 +423,36 @@ export async function runCurrentScene(
 
   const blocker = resolveBlockerReason(scene);
   if (blocker === "prompt" && !hasResolvedPromptInput(state, scene)) {
+    const hasContinueMarker = hasContinueMarkerForScene(state, state.current_scene);
+    if (!hasContinueMarker) {
+      const existingPending = getPendingPromptFromState(state);
+      const nonce =
+        existingPending
+        && existingPending.sceneId === state.current_scene
+        && existingPending.key === AWAKEN_CONTINUE_KEY
+        && existingPending.kind === "continue"
+          ? existingPending.nonce
+          : randomUUID();
+
+      state = saveProgress(state.guild_id, state.script_id, buildPendingPromptPatch({
+        key: AWAKEN_CONTINUE_KEY,
+        kind: "continue",
+        sceneId: state.current_scene,
+        nonce,
+        createdAtMs: existingPending?.createdAtMs ?? Date.now(),
+      }), { db: opts.db });
+
+      return {
+        status: "blocked",
+        emittedBeatCount: emitted,
+        sleptMs,
+        reason: "prompt",
+        sceneId: state.current_scene,
+        state,
+        runtimeChannelId: opts.runtimeChannelId,
+      };
+    }
+
     const awaitInput = resolveAwaitInputFromScene(scene);
     if (awaitInput) {
       const existingPending = getPendingPromptFromState(state);
@@ -400,6 +463,10 @@ export async function runCurrentScene(
         && existingPending.kind === awaitInput.kind
           ? existingPending.nonce
           : randomUUID();
+
+      state = saveProgress(state.guild_id, state.script_id, {
+        [AWAKEN_CONTINUE_KEY]: null,
+      }, { db: opts.db });
 
       state = saveProgress(state.guild_id, state.script_id, buildPendingPromptPatch({
         key: awaitInput.key,
@@ -521,6 +588,12 @@ export const AwakenEngine = {
     let totalSleptMs = 0;
     let lastAdvance: { fromScene: string; toScene: string } | null = null;
     let runtimeChannelId = options.runtimeChannelId ?? interaction.channelId;
+
+    if (runtimeChannelId && state.progress_json.current_channel_id !== runtimeChannelId) {
+      state = saveProgress(guildId, script.id, {
+        current_channel_id: runtimeChannelId,
+      }, { db: options.db });
+    }
 
     for (let sceneSteps = 0; sceneSteps < MAX_SCENE_STEPS_PER_RUN; sceneSteps += 1) {
       const remainingBudget = Math.max(0, maxBeatsPerRun - emittedTotal);

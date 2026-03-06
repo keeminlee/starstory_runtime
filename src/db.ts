@@ -1386,6 +1386,7 @@ function applyMigrations(db: Database.Database) {
         awakened INTEGER,
         dm_user_id TEXT,
         dm_role_id TEXT,
+        default_talk_mode TEXT,
         default_persona_id TEXT,
         setup_version INTEGER,
         home_text_channel_id TEXT,
@@ -1450,6 +1451,12 @@ function applyMigrations(db: Database.Database) {
   if (!hasDefaultRecapStyle) {
     console.log("Migrating: Adding default_recap_style to guild_config");
     db.exec("ALTER TABLE guild_config ADD COLUMN default_recap_style TEXT");
+  }
+
+  const hasDefaultTalkMode = guildConfigColumns.some((c: any) => c.name === "default_talk_mode");
+  if (!hasDefaultTalkMode) {
+    console.log("Migrating: Adding default_talk_mode to guild_config");
+    db.exec("ALTER TABLE guild_config ADD COLUMN default_talk_mode TEXT");
   }
 
   db.exec(`

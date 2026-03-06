@@ -3,6 +3,7 @@ import {
   setGuildCanonPersonaId,
   setGuildCanonPersonaMode,
   setGuildDefaultRecapStyle,
+  setGuildDefaultTalkMode,
   setGuildDmRoleId,
   setGuildDmUserId,
   setGuildHomeTextChannelId,
@@ -32,6 +33,12 @@ export async function handleSetGuildConfigCommit(ctx: CommitContext, commit: Com
       return;
     case "dm_role_id":
       setGuildDmRoleId(ctx.guildId, typeof value === "string" && value.trim().length > 0 ? value.trim() : null);
+      return;
+    case "default_talk_mode":
+      if (value !== "hush" && value !== "talk" && value !== null) {
+        throw new Error("set_guild_config.default_talk_mode must be hush|talk|null");
+      }
+      setGuildDefaultTalkMode(ctx.guildId, value as "hush" | "talk" | null);
       return;
     case "canon_persona_mode":
       if (value !== "diegetic" && value !== "meta" && value !== null) {

@@ -48,7 +48,7 @@ describe("AwakenEngine commit flow", () => {
     configureHermeticEnv(tempDir);
 
     const { getDbForCampaign } = await import("../../db.js");
-    const { initState, loadState } = await import("../../ledger/awakeningStateRepo.js");
+    const { initState, loadState, saveProgress } = await import("../../ledger/awakeningStateRepo.js");
     const { acceptDmDisplayNameResponse } = await import("../wakeIdentity.js");
     const { AwakenEngine } = await import("../AwakenEngine.js");
 
@@ -93,7 +93,24 @@ describe("AwakenEngine commit flow", () => {
     }
 
     const blockedState = loadState("guild-flow-1", script.id, { db });
-    expect(blockedState?.progress_json.await_input).toEqual({ key: "dm_display_name", kind: "modal_text" });
+    expect(blockedState?.progress_json.await_input).toEqual({ key: "__continue__", kind: "continue" });
+
+    saveProgress("guild-flow-1", script.id, {
+      __continue__: "ask_dm_name",
+      await_input: null,
+      pending_prompt_kind: null,
+      pending_prompt_key: null,
+      pending_prompt_scene_id: null,
+      pending_prompt_nonce: null,
+      pending_prompt_created_at_ms: null,
+    }, { db });
+
+    const gateInteraction = buildInteraction();
+    const gated = await AwakenEngine.runWake(gateInteraction, { db, script });
+    expect(gated.status).toBe("blocked");
+
+    const promptState = loadState("guild-flow-1", script.id, { db });
+    expect(promptState?.progress_json.await_input).toEqual({ key: "dm_display_name", kind: "modal_text" });
 
     acceptDmDisplayNameResponse({
       db,
@@ -104,19 +121,15 @@ describe("AwakenEngine commit flow", () => {
 
     const secondInteraction = buildInteraction();
     const second = await AwakenEngine.runWake(secondInteraction, { db, script });
-    expect(second.status).toBe("completed");
+    expect(second.status).toBe("blocked");
+    if (second.status === "blocked") {
+      expect(second.reason).toBe("commit");
+    }
 
     const finalState = loadState("guild-flow-1", script.id, { db });
     expect(finalState?.progress_json.dm_display_name).toBe("ZZZ_TEST_DM_NAME");
     expect(finalState?.progress_json.await_input).toBeNull();
-    expect(finalState?.completed).toBe(true);
-
-    const memoryRows = db
-      .prepare("SELECT key, text FROM meepo_mind_memory WHERE scope_kind = 'guild' AND scope_id = ?")
-      .all("guild-flow-1") as Array<{ key: string; text: string }>;
-    expect(memoryRows).toHaveLength(1);
-    expect(memoryRows[0]?.key).toBe("dm_display_name");
-    expect(memoryRows[0]?.text).toContain("ZZZ_TEST_DM_NAME");
+    expect(finalState?.progress_json.pending_prompt_kind).toBeNull();
 
     db.close();
   });

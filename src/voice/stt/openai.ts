@@ -15,6 +15,7 @@ import { toFile } from "openai/uploads";
 import { cfg } from "../../config/env.js";
 import type { SttTranscriptionMeta } from "./provider.js";
 import { getGuildSttPrompt } from "./promptState.js";
+import { MeepoError } from "../../errors/meepoError.js";
 
 const sttLog = log.withScope("stt");
 
@@ -173,7 +174,15 @@ export class OpenAiSttProvider implements SttProvider {
           sttLog.error(
             `OpenAI transcription failed (attempt ${attempt + 1}, ${status}): ${message}`
           );
-          throw err;
+          throw new MeepoError("ERR_STT_FAILED", {
+            message: `STT transcription failed: ${message}`,
+            cause: err,
+            metadata: {
+              status,
+              attempt: attempt + 1,
+              model: this.model,
+            },
+          });
         }
 
         // Transient error on first attempt; retry after backoff
@@ -186,8 +195,12 @@ export class OpenAiSttProvider implements SttProvider {
     }
 
     // Shouldn't reach here, but just in case
-    throw (
-      lastError ?? new Error("[STT] Unknown transcription error")
-    );
+    throw new MeepoError("ERR_STT_FAILED", {
+      message: "STT transcription failed: unknown error",
+      cause: lastError,
+      metadata: {
+        model: this.model,
+      },
+    });
   }
 }

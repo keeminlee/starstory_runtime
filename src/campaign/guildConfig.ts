@@ -16,6 +16,7 @@ export type GuildConfigRow = {
   awakened: number | null;
   dm_user_id: string | null;
   dm_role_id: string | null;
+  default_talk_mode: "hush" | "talk" | null;
   default_persona_id: string | null;
   setup_version: number | null;
   home_text_channel_id: string | null;
@@ -34,7 +35,7 @@ export function getGuildConfig(guildId: string): GuildConfigRow | null {
   const db = getControlDb();
   const row = db
     .prepare(
-      "SELECT guild_id, campaign_slug, awakened, dm_user_id, dm_role_id, default_persona_id, setup_version, home_text_channel_id, home_voice_channel_id, canon_persona_mode, canon_persona_id, default_recap_style FROM guild_config WHERE guild_id = ? LIMIT 1"
+      "SELECT guild_id, campaign_slug, awakened, dm_user_id, dm_role_id, default_talk_mode, default_persona_id, setup_version, home_text_channel_id, home_voice_channel_id, canon_persona_mode, canon_persona_id, default_recap_style FROM guild_config WHERE guild_id = ? LIMIT 1"
     )
     .get(guildId) as GuildConfigRow | undefined;
   return row ?? null;
@@ -57,6 +58,7 @@ export function ensureGuildConfig(guildId: string, guildName?: string | null): G
       awakened,
       dm_user_id,
       dm_role_id,
+      default_talk_mode,
       default_persona_id,
       setup_version,
       home_text_channel_id,
@@ -142,6 +144,19 @@ export function setGuildDmRoleId(guildId: string, dmRoleId: string | null): void
   ensureGuildConfig(guildId, null);
   db.prepare("UPDATE guild_config SET dm_role_id = ? WHERE guild_id = ?").run(dmRoleId, guildId);
   campaignLog.info(`Set dm_role_id=${dmRoleId ?? "null"} for guild=${guildId}`);
+}
+
+export function getGuildDefaultTalkMode(guildId: string): "hush" | "talk" | null {
+  const config = getGuildConfig(guildId);
+  const mode = config?.default_talk_mode ?? null;
+  return mode === "hush" || mode === "talk" ? mode : null;
+}
+
+export function setGuildDefaultTalkMode(guildId: string, mode: "hush" | "talk" | null): void {
+  const db = getControlDb();
+  ensureGuildConfig(guildId, null);
+  db.prepare("UPDATE guild_config SET default_talk_mode = ? WHERE guild_id = ?").run(mode, guildId);
+  campaignLog.info(`Set default_talk_mode=${mode ?? "null"} for guild=${guildId}`);
 }
 
 /**

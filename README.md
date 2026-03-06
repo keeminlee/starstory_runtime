@@ -47,14 +47,20 @@ Useful runtime toggles:
 ### Run
 
 ```bash
-npm run dev:deploy   # register slash commands
+npm run deploy:commands   # register slash commands (global by default)
 npm run dev:bot      # start the bot
+```
+
+To deploy `/lab` into dev guilds, set `DEV_GUILD_IDS` (comma-separated) before deploy:
+
+```bash
+DEV_GUILD_IDS=<guild_id_1>,<guild_id_2> npm run deploy:commands
 ```
 
 Once running, invite Meepo to your Discord server and awaken her with:
 
 ```
-/meepo wake
+/meepo awaken
 ```
 
 ---
@@ -65,7 +71,7 @@ Meepo’s primary interactions are organized into a few command families.
 
 ### Presence & Interaction
 ```
-meepo wake | sleep | status | doctor | talk | hush
+meepo awaken | status | talk | hush | help
 ```
 
 ### Configuration

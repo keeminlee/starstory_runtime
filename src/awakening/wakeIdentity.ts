@@ -13,6 +13,7 @@ export const AWAKEN_PENDING_PROMPT_KEY_KEY = "pending_prompt_key";
 export const AWAKEN_PENDING_PROMPT_SCENE_ID_KEY = "pending_prompt_scene_id";
 export const AWAKEN_PENDING_PROMPT_NONCE_KEY = "pending_prompt_nonce";
 export const AWAKEN_PENDING_PROMPT_CREATED_AT_MS_KEY = "pending_prompt_created_at_ms";
+export const AWAKEN_INVOKER_USER_ID_KEY = "awaken_invoker_user_id";
 
 type AwaitInputSpec = {
   key: string;

@@ -129,14 +129,14 @@ describe("AwakenEngine", () => {
     db.close();
   });
 
-  test("scene with prompt emits dialogue then blocks by prompt", async () => {
+  test("scene with prompt emits dialogue then blocks on continue before prompt", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-awaken-engine-"));
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
 
     const { AwakenEngine } = await import("../AwakenEngine.js");
     const { getDbForCampaign } = await import("../../db.js");
-    const { initState, loadState } = await import("../../ledger/awakeningStateRepo.js");
+    const { initState, loadState, saveProgress } = await import("../../ledger/awakeningStateRepo.js");
 
     const script: AwakenScript = {
       id: "meepo_awaken",
@@ -166,8 +166,26 @@ describe("AwakenEngine", () => {
     const state = loadState("guild-awaken-1", script.id, { db });
     expect(state?.current_scene).toBe("cold_open");
     expect(state?.beat_index).toBe(1);
-    expect(state?.progress_json.await_input).toEqual({ key: "dm_display_name", kind: "modal_text" });
+    expect(state?.progress_json.await_input).toEqual({ key: "__continue__", kind: "continue" });
     expect(state?.completed).toBe(false);
+
+    const continueNonce = String(state?.progress_json.pending_prompt_nonce ?? "");
+    saveProgress("guild-awaken-1", script.id, {
+      __continue__: "cold_open",
+      await_input: null,
+      pending_prompt_kind: null,
+      pending_prompt_key: null,
+      pending_prompt_scene_id: null,
+      pending_prompt_nonce: null,
+      pending_prompt_created_at_ms: null,
+    }, { db });
+
+    const second = await AwakenEngine.runWake(interaction, { db, script });
+    expect(second.status).toBe("blocked");
+    const stateAfterContinue = loadState("guild-awaken-1", script.id, { db });
+    expect(stateAfterContinue?.progress_json.__continue__).toBeNull();
+    expect(stateAfterContinue?.progress_json.await_input).toEqual({ key: "dm_display_name", kind: "modal_text" });
+    expect(String(stateAfterContinue?.progress_json.pending_prompt_nonce ?? "")).not.toBe(continueNonce);
     db.close();
   });
 

@@ -6,6 +6,7 @@ Primary documentation entrypoints for active architecture lanes.
 - [START_HERE.md](START_HERE.md) — first-time DM onboarding path
 - [MAP.md](MAP.md) — runtime and subsystem map
 - [CURRENT_STATE.md](CURRENT_STATE.md) — current implementation status
+- [ops/ENV.md](ops/ENV.md) — runtime and deploy environment contract
 - [awakening/ARCHITECTURE.md](awakening/ARCHITECTURE.md) — Awakening Runtime guarantees and invariants
 - [awakening/SCRIPTS.md](awakening/SCRIPTS.md) — script authoring/runtime contract
 - [MEGAMEECAP_WORKER.md](MEGAMEECAP_WORKER.md) — action contract + receipts + artifact triage

@@ -48,6 +48,7 @@ function configureHermeticEnv(tempDir: string): void {
   vi.stubEnv("DATA_DB_FILENAME", "db.sqlite");
   vi.stubEnv("DISCORD_TOKEN", "test-token");
   vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
+  vi.stubEnv("DEV_USER_IDS", "dm-user,not-dm");
   vi.stubEnv("MIGRATIONS_SILENT", "1");
 }
 
@@ -57,6 +58,7 @@ function buildInteraction(args: {
   hasManageGuild?: boolean;
 }) {
   const reply = vi.fn(async (_payload: { content: string; ephemeral: boolean }) => undefined);
+  const editReply = vi.fn(async (_payload: { content: string; ephemeral?: boolean }) => undefined);
   return {
     interaction: {
       guildId: "guild-1",
@@ -78,8 +80,10 @@ function buildInteraction(args: {
         }),
       },
       reply,
+      editReply,
     },
     reply,
+    editReply,
   };
 }
 

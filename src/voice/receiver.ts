@@ -27,6 +27,7 @@ import { log } from "../utils/logger.js";
 import { overlayEmitSpeaking } from "../overlay/server.js";
 import { cfg } from "../config/env.js";
 import { voicePlaybackController } from "./voicePlaybackController.js";
+import { MeepoError } from "../errors/meepoError.js";
 
 /**
  * Phase 2 Task 1-2: Speaking detection + PCM capture pipeline
@@ -422,7 +423,14 @@ async function handleTranscription(
       audioPath,
     });
   } catch (err) {
-    voiceLog.error(`Transcription failed:`, { err });
+    if (err instanceof MeepoError) {
+      voiceLog.error(`Transcription failed:`, {
+        error_code: err.code,
+        error: err.message,
+      });
+    } else {
+      voiceLog.error(`Transcription failed:`, { err });
+    }
   }
 }
 

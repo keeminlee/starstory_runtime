@@ -1,5 +1,12 @@
 import OpenAI from "openai";
 import { cfg } from "../config/env.js";
+import { log } from "../utils/logger.js";
+import { MeepoError } from "../errors/meepoError.js";
+
+const llmLog = log.withScope("llm", {
+  requireGuildContext: true,
+  callsite: "llm/client.ts",
+});
 
 let openaiClient: OpenAI | null = null;
 
@@ -21,6 +28,11 @@ export async function chat(opts: {
   temperature?: number;
   maxTokens?: number;
   responseFormat?: "text" | "json_object";
+  trace_id?: string;
+  interaction_id?: string;
+  guild_id?: string;
+  campaign_slug?: string;
+  session_id?: string;
 }): Promise<string> {
   const client = getOpenAIClient();
   
@@ -28,8 +40,21 @@ export async function chat(opts: {
   const model = opts.model ?? cfg.llm.model;
   const temperature = opts.temperature ?? cfg.llm.temperature;
   const maxTokens = opts.maxTokens ?? cfg.llm.maxTokens;
+  const context = {
+    trace_id: opts.trace_id,
+    interaction_id: opts.interaction_id,
+    guild_id: opts.guild_id,
+    campaign_slug: opts.campaign_slug,
+    session_id: opts.session_id,
+  };
 
   try {
+    llmLog.info("LLM request started", {
+      model,
+      max_tokens: maxTokens,
+      response_format: opts.responseFormat ?? "text",
+    }, context);
+
     const response = await client.chat.completions.create({
       model,
       temperature,
@@ -45,12 +70,53 @@ export async function chat(opts: {
 
     const content = response.choices[0]?.message?.content?.trim();
     if (!content) {
-      throw new Error("Empty response from OpenAI");
+      throw new MeepoError("ERR_INVALID_STATE", {
+        message: "Empty response from OpenAI",
+        trace_id: opts.trace_id,
+        interaction_id: opts.interaction_id,
+      });
     }
+
+    llmLog.debug("LLM request completed", {
+      response_chars: content.length,
+    }, context);
 
     return content;
   } catch (err: any) {
-    console.error("OpenAI API error:", err.message ?? err);
-    throw new Error("LLM request failed: " + (err.message ?? "unknown error"));
+    if (err instanceof MeepoError) {
+      llmLog.error("LLM request failed", {
+        error_code: err.code,
+        error: err.message,
+      }, context);
+      throw err;
+    }
+
+    const status = typeof err?.status === "number" ? err.status : undefined;
+    const code = String(err?.code ?? "").toLowerCase();
+    const msg = String(err?.message ?? "").toLowerCase();
+    const isTimeout = code.includes("timeout") || msg.includes("timeout") || msg.includes("timed out");
+    const mappedCode: "ERR_LLM_RATE_LIMIT" | "ERR_LLM_TIMEOUT" | "ERR_UNKNOWN" = status === 429
+      ? "ERR_LLM_RATE_LIMIT"
+      : isTimeout
+        ? "ERR_LLM_TIMEOUT"
+        : "ERR_UNKNOWN";
+
+    const wrapped = new MeepoError(mappedCode, {
+      message: `LLM request failed: ${err?.message ?? "unknown error"}`,
+      cause: err,
+      trace_id: opts.trace_id,
+      interaction_id: opts.interaction_id,
+      metadata: {
+        status,
+        model,
+      },
+    });
+
+    llmLog.error("LLM request failed", {
+      error_code: wrapped.code,
+      error: wrapped.message,
+      status,
+    }, context);
+    throw wrapped;
   }
 }

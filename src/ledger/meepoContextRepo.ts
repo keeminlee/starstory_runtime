@@ -63,6 +63,8 @@ export type CompactMiniPayload = {
   guild_id: string;
   scope: ContextScope;
   session_id: string;
+  trace_id?: string;
+  interaction_id?: string;
   start_line: number;
   end_line: number;
   start_ledger_id?: string;
@@ -73,6 +75,8 @@ export type MegameecapUpdateChunkPayload = {
   guild_id: string;
   scope: ContextScope;
   session_id: string;
+  trace_id?: string;
+  interaction_id?: string;
   range_start_ledger_id: string;
   range_end_ledger_id: string;
   chunk_index: number;
@@ -84,6 +88,8 @@ export type MeepoMindRetrievePayload = {
   campaign_slug: string;
   scope: ContextScope;
   session_id: string;
+  trace_id?: string;
+  interaction_id?: string;
   anchor_ledger_id: string;
   query_text?: string;
   query_hash: string;

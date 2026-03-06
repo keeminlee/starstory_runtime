@@ -11,16 +11,16 @@ For documentation navigation, start at [README.md](README.md).
 
 ```bash
 npm run dev:bot        # Start bot with hot-reload
-npm run dev:deploy     # Register/update slash commands in Discord
+npm run deploy:commands # Register/update slash commands in Discord (global default)
 npx tsc --noEmit      # Type-check code
 ```
 
 ### Test in Discord
 
 ```
-/meepo wake                              # Wake + bind home channels (hush default)
+/meepo awaken                            # Begin awakening ritual + bind home channels
 /meepo status                            # Public status + fix hints
-/meepo doctor                            # Deterministic diagnostics + next actions
+/lab doctor                              # Dev diagnostics + next actions (DEV_USER_IDS only)
 /meepo settings view                     # Show persisted setup/persona/recap defaults
 /meepo sessions list                      # List recent sessions with recap status
 /meepo sessions view session:<id>         # Session hub + artifact availability
@@ -62,7 +62,7 @@ http://localhost:7777/overlay            # Browser Source for speaking indicator
 
 ### Awakening Runtime (v1.6)
 
-Awakening Runtime is the deterministic onboarding interpreter used by `/meepo wake` and future ritual-style flows.
+Awakening Runtime is the deterministic onboarding interpreter used by `/meepo awaken` and future ritual-style flows.
 
 Execution lifecycle per scene:
 
@@ -209,7 +209,7 @@ Recap      Emotion Beats         LLM Response
 - **Voice Loop:** Closed STT → LLM → TTS with feedback loop protection
 - **Anti-noise Gating:** Configurable threshold to filter background noise
 - **Voice State Tracking:** Guild-scoped connection management
-- **Auto-join Voice:** Meepo automatically joins General voice when waking (via `/meepo wake` or auto-wake)
+- **Auto-join Voice:** Meepo automatically joins General voice when awakening (via `/meepo awaken` or auto-awaken)
 - **STT Always-On:** STT automatically enabled when Meepo joins any voice channel
 
 #### Text I/O
@@ -231,7 +231,7 @@ Recap      Emotion Beats         LLM Response
 #### Session Management
 - **Meepo State Persistence:** Active state (`is_active=1`) persists across bot restarts; Meepo auto-restores and rejoins voice
 - **Session Lifecycle:**
-  - **Auto-start:** `/meepo wake` generates UUID session, auto-grouped text+voice
+  - **Auto-start:** `/meepo awaken` generates UUID session, auto-grouped text+voice
   - **Manual start:** `/session new [--label C2E20]` starts a new session (ends active session first)
   - **Auto-end:** `/meepo sleep` or inactivity timeout (`MEEPO_AUTO_SLEEP_MS`)
 - **Session Announcements:** `/meepo announce [--dry_run] [--timestamp] [--label] [--message]` posts Discord reminders with auto-incremented labels
@@ -277,8 +277,8 @@ Recap      Emotion Beats         LLM Response
 - **Disk Export:** JSON files for git diffing and Discord review
 
 #### Commands
-- `/meepo wake|sleep|talk|hush|status` — Phase 1A clean Meepo surface
-- `/meepo status` + `/meepo doctor` internal debug/trace view includes Meepo context queue telemetry:
+- `/meepo awaken|talk|hush|status` — Phase 1A clean Meepo surface
+- `/meepo status` internal debug/trace view includes Meepo context queue telemetry:
   - counts: `queued`, `leased`, `failed`
   - `oldest queued age`
   - `last completed timestamp`
@@ -303,8 +303,11 @@ Recap      Emotion Beats         LLM Response
 
 #### Dev-only Commands
 - `/lab ...` is development-only and normally hidden from production users.
-- Registration gate: `ENABLE_LAB_COMMANDS=true`
-- Runtime allowlist gate: `DEV_USER_IDS=<comma-separated-user-ids>` (optional `DEV_GUILD_IDS=<comma-separated-guild-ids>`)
+- Moved from public surface: `/meepo doctor`, `/meepo sleep`, `/goldmem`, `/meeps ...`, `/missions ...`.
+- Awakening fallback/debug: `/lab awaken respond text:<...>`, `/lab awaken status`.
+- Runtime allowlist gate: `DEV_USER_IDS=<comma-separated-user-ids>`
+- Deploy scope gate: `/lab` is deployed only to guilds listed in `DEV_GUILD_IDS=<comma-separated-guild-ids>`.
+- Product surface: `/meepo` remains global.
 
 #### Tools (CLI)
 - `tools/ingest-media.ts` — Offline media ingestion (extract audio, transcribe, generate session)

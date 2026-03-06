@@ -6,8 +6,7 @@ vi.mock("../config/env.js", () => ({
     logging: { level: "warn", scopes: [], format: "pretty" },
     voice: { debug: false },
     data: { root: ".", campaignsDir: "campaigns" },
-    features: { labCommandsEnabled: true },
-    access: { devUserIds: [], devGuildIds: [] },
+    access: { devUserIds: [] },
   },
 }));
 
@@ -31,6 +30,11 @@ const stubLegacyCommand = {
 };
 
 vi.mock("../commands/meepoLegacy.js", () => ({ meepo: stubLegacyCommand }));
+vi.mock("../commands/meepo.js", () => ({
+  executeLabAwakenRespond: vi.fn(async () => {}),
+  executeLabDoctor: vi.fn(async () => {}),
+  executeLabSleep: vi.fn(async () => {}),
+}));
 vi.mock("../commands/session.js", () => ({ session: stubLegacyCommand }));
 vi.mock("../commands/meeps.js", () => ({ meeps: stubLegacyCommand }));
 vi.mock("../commands/missions.js", () => ({ missions: stubLegacyCommand }));

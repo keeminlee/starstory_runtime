@@ -6,15 +6,15 @@ import {
 // NOTE(v1.1): meepoLegacy is intentionally excluded from voice-string centralization.
 // This lab-only surface is deferred and may retain inline prose until a dedicated legacy pass.
 import { meepo as meepoLegacy } from "./meepoLegacy.js";
+import { executeLabAwakenRespond, executeLabDoctor, executeLabSleep } from "./meepo.js";
 import { session } from "./session.js";
 import { meeps } from "./meeps.js";
 import { missions } from "./missions.js";
 import { goldmem } from "./goldmem.js";
-import { cfg } from "../config/env.js";
 import type { CommandCtx } from "./index.js";
 import fs from "node:fs";
 import { getDbForCampaign } from "../db.js";
-import { resolveCampaignSlug } from "../campaign/guildConfig.js";
+import { getGuildDmUserId, resolveCampaignSlug } from "../campaign/guildConfig.js";
 import { resolveMeepoActionLogPaths } from "../ledger/meepoActionLogging.js";
 import {
   getActiveSession,
@@ -28,6 +28,12 @@ import {
   resolveLatestUserAnchorLedgerId,
   resolveSessionSelection,
 } from "./shared/sessionResolve.js";
+import { isDevUser } from "../security/devAccess.js";
+import { loadAwakenScript } from "../scripts/awakening/_loader.js";
+import { loadState } from "../ledger/awakeningStateRepo.js";
+import { getPendingPromptFromState, resolveModalTextFallback } from "../awakening/wakeIdentity.js";
+import { PermissionFlagsBits } from "discord.js";
+import { resetAwakeningForGuild } from "../awakening/resetAwakeningForGuild.js";
 
 /**
  * Session-kind vocabulary for /lab wake:
@@ -478,7 +484,121 @@ const wakeLab: LegacyCommand = {
   },
 };
 
+function canAnswerAwakeningPrompt(guildId: string, interaction: any): boolean {
+  const configuredDmUserId = getGuildDmUserId(guildId);
+  if (configuredDmUserId) {
+    return interaction.user?.id === configuredDmUserId;
+  }
+  return Boolean(interaction.memberPermissions?.has?.(PermissionFlagsBits.ManageGuild));
+}
+
+const awakenLab: LegacyCommand = {
+  data: new SlashCommandBuilder()
+    .setName("awaken")
+    .setDescription("Awakening fallback and diagnostics")
+    .addSubcommand((sub) =>
+      sub
+        .setName("respond")
+        .setDescription("Submit fallback text for pending modal awakening prompt")
+        .addStringOption((opt) =>
+          opt
+            .setName("text")
+            .setDescription("Fallback response text")
+            .setRequired(true)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("status")
+        .setDescription("Show current awakening runtime state")
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("reset")
+        .setDescription("Reset awakening/onboarding state for this guild")
+        .addStringOption((opt) =>
+          opt
+            .setName("confirm")
+            .setDescription("Type RESET to confirm")
+            .setRequired(true)
+        )
+    ),
+
+  async execute(interaction: any, ctx: CommandCtx | null): Promise<void> {
+    const guildId = interaction.guildId as string | null;
+    if (!guildId || !ctx?.db) {
+      await interaction.reply({ content: "Guild context is required.", ephemeral: true });
+      return;
+    }
+
+    const sub = interaction.options.getSubcommand(true);
+    if (sub === "reset") {
+      const confirm = interaction.options.getString("confirm", true);
+      if (confirm !== "RESET") {
+        await interaction.reply({
+          content: "Confirmation failed. Use exactly: /lab awaken reset confirm:RESET",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const report = resetAwakeningForGuild(guildId, { db: ctx.db });
+      const awakenedFlagStatus = report.cleared_awakened_flag ? "cleared" : "none";
+      const lines = [
+        `Deleted: onboarding_progress (${report.deleted_onboarding_rows} rows), awakened flag (${awakenedFlagStatus})`,
+        "Preserved: sessions, transcripts, artifacts, recaps",
+      ];
+      if (report.notes.length > 0) {
+        lines.push(`Notes: ${report.notes.join("; ")}`);
+      }
+      await interaction.reply({ content: lines.join("\n"), ephemeral: true });
+      return;
+    }
+
+    const script = await loadAwakenScript("meepo_awaken");
+    const state = loadState(guildId, script.id, { db: ctx.db });
+
+    if (sub === "status") {
+      const pending = getPendingPromptFromState(state);
+      const currentChannelIdRaw = state?.progress_json?.current_channel_id;
+      const currentChannelId =
+        typeof currentChannelIdRaw === "string" && currentChannelIdRaw.trim().length > 0
+          ? currentChannelIdRaw
+          : (interaction.channelId ?? "");
+
+      const lines = [
+        `script_id=${script.id}`,
+        `scene_id=${state?.current_scene ?? "(none)"}`,
+        `pending_prompt_kind=${pending?.kind ?? "(none)"}`,
+        `pending_prompt_key=${pending?.key ?? "(none)"}`,
+        `current_channel_id=${currentChannelId || "(none)"}`,
+      ];
+      await interaction.reply({ content: lines.join("\n"), ephemeral: true });
+      return;
+    }
+
+    const pending = getPendingPromptFromState(state);
+    if (!state || !pending || pending.kind !== "modal_text") {
+      await interaction.reply({ content: "No pending text prompt.", ephemeral: true });
+      return;
+    }
+
+    if (!canAnswerAwakeningPrompt(guildId, interaction)) {
+      await interaction.reply({
+        content: "Only the Dungeon Master can answer this awakening prompt.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const text = interaction.options.getString("text", true);
+    const normalized = resolveModalTextFallback(text);
+    await executeLabAwakenRespond(interaction, ctx, normalized);
+  },
+};
+
 const familyCommands: Record<string, LegacyCommand> = {
+  awaken: awakenLab,
   meepo: meepoLegacy,
   session,
   meeps,
@@ -652,6 +772,18 @@ const routesByFamily: Record<string, Route[]> = Object.fromEntries(
 function buildLabData(): SlashCommandBuilder {
   const root = new SlashCommandBuilder().setName("lab").setDescription("Legacy command quarantine namespace.");
 
+  root
+    .addSubcommand((sub) =>
+      sub
+        .setName("doctor")
+        .setDescription("Run deterministic diagnostics with next actions.")
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("sleep")
+        .setDescription("Put Meepo to sleep and end active session.")
+    );
+
   for (const [family, command] of Object.entries(familyCommands)) {
     const sourceDescription = command.data.toJSON().description ?? `Legacy /${family}`;
     const routes = routesByFamily[family] ?? [];
@@ -707,6 +839,11 @@ export const lab = {
   data: buildLabData(),
 
   async autocomplete(interaction: any) {
+    if (!isDevUser(interaction.user?.id as string | undefined)) {
+      await interaction.respond([]).catch(() => {});
+      return;
+    }
+
     const guildId = interaction.guildId as string | null;
     if (!guildId) {
       await interaction.respond([]);
@@ -770,11 +907,7 @@ export const lab = {
 
   async execute(interaction: any, ctx: CommandCtx | null) {
     const userId = interaction.user?.id as string | undefined;
-    const guildId = interaction.guildId as string | null;
-    const allowByUser = Boolean(userId && cfg.access.devUserIds.includes(userId));
-    const allowByGuild = Boolean(guildId && cfg.access.devGuildIds.includes(guildId));
-
-    if (!allowByUser && !allowByGuild) {
+    if (!isDevUser(userId)) {
       await interaction.reply({
         content: "Not authorized. /lab is restricted to development allowlists.",
         ephemeral: true,
@@ -782,8 +915,28 @@ export const lab = {
       return;
     }
 
-    const family = interaction.options.getSubcommandGroup(true);
+    const family = interaction.options.getSubcommandGroup(false);
     const exposedSubcommand = interaction.options.getSubcommand(true);
+
+    if (!family) {
+      if (!ctx || !interaction.guildId) {
+        await interaction.reply({ content: "Guild-only command.", ephemeral: true });
+        return;
+      }
+
+      if (exposedSubcommand === "doctor") {
+        await executeLabDoctor(interaction, ctx);
+        return;
+      }
+
+      if (exposedSubcommand === "sleep") {
+        await executeLabSleep(interaction);
+        return;
+      }
+
+      await interaction.reply({ content: `Unknown /lab command: ${exposedSubcommand}`, ephemeral: true });
+      return;
+    }
 
     const command = familyCommands[family];
     if (!command) {

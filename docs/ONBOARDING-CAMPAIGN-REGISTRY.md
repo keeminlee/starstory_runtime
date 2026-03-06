@@ -13,7 +13,7 @@
    - `/meepo guild-config set key: default-persona value: rei`
 3. **Optional — set campaign slug** if the auto-derived slug isn’t desired:
    - `/meepo guild-config set key: campaign-slug value: pandas-dd-server`
-4. **Wake**: `/meepo wake` — Meepo wakes with Rei (or whatever default-persona is set).
+4. **Awaken**: `/meepo awaken` — Meepo awakens with Rei (or whatever default-persona is set).
 5. **Start a session** before using campaign personas: `/session start` (or equivalent). Then `/meepo persona-set persona: rei` works.
 
 ## Tool cycle (scan-names + review-names)

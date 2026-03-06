@@ -10,14 +10,14 @@ import { resolveGuildHomeVoiceChannelId } from "../campaign/guildConfig.js";
 const meepoLog = log.withScope("meepo");
 
 /**
- * Auto-join the General voice channel when Meepo wakes.
- * This makes Meepo available for voice interactions immediately upon waking.
+ * Auto-join the General voice channel when Meepo awakens.
+ * This makes Meepo available for voice interactions immediately upon awakening.
  * 
  * If already connected to General (e.g., from overlay auto-join), ensures STT is running.
  * 
  * Called from:
- * - /meepo wake command
- * - Auto-wake via message containing "meepo"
+ * - /meepo awaken command
+ * - Auto-awaken via message containing "meepo"
  */
 export async function autoJoinGeneralVoice(opts: {
   client: Client;

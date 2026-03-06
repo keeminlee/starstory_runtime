@@ -181,6 +181,8 @@ export function buildMeepoPromptBundle(input: BuildMeepoPromptBundleInput): Prom
       campaignSlug: input.campaign_slug,
       scope: "canon",
       sessionId: input.session_id,
+      trace_id: input.trace_id,
+      interaction_id: input.interaction_id,
       anchorLedgerId: input.anchor_ledger_id,
       queryText: input.user_text,
       queryHash,
