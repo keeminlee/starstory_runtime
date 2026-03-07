@@ -3,98 +3,50 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-let configuredDmUserId: string | null = "dm-user";
+process.env.DISCORD_TOKEN ??= "test-token";
+process.env.OPENAI_API_KEY ??= "test-openai-key";
 
-const runWakeMock = vi.fn(async () => ({
-  status: "blocked" as const,
-  reason: "budget" as const,
-  sceneId: "done_stub",
-  emittedBeatCount: 0,
-}));
-
-vi.mock("../awakening/AwakenEngine.js", () => ({
-  AwakenEngine: {
-    runWake: runWakeMock,
-  },
-}));
+const tempDirs: string[] = [];
 
 vi.mock("../security/isElevated.js", () => ({
   isElevated: vi.fn(() => true),
 }));
 
-vi.mock("../campaign/guildConfig.js", () => ({
-  getGuildCanonPersonaId: vi.fn(() => null),
-  getGuildCanonPersonaMode: vi.fn(() => "meta"),
-  getGuildConfig: vi.fn(() => ({ campaign_slug: "default" })),
-  getGuildDmUserId: vi.fn(() => configuredDmUserId),
-  getGuildDefaultRecapStyle: vi.fn(() => "balanced"),
-  getGuildHomeTextChannelId: vi.fn(() => null),
-  getGuildHomeVoiceChannelId: vi.fn(() => null),
-  getGuildSetupVersion: vi.fn(() => 1),
-  resolveGuildHomeVoiceChannelId: vi.fn(() => null),
-  setGuildCanonPersonaId: vi.fn(),
-  setGuildCanonPersonaMode: vi.fn(),
-  setGuildDefaultRecapStyle: vi.fn(),
-  setGuildDmUserId: vi.fn(),
-  setGuildHomeTextChannelId: vi.fn(),
-  setGuildHomeVoiceChannelId: vi.fn(),
+vi.mock("../meepo/state.js", () => ({
+  getActiveMeepo: vi.fn(() => null),
+  wakeMeepo: vi.fn(() => undefined),
+  sleepMeepo: vi.fn(() => true),
 }));
-
-const tempDirs: string[] = [];
 
 function configureHermeticEnv(tempDir: string): void {
   vi.stubEnv("DATA_ROOT", tempDir);
   vi.stubEnv("DATA_CAMPAIGNS_DIR", "campaigns");
   vi.stubEnv("DATA_DB_FILENAME", "db.sqlite");
-  vi.stubEnv("DISCORD_TOKEN", "test-token");
-  vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
-  vi.stubEnv("DEV_USER_IDS", "dm-user,not-dm");
   vi.stubEnv("MIGRATIONS_SILENT", "1");
+  vi.stubEnv("DEFAULT_CAMPAIGN_SLUG", "default");
 }
 
-function buildInteraction(args: {
-  response: string;
-  userId: string;
-  hasManageGuild?: boolean;
-}) {
+function buildWakeInteraction(response: string) {
   const reply = vi.fn(async (_payload: { content: string; ephemeral: boolean }) => undefined);
-  const editReply = vi.fn(async (_payload: { content: string; ephemeral?: boolean }) => undefined);
   return {
-    interaction: {
-      guildId: "guild-1",
-      channelId: "channel-1",
-      guild: {},
-      member: {},
-      memberPermissions: {
-        has: vi.fn(() => Boolean(args.hasManageGuild)),
-      },
-      user: { id: args.userId, username: "Tester" },
-      deferred: false,
-      replied: false,
-      options: {
-        getSubcommandGroup: vi.fn(() => null),
-        getSubcommand: vi.fn(() => "wake"),
-        getString: vi.fn((name: string) => {
-          if (name === "response") return args.response;
-          return null;
-        }),
-      },
-      reply,
-      editReply,
+    guildId: "guild-1",
+    channelId: "channel-1",
+    guild: { name: "Guild One" },
+    member: {},
+    memberPermissions: { has: vi.fn(() => true) },
+    user: { id: "dm-user", username: "DM" },
+    deferred: false,
+    replied: false,
+    options: {
+      getSubcommandGroup: () => null,
+      getSubcommand: () => "wake",
+      getString: (name: string) => (name === "response" ? response : null),
     },
     reply,
-    editReply,
-  };
-}
-
-function getIdentityMemoryRowCount(db: any): number {
-  const row = db.prepare("SELECT COUNT(*) as n FROM meepo_mind_memory").get() as { n: number };
-  return row.n;
+  } as any;
 }
 
 afterEach(() => {
-  configuredDmUserId = "dm-user";
-  runWakeMock.mockClear();
   vi.unstubAllEnvs();
   vi.resetModules();
   while (tempDirs.length > 0) {
@@ -103,15 +55,15 @@ afterEach(() => {
       try {
         fs.rmSync(dir, { recursive: true, force: true });
       } catch {
-        // Ignore transient Windows file lock cleanup failures in test teardown.
+        // Ignore transient Windows file-lock cleanup failures in test teardown.
       }
     }
   }
 });
 
-describe("/meepo wake response strict gating", () => {
-  test("Case A: rejects when onboarding state is missing", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-wake-gating-"));
+describe("/meepo wake legacy response input behavior", () => {
+  test("wake ignores legacy response text and follows awaken path", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-wake-response-"));
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
 
@@ -119,10 +71,7 @@ describe("/meepo wake response strict gating", () => {
     const { getDbForCampaign } = await import("../db.js");
 
     const db = getDbForCampaign("default");
-    const { interaction, reply } = buildInteraction({
-      response: "Keemin",
-      userId: "dm-user",
-    });
+    const interaction = buildWakeInteraction("legacy-response-text");
 
     await meepo.execute(interaction, {
       guildId: "guild-1",
@@ -131,148 +80,39 @@ describe("/meepo wake response strict gating", () => {
       db,
     });
 
-    expect(reply).toHaveBeenCalledTimes(1);
-    expect(reply.mock.calls[0]?.[0]).toEqual({
-      content: "No pending text prompt.",
-      ephemeral: true,
-    });
-    expect(getIdentityMemoryRowCount(db)).toBe(0);
-    expect(runWakeMock).not.toHaveBeenCalled();
+    const content = String(interaction.reply.mock.calls[0]?.[0]?.content ?? "");
+    expect(content).toContain("Meepo awakens in this guild");
+    expect(content).toContain("/meepo showtime start");
     db.close();
   });
 
-  test("Case B: rejects when state exists but no matching await_input", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-wake-gating-"));
+  test("second wake after initialization returns already-awakened guidance", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-wake-response-"));
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
 
     const { meepo } = await import("../commands/meepo.js");
     const { getDbForCampaign } = await import("../db.js");
-    const { initState } = await import("../ledger/awakeningStateRepo.js");
 
     const db = getDbForCampaign("default");
-    initState("guild-1", "meepo_awaken", 1, "cold_open", { db });
 
-    const { interaction, reply } = buildInteraction({
-      response: "Keemin",
-      userId: "dm-user",
-    });
-
-    await meepo.execute(interaction, {
+    await meepo.execute(buildWakeInteraction("first"), {
       guildId: "guild-1",
       campaignSlug: "default",
       dbPath: "test.sqlite",
       db,
     });
 
-    expect(reply).toHaveBeenCalledTimes(1);
-    expect(reply.mock.calls[0]?.[0]).toEqual({
-      content: "No pending text prompt.",
-      ephemeral: true,
-    });
-    expect(getIdentityMemoryRowCount(db)).toBe(0);
-    expect(runWakeMock).not.toHaveBeenCalled();
-    db.close();
-  });
-
-  test("Case C: rejects non-DM caller when dm_display_name input is pending", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-wake-gating-"));
-    tempDirs.push(tempDir);
-    configureHermeticEnv(tempDir);
-
-    const { meepo } = await import("../commands/meepo.js");
-    const { getDbForCampaign } = await import("../db.js");
-    const { initState, saveProgress } = await import("../ledger/awakeningStateRepo.js");
-
-    const db = getDbForCampaign("default");
-    initState("guild-1", "meepo_awaken", 1, "ask_dm_name", { db });
-    saveProgress("guild-1", "meepo_awaken", {
-      await_input: { key: "dm_display_name", kind: "modal_text" },
-      pending_prompt_kind: "modal_text",
-      pending_prompt_key: "dm_display_name",
-      pending_prompt_scene_id: "ask_dm_name",
-      pending_prompt_nonce: "nonce-1",
-    }, { db });
-
-    const { interaction, reply } = buildInteraction({
-      response: "Keemin",
-      userId: "not-dm",
-      hasManageGuild: false,
-    });
-
-    await meepo.execute(interaction, {
+    const second = buildWakeInteraction("second");
+    await meepo.execute(second, {
       guildId: "guild-1",
       campaignSlug: "default",
       dbPath: "test.sqlite",
       db,
     });
 
-    expect(reply).toHaveBeenCalledTimes(1);
-    expect(reply.mock.calls[0]?.[0]).toEqual({
-      content: "Only the Dungeon Master can answer this awakening prompt.",
-      ephemeral: true,
-    });
-    expect(getIdentityMemoryRowCount(db)).toBe(0);
-    expect(runWakeMock).not.toHaveBeenCalled();
-    db.close();
-  });
-
-  test("Case D: accepts DM response, persists input, and second call rejects", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-wake-gating-"));
-    tempDirs.push(tempDir);
-    configureHermeticEnv(tempDir);
-
-    const { meepo } = await import("../commands/meepo.js");
-    const { getDbForCampaign } = await import("../db.js");
-    const { initState, loadState, saveProgress } = await import("../ledger/awakeningStateRepo.js");
-
-    const db = getDbForCampaign("default");
-    initState("guild-1", "meepo_awaken", 1, "ask_dm_name", { db });
-    saveProgress("guild-1", "meepo_awaken", {
-      await_input: { key: "dm_display_name", kind: "modal_text" },
-      pending_prompt_kind: "modal_text",
-      pending_prompt_key: "dm_display_name",
-      pending_prompt_scene_id: "ask_dm_name",
-      pending_prompt_nonce: "nonce-1",
-    }, { db });
-
-    const first = buildInteraction({
-      response: "ZZZ_TEST_DM_NAME",
-      userId: "dm-user",
-      hasManageGuild: false,
-    });
-
-    await meepo.execute(first.interaction, {
-      guildId: "guild-1",
-      campaignSlug: "default",
-      dbPath: "test.sqlite",
-      db,
-    });
-
-    const state = loadState("guild-1", "meepo_awaken", { db });
-    expect(state?.progress_json.dm_display_name).toBe("ZZZ_TEST_DM_NAME");
-    expect(state?.progress_json.await_input).toBeNull();
-    expect(state?.current_scene).toBe("ask_dm_name");
-    expect(getIdentityMemoryRowCount(db)).toBe(1);
-
-    const second = buildInteraction({
-      response: "ZZZ_TEST_DM_NAME",
-      userId: "dm-user",
-      hasManageGuild: false,
-    });
-
-    await meepo.execute(second.interaction, {
-      guildId: "guild-1",
-      campaignSlug: "default",
-      dbPath: "test.sqlite",
-      db,
-    });
-
-    expect(second.reply).toHaveBeenCalledWith({
-      content: "No pending text prompt.",
-      ephemeral: true,
-    });
-    expect(getIdentityMemoryRowCount(db)).toBe(1);
+    const secondContent = String(second.reply.mock.calls[0]?.[0]?.content ?? "");
+    expect(secondContent).toContain("already awakened");
     db.close();
   });
 });

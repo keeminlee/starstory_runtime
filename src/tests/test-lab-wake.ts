@@ -18,6 +18,10 @@ vi.mock("../campaign/guildConfig.js", () => ({
   resolveCampaignSlug: vi.fn(() => "default"),
 }));
 
+vi.mock("../security/devAccess.js", () => ({
+  isDevUser: vi.fn(() => true),
+}));
+
 const stubLegacyCommand = {
   data: {
     toJSON: () => ({
@@ -196,5 +200,29 @@ describe("lab wake resolver", () => {
       modeAtStart: "lab",
       label: "test_canon",
     });
+  });
+});
+
+describe("lab wake command routing", () => {
+  test("/lab wake run returns moved guidance", async () => {
+    const { lab } = await import("../commands/lab.js");
+    const reply = vi.fn(async (_payload: unknown) => undefined);
+    const interaction = {
+      guildId: "g1",
+      user: { id: "dev-user" },
+      options: {
+        getSubcommandGroup: () => "wake",
+        getSubcommand: () => "run",
+        getString: () => null,
+      },
+      reply,
+    } as any;
+
+    await lab.execute(interaction, null);
+
+    expect(reply).toHaveBeenCalledTimes(1);
+    const firstReplyArg = (reply as any).mock.calls[0]?.[0];
+    const content = String(firstReplyArg?.content ?? "");
+    expect(content).toContain("Moved: use `/meepo showtime start`");
   });
 });

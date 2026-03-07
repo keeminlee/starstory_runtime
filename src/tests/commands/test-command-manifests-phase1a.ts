@@ -44,7 +44,14 @@ describe("Phase 1A command manifests", () => {
 
     const options = (data.options ?? []) as any[];
     const optionNames = options.map((option) => option.name).sort();
-    expect(optionNames).toEqual(["awaken", "help", "hush", "sessions", "settings", "status", "talk"]);
+    expect(optionNames).toEqual(["awaken", "help", "hush", "sessions", "settings", "showtime", "status", "talk"]);
+
+    const showtimeGroup = options.find((option) => option.name === "showtime") as any;
+    expect(showtimeGroup).toBeTruthy();
+    expect(showtimeGroup.type).toBe(2);
+
+    const showtimeSubcommands = (showtimeGroup.options ?? []).map((option: any) => option.name).sort();
+    expect(showtimeSubcommands).toEqual(["end", "start"]);
 
     const settingsGroup = options.find((option) => option.name === "settings") as any;
     expect(settingsGroup).toBeTruthy();

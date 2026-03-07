@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import { AttachmentBuilder, GuildMember, SlashCommandBuilder } from "discord.js";
 import {
+  ensureGuildConfig,
+  getGuildAwakened,
+  setGuildAwakened,
+  setGuildCampaignSlug,
   getGuildCanonPersonaId,
   getGuildCanonPersonaMode,
   getGuildConfig,
@@ -17,6 +21,7 @@ import {
   setGuildHomeTextChannelId,
   setGuildHomeVoiceChannelId,
 } from "../campaign/guildConfig.js";
+import { getDefaultCampaignSlug } from "../campaign/defaultCampaign.js";
 import { ensureGuildSetup, type SetupReport } from "../campaign/ensureGuildSetup.js";
 import { cfg } from "../config/env.js";
 import { AwakenEngine, type AwakenRunResult } from "../awakening/AwakenEngine.js";
@@ -46,7 +51,11 @@ import {
   getFinalStatus,
   type RecapPassStrategy,
 } from "../sessions/megameecapArtifactLocator.js";
-import { resolveEffectiveMode } from "../sessions/sessionRuntime.js";
+import { resolveEffectiveMode, setGuildMode } from "../sessions/sessionRuntime.js";
+import {
+  deriveLifecycleState,
+  getGuildActiveSession,
+} from "../sessions/lifecycleState.js";
 import { joinVoice, leaveVoice } from "../voice/connection.js";
 import { startReceiver, stopReceiver } from "../voice/receiver.js";
 import {
@@ -1512,7 +1521,7 @@ async function runDoctorChecks(interaction: any, ctx: CommandCtx): Promise<Docto
     checks.push({
       icon: "⚠️",
       label: "No session data yet",
-      action: "Run /meepo awaken then start a session and generate a recap",
+      action: "Run /meepo awaken once, then use /meepo showtime start and generate a recap",
     });
   } else {
     const baseStatus = getBaseStatus(guildId, ctx.campaignSlug, session.session_id, session.label);
@@ -1748,606 +1757,191 @@ export async function executeLabAwakenRespond(interaction: any, ctx: CommandCtx,
   }
 }
 
-async function handleAwaken(interaction: any, ctx: CommandCtx): Promise<void> {
-  const guildId = interaction.guildId as string;
-  logAwakenStage({
-    level: "info",
-    stage: "awaken_handler_enter",
-    label: "Awakening handler entered",
-    interaction,
-    ctx,
-    extra: {
-      marker: "awaken-hardening-v3-2026-03-06",
-      pid: process.pid,
-      deferred: Boolean(interaction?.deferred),
-      replied: Boolean(interaction?.replied),
-    },
-  });
-  const alreadyAwakeMessage = "Meepo is already awake in this world, meep. Use /lab awaken reset to run onboarding again.";
-  if (ctx?.db && typeof ctx.db.exec === "function") {
-    logAwakenResponseLifecycle({
-      marker: "AWAKEN_DB_CONTEXT_BRANCH_ENTER",
-      interaction,
-      ctx,
-    });
-    const script = await loadAwakenScript("meepo_awaken");
-    const responseTextRaw = interaction.options.getString("response")?.trim() ?? "";
-    const hasResponseText = responseTextRaw.length > 0;
-
-    logAwakenResponseLifecycle({
-      marker: "AWAKEN_DEV_FALLBACK_CHECK",
-      interaction,
-      ctx,
-      extra: {
-        has_response_text: hasResponseText,
-      },
+function kickoffShowtimeArtifactsAsync(args: {
+  ctx: CommandCtx;
+  guildId: string;
+  sessionId: string;
+  sessionLabel?: string | null;
+}): void {
+  void Promise.resolve().then(async () => {
+    meepoCommandLog.info("Showtime artifact kickoff started", {
+      event_type: "SHOWTIME_ARTIFACT_KICKOFF",
+      stage: "start",
+      session_id: args.sessionId,
+      session_label: args.sessionLabel ?? null,
+    }, {
+      guild_id: args.guildId,
+      campaign_slug: args.ctx.campaignSlug,
+      interaction_id: args.ctx.interaction_id,
+      trace_id: args.ctx.trace_id,
+      session_id: args.sessionId,
     });
 
-    if (hasResponseText) {
-      logAwakenResponseLifecycle({
-        marker: "AWAKEN_DEV_FALLBACK_BRANCH_ENTER",
-        interaction,
-        ctx,
-      });
-      if (!isDevUser(interaction.user?.id)) {
-        await replyEphemeral(
-          interaction,
-          "This fallback command has moved to /lab awaken respond.",
-          { ctx, marker: "AWAKEN_DEV_FALLBACK_DENIED" }
-        );
-        return;
-      }
-      await executeLabAwakenRespond(interaction, ctx, responseTextRaw);
-      return;
-    }
-
-    repairDmDisplayNameMemory({
-      db: ctx.db,
-      guildId,
-      scriptId: script.id,
-    });
-
-    logAwakenResponseLifecycle({
-      marker: "AWAKEN_AWAKENED_STATE_READ_START",
-      interaction,
-      ctx,
-    });
-    const guildConfig = getGuildConfig(guildId);
-    logAwakenResponseLifecycle({
-      marker: "AWAKEN_AWAKENED_STATE_READ_RESULT",
-      interaction,
-      ctx,
-      extra: {
-        awakened_flag: guildConfig?.awakened ?? null,
-      },
-    });
-    if (guildConfig?.awakened === 1) {
-      logAwakenResponseLifecycle({
-        marker: "AWAKEN_ALREADY_AWAKENED_BRANCH_ENTER",
-        interaction,
-        ctx,
-      });
-      logAwakenResponseLifecycle({
-        marker: "AWAKEN_ALREADY_AWAKENED_BEFORE_REPLY",
-        interaction,
-        ctx,
-        operation: "replyEphemeral",
-      });
-      await replyEphemeral(interaction, alreadyAwakeMessage, {
-        ctx,
-        marker: "AWAKEN_ALREADY_AWAKENED",
-        originBranch: "already_awakened",
-      });
-      logAwakenResponseLifecycle({
-        marker: "AWAKEN_ALREADY_AWAKENED_AFTER_REPLY",
-        interaction,
-        ctx,
-        operation: "replyEphemeral",
-      });
-      return;
-    }
-
-    logAwakenResponseLifecycle({
-      marker: "AWAKEN_ONBOARDING_STATE_READ_START",
-      interaction,
-      ctx,
-      extra: {
-        script_id: script.id,
-      },
-    });
-    let refreshedState = loadState(guildId, script.id, { db: ctx.db });
-    logAwakenResponseLifecycle({
-      marker: "AWAKEN_ONBOARDING_STATE_READ_RESULT",
-      interaction,
-      ctx,
-      extra: {
-        state_exists: Boolean(refreshedState),
-        current_scene: refreshedState?.current_scene,
-        completed: Boolean(refreshedState?.completed),
-      },
-    });
-
-    const hasValidScene = refreshedState ? Boolean(script.scenes[refreshedState.current_scene]) : true;
-    const needsStateReset = Boolean(
-      refreshedState
-      && (!hasValidScene || refreshedState.script_version !== script.version)
-    );
-
-    logAwakenResponseLifecycle({
-      marker: "AWAKEN_STALE_STATE_CHECK",
-      interaction,
-      ctx,
-      extra: {
-        has_valid_scene: hasValidScene,
-        needs_state_reset: needsStateReset,
-        current_scene: refreshedState?.current_scene,
-        state_script_version: refreshedState?.script_version,
-        script_version: script.version,
-      },
-    });
-
-    if (needsStateReset) {
-      logAwakenResponseLifecycle({
-        marker: "AWAKEN_STALE_STATE_RESET_START",
-        interaction,
-        ctx,
-      });
-      // Old onboarding rows can reference scenes removed by script updates.
-      // Reset to script start so /meepo awaken recovers instead of bubbling ERR_UNKNOWN.
-      ctx.db
-        .prepare("DELETE FROM guild_onboarding_state WHERE guild_id = ? AND script_id = ?")
-        .run(guildId, script.id);
-      refreshedState = null;
-      logAwakenResponseLifecycle({
-        marker: "AWAKEN_STALE_STATE_RESET_DONE",
-        interaction,
-        ctx,
-      });
-    }
-
-    if (refreshedState?.completed) {
-      logAwakenResponseLifecycle({
-        marker: "AWAKEN_ALREADY_AWAKENED_BRANCH_ENTER",
-        interaction,
-        ctx,
-        extra: {
-          source: "onboarding_state_completed",
-        },
-      });
-      logAwakenResponseLifecycle({
-        marker: "AWAKEN_ALREADY_AWAKENED_BEFORE_REPLY",
-        interaction,
-        ctx,
-      });
-      await replyEphemeral(interaction, alreadyAwakeMessage, {
-        ctx,
-        marker: "AWAKEN_ALREADY_AWAKENED",
-        originBranch: "already_awakened",
-      });
-      logAwakenResponseLifecycle({
-        marker: "AWAKEN_ALREADY_AWAKENED_AFTER_REPLY",
-        interaction,
-        ctx,
-      });
-      return;
-    }
-
-    if (!refreshedState) {
-      logAwakenResponseLifecycle({
-        marker: "AWAKEN_ONBOARDING_INIT_START",
-        interaction,
-        ctx,
-        extra: {
-          start_scene: script.start_scene,
-          script_version: script.version,
-        },
-      });
-      initState(guildId, script.id, script.version, script.start_scene, { db: ctx.db });
-      logAwakenResponseLifecycle({
-        marker: "AWAKEN_ONBOARDING_INIT_DONE",
-        interaction,
-        ctx,
-      });
-    }
-
-    logAwakenResponseLifecycle({
-      marker: "AWAKEN_ONBOARDING_PROGRESS_SAVE_START",
-      interaction,
-      ctx,
-    });
-    saveProgress(guildId, script.id, {
-      [AWAKEN_INVOKER_USER_ID_KEY]: interaction.user?.id ?? null,
-    }, { db: ctx.db });
-    logAwakenResponseLifecycle({
-      marker: "AWAKEN_ONBOARDING_PROGRESS_SAVE_DONE",
-      interaction,
-      ctx,
-    });
-
-    if (!interaction.deferred && !interaction.replied && typeof interaction.deferReply === "function") {
-      logAwakenResponseLifecycle({
-        marker: "AWAKEN_INITIAL_PROMPT_BEFORE_DEFER",
-        interaction,
-        ctx,
-        operation: "deferReply",
-      });
-      await interaction.deferReply({ ephemeral: true });
-      logAwakenResponseLifecycle({
-        marker: "AWAKEN_INITIAL_PROMPT_AFTER_DEFER",
-        interaction,
-        ctx,
-        operation: "deferReply",
-      });
-    }
-
-    const stateBeforeRun = loadState(guildId, script.id, { db: ctx.db });
-    const pendingBeforeRun = getPendingPromptFromState(stateBeforeRun);
-    logAwakenStage({
-      level: "info",
-      stage: "initial_engine_start",
-      label: "Awakening initial engine start",
-      interaction,
-      ctx,
-      script,
-      state: stateBeforeRun,
-      pending: pendingBeforeRun,
-      awakenedFlag: guildConfig?.awakened ?? null,
-    });
-
-    let result: AwakenRunResult;
     try {
-      result = await AwakenEngine.runWake(interaction, {
-        db: ctx.db,
-        script,
-        runtimeChannelId: interaction.channelId,
+      ensureBronzeTranscriptExportCached({
+        guildId: args.guildId,
+        campaignSlug: args.ctx.campaignSlug,
+        sessionId: args.sessionId,
+        sessionLabel: args.sessionLabel,
+        db: args.ctx.db,
+        timeBudgetMs: TRANSCRIPT_EXPORT_TIME_BUDGET_MS,
+      });
+
+      const strategy = getGuildDefaultRecapStyle(args.guildId) ?? DEFAULT_RECAP_STRATEGY;
+      await generateSessionRecap({
+        guildId: args.guildId,
+        sessionId: args.sessionId,
+        strategy,
+      });
+
+      meepoCommandLog.info("Showtime artifact kickoff succeeded", {
+        event_type: "SHOWTIME_ARTIFACT_KICKOFF",
+        stage: "success",
+        session_id: args.sessionId,
+        strategy,
+      }, {
+        guild_id: args.guildId,
+        campaign_slug: args.ctx.campaignSlug,
+        interaction_id: args.ctx.interaction_id,
+        trace_id: args.ctx.trace_id,
+        session_id: args.sessionId,
       });
     } catch (error) {
-      const normalized = toAwakenBoundaryError({
-        error,
-        fallbackCode: "ERR_AWAKEN_MODEL",
-        traceId: ctx.trace_id,
-        interactionId: ctx.interaction_id,
-        metadata: {
-          stage: "initial_engine",
-          script_id: script.id,
-          script_version: script.version,
-          scene_id: stateBeforeRun?.current_scene,
-          pending_prompt_key: pendingBeforeRun?.key,
-          pending_prompt_nonce: pendingBeforeRun?.nonce,
-          awakened_flag: guildConfig?.awakened ?? null,
-        },
+      meepoCommandLog.warn("Showtime artifact kickoff failed", {
+        event_type: "SHOWTIME_ARTIFACT_KICKOFF",
+        stage: "error",
+        session_id: args.sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      }, {
+        guild_id: args.guildId,
+        campaign_slug: args.ctx.campaignSlug,
+        interaction_id: args.ctx.interaction_id,
+        trace_id: args.ctx.trace_id,
+        session_id: args.sessionId,
       });
-      logAwakenStage({
-        level: "error",
-        stage: "initial_engine_error",
-        label: "Awakening initial engine failed",
-        interaction,
-        ctx,
-        script,
-        state: stateBeforeRun,
-        pending: pendingBeforeRun,
-        awakenedFlag: guildConfig?.awakened ?? null,
-        extra: {
-          error_code: normalized.code,
-          error: normalized.message,
-        },
-      });
-      const payload = formatUserFacingError(normalized, {
-        trace_id: ctx.trace_id,
-        interaction_id: ctx.interaction_id,
-      });
-      await replyEphemeral(interaction, payload.content, {
-        ctx,
-        marker: "AWAKEN_INITIAL_ENGINE_ERROR",
-        originBranch: "initial_prompt",
-      });
-      return;
     }
-
-    logAwakenStage({
-      level: "info",
-      stage: "initial_engine_success",
-      label: "Awakening initial engine success",
-      interaction,
-      ctx,
-      script,
-      state: stateBeforeRun,
-      pending: pendingBeforeRun,
-      awakenedFlag: guildConfig?.awakened ?? null,
-      extra: {
-        run_status: result.status,
-        run_reason: (result as { reason?: string }).reason,
-      },
-    });
-
-    const editReply = async (content: string): Promise<void> => {
-      if (typeof interaction.editReply === "function" && (interaction.deferred || interaction.replied)) {
-        logAwakenResponseLifecycle({
-          marker: "AWAKEN_HANDLE_AWAKEN_BEFORE_EDIT_REPLY",
-          interaction,
-          ctx,
-          operation: "editReply",
-        });
-        await interaction.editReply(content);
-        logAwakenResponseLifecycle({
-          marker: "AWAKEN_HANDLE_AWAKEN_AFTER_EDIT_REPLY",
-          interaction,
-          ctx,
-          operation: "editReply",
-        });
-        return;
-      }
-      if (typeof interaction.reply === "function" && !interaction.replied) {
-        logAwakenResponseLifecycle({
-          marker: "AWAKEN_HANDLE_AWAKEN_BEFORE_REPLY",
-          interaction,
-          ctx,
-          operation: "reply",
-        });
-        await interaction.reply({ content, ephemeral: true });
-        logAwakenResponseLifecycle({
-          marker: "AWAKEN_HANDLE_AWAKEN_AFTER_REPLY",
-          interaction,
-          ctx,
-          operation: "reply",
-        });
-      }
-    };
-
-    const statusText = (runResult: AwakenRunResult): string => {
-      return formatAwakenStatus(runResult);
-    };
-
-    const stateAfterRun = loadState(guildId, script.id, { db: ctx.db });
-    const pendingPrompt = getPendingPromptFromState(stateAfterRun);
-    if (stateAfterRun && pendingPrompt) {
-      logAwakenResponseLifecycle({
-        marker: "AWAKEN_INITIAL_PROMPT_BRANCH_ENTER",
-        interaction,
-        ctx,
-        extra: {
-          pending_kind: pendingPrompt.kind,
-          pending_key: pendingPrompt.key,
-          pending_scene_id: pendingPrompt.sceneId,
-          pending_nonce: pendingPrompt.nonce,
-        },
-      });
-      if (pendingPrompt.kind !== "continue") {
-        logAwakenResponseLifecycle({
-          marker: pendingPrompt.kind === "modal_text"
-            ? "AWAKEN_INITIAL_PROMPT_BEFORE_MODAL"
-            : "AWAKEN_INITIAL_PROMPT_BEFORE_REPLY",
-          interaction,
-          ctx,
-          operation: "edit-or-reply",
-        });
-        await editReply(metaMeepoVoice.wake.pausedContinuePrompt());
-        logAwakenResponseLifecycle({
-          marker: pendingPrompt.kind === "modal_text"
-            ? "AWAKEN_INITIAL_PROMPT_AFTER_MODAL"
-            : "AWAKEN_INITIAL_PROMPT_AFTER_REPLY",
-          interaction,
-          ctx,
-          operation: "edit-or-reply",
-        });
-        return;
-      }
-
-      logAwakenResponseLifecycle({
-        marker: "AWAKEN_INITIAL_PROMPT_BEFORE_REPLY",
-        interaction,
-        ctx,
-        operation: "renderPendingAwakeningPrompt",
-      });
-      try {
-        logAwakenResponseLifecycle({
-          marker: "AWAKEN_RENDER_PENDING_PROMPT_CALL",
-          interaction,
-          ctx,
-          extra: {
-            origin_branch: "initial_prompt",
-            pending_kind: pendingPrompt.kind,
-            pending_key: pendingPrompt.key,
-            pending_nonce: pendingPrompt.nonce,
-          },
-        });
-        const rendered = await renderPendingAwakeningPrompt({
-          interaction,
-          script,
-          state: stateAfterRun,
-          pending: pendingPrompt,
-          originBranch: "initial_prompt",
-        });
-        logAwakenResponseLifecycle({
-          marker: "AWAKEN_INITIAL_PROMPT_AFTER_REPLY",
-          interaction,
-          ctx,
-          operation: "renderPendingAwakeningPrompt",
-          extra: {
-            rendered,
-            pending_kind: pendingPrompt.kind,
-          },
-        });
-        if (rendered) {
-          return;
-        }
-      } catch (error) {
-        const diag = getAwakenDiag(error);
-        const normalized = toAwakenBoundaryError({
-          error,
-          fallbackCode: "ERR_AWAKEN_PROMPT",
-          traceId: ctx.trace_id,
-          interactionId: ctx.interaction_id,
-          metadata: {
-            stage: "initial_prompt_render",
-            scene_id: pendingPrompt.sceneId,
-            pending_prompt_key: pendingPrompt.key,
-            pending_prompt_kind: pendingPrompt.kind,
-            pending_prompt_nonce: pendingPrompt.nonce,
-            ...diag,
-          },
-        });
-        logAwakenStage({
-          level: "error",
-          stage: "initial_prompt_render_error",
-          label: "Awakening initial prompt render failed",
-          interaction,
-          ctx,
-          script,
-          state: stateAfterRun,
-          pending: pendingPrompt,
-          extra: {
-            error_code: normalized.code,
-            error: normalized.message,
-          },
-        });
-        const payload = formatUserFacingError(normalized, {
-          trace_id: ctx.trace_id,
-          interaction_id: ctx.interaction_id,
-        });
-        const content = withAwakenPromptDiagnosticSuffix(payload.content, {
-          origin_branch: diag?.origin_branch ?? "initial_prompt",
-          selected_op: diag?.selected_op,
-          helper_name: diag?.helper_name,
-        });
-        await replyEphemeral(interaction, content, {
-          ctx,
-          marker: "AWAKEN_INITIAL_PROMPT_RENDER_ERROR",
-          originBranch: "initial_prompt",
-        });
-        return;
-      }
-    }
-
-    logAwakenResponseLifecycle({
-      marker: "AWAKEN_INITIAL_PROMPT_BEFORE_REPLY",
-      interaction,
-      ctx,
-      operation: "final-status",
-    });
-    await editReply(statusText(result));
-    logAwakenResponseLifecycle({
-      marker: "AWAKEN_INITIAL_PROMPT_AFTER_REPLY",
-      interaction,
-      ctx,
-      operation: "final-status",
-    });
-    return;
-  }
-
-  const invocationChannelId = interaction.channelId as string;
-  const requestedSessionLabel = interaction.options.getString("session")?.trim() ?? null;
-
-  const setupReport = await ensureGuildSetup({
-    guildId,
-    guildName: interaction.guild?.name ?? null,
-    interaction,
-    canonicalWake: Boolean(requestedSessionLabel),
   });
+}
 
-  if (setupReport.errors.length > 0) {
-    const setupSummaryLines = renderSetupSummary(setupReport);
+async function handleAwaken(interaction: any, ctx: CommandCtx): Promise<void> {
+  const guildId = interaction.guildId as string;
+  const lifecycle = deriveLifecycleState(guildId);
+
+  if (lifecycle !== "Dormant") {
     await interaction.reply({
-      content: metaMeepoVoice.wake.blockedDueToSetup(setupSummaryLines),
+      content: "Meepo is already awakened in this guild.\nUse `/meepo showtime start` to begin a session.",
       ephemeral: true,
     });
     return;
   }
 
+  const defaultCampaignSlug = getDefaultCampaignSlug();
+  ensureGuildConfig(guildId, interaction.guild?.name ?? null);
+  setGuildCampaignSlug(guildId, defaultCampaignSlug);
+  setGuildAwakened(guildId, true);
+  setGuildMode(guildId, "ambient");
+
   if (!getActiveMeepo(guildId)) {
-    wakeMeepo({ guildId, channelId: invocationChannelId });
+    wakeMeepo({ guildId, channelId: interaction.channelId as string });
   }
 
-  let joinedVoiceChannelId: string | null = null;
-  let stayPutNotice: string | null = null;
-  let notInVoiceNotice: string | null = null;
-  if (setupReport.canAttemptVoice) {
-    const voiceResult = await ensureVoiceConnection(interaction, guildId);
-    joinedVoiceChannelId = voiceResult.joinedVoiceChannelId;
-    stayPutNotice = voiceResult.stayPutNotice;
-    notInVoiceNotice = voiceResult.notInVoiceNotice;
-  } else {
-    notInVoiceNotice = metaMeepoVoice.wake.voiceConnectSkipped();
-  }
+  await interaction.reply({
+    content: [
+      "Meepo awakens in this guild.",
+      "",
+      "Ambient mode is now active.",
+      "Use `/meepo showtime start` when your session begins.",
+    ].join("\n"),
+    ephemeral: true,
+  });
+}
 
-  setReplyMode(ctx.db, guildId, "text");
-  setVoiceHushEnabled(guildId, true);
+async function handleShowtimeStart(interaction: any, ctx: CommandCtx): Promise<void> {
+  const guildId = interaction.guildId as string;
+  const lifecycle = deriveLifecycleState(guildId);
 
-  const previousSession = getActiveSession(guildId);
-  let startedSession: SessionRow | null = null;
-  let endedPrevious = false;
-
-  if (previousSession) {
-    if (requestedSessionLabel) {
-      endSession(guildId, "session_switch");
-      endedPrevious = true;
-      logSystemEvent({
-        guildId,
-        channelId: invocationChannelId,
-        eventType: "SESSION_ENDED",
-        content: JSON.stringify({ id: previousSession.session_id }),
-        authorId: interaction.user.id,
-        authorName: interaction.user.username,
-        narrativeWeight: "secondary",
-      });
-    } else {
-      endSession(guildId, "wake_ambient");
-      endedPrevious = true;
-      logSystemEvent({
-        guildId,
-        channelId: invocationChannelId,
-        eventType: "SESSION_ENDED",
-        content: JSON.stringify({ id: previousSession.session_id }),
-        authorId: interaction.user.id,
-        authorName: interaction.user.username,
-        narrativeWeight: "secondary",
-      });
-    }
-  }
-
-  if (requestedSessionLabel) {
-    startedSession = startSession(guildId, interaction.user.id, interaction.user.username, {
-      label: requestedSessionLabel,
-      source: "live",
-      modeAtStart: "canon",
-      kind: "canon",
-    }) as SessionRow;
-
-    logSystemEvent({
-      guildId,
-      channelId: invocationChannelId,
-      eventType: "SESSION_STARTED",
-      content: JSON.stringify({ id: startedSession.session_id, label: startedSession.label }),
-      authorId: interaction.user.id,
-      authorName: interaction.user.username,
-      narrativeWeight: "secondary",
+  if (lifecycle === "Dormant") {
+    await interaction.reply({
+      content: "Meepo is not awakened in this guild yet. Use `/meepo awaken` first.",
+      ephemeral: true,
     });
+    return;
   }
 
-  const activeSession = getActiveSession(guildId) as SessionRow | null;
-  const effectiveMode = resolveEffectiveMode(guildId);
-  const effectivePersonaId = getEffectivePersonaId(guildId);
-  const effectivePersona = getPersona(effectivePersonaId);
-  const homeText = getGuildHomeTextChannelId(guildId);
-  const homeVoice = resolveGuildHomeVoiceChannelId(guildId, cfg.overlay.homeVoiceChannelId ?? null);
+  const activeSession = getGuildActiveSession(guildId) as SessionRow | null;
+  if (activeSession) {
+    await interaction.reply({
+      content: `A showtime session is already active (${getSessionDisplayLabel(activeSession)}). Use /meepo showtime end first.`,
+      ephemeral: true,
+    });
+    return;
+  }
 
-  const setupSummaryLines = shouldPrintSetupSummary(guildId, setupReport) ? renderSetupSummary(setupReport) : [];
-  const responseLines = metaMeepoVoice.wake.replyLines({
-    startedSessionLabel: startedSession?.label ?? null,
-    activeSessionLabel: activeSession ? getSessionDisplayLabel(activeSession) : null,
-    endedPrevious,
-    effectiveMode,
-    personaDisplayName: effectivePersona.displayName,
-    personaId: effectivePersonaId,
-    homeText: formatChannel(homeText),
-    homeVoice: formatChannel(homeVoice),
-    joinedVoice: joinedVoiceChannelId ? formatChannel(joinedVoiceChannelId) : null,
-    stayPutNotice,
-    notInVoiceNotice,
-    setupSummaryLines,
+  const startedSession = startSession(guildId, interaction.user.id, interaction.user.username, {
+    source: "live",
+    modeAtStart: "canon",
+    kind: "canon",
+  }) as SessionRow;
+
+  logSystemEvent({
+    guildId,
+    channelId: interaction.channelId,
+    eventType: "SESSION_STARTED",
+    content: JSON.stringify({ id: startedSession.session_id, label: startedSession.label }),
+    authorId: interaction.user.id,
+    authorName: interaction.user.username,
+    narrativeWeight: "secondary",
   });
 
-  await interaction.reply({ content: responseLines.join("\n"), ephemeral: true });
+  await interaction.reply({
+    content: "🎭 Showtime begins.\n\nSession recording has started.",
+    ephemeral: true,
+  });
+}
+
+async function handleShowtimeEnd(interaction: any, ctx: CommandCtx): Promise<void> {
+  const guildId = interaction.guildId as string;
+  const lifecycle = deriveLifecycleState(guildId);
+
+  if (lifecycle === "Dormant") {
+    await interaction.reply({
+      content: "Meepo is not awakened in this guild yet. Use `/meepo awaken` first.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const activeSession = getGuildActiveSession(guildId) as SessionRow | null;
+  if (!activeSession) {
+    await interaction.reply({
+      content: "No active showtime session. Use `/meepo showtime start` to begin one.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  endSession(guildId, "showtime_end");
+  logSystemEvent({
+    guildId,
+    channelId: interaction.channelId,
+    eventType: "SESSION_ENDED",
+    content: JSON.stringify({ id: activeSession.session_id }),
+    authorId: interaction.user.id,
+    authorName: interaction.user.username,
+    narrativeWeight: "secondary",
+  });
+
+  kickoffShowtimeArtifactsAsync({
+    ctx,
+    guildId,
+    sessionId: activeSession.session_id,
+    sessionLabel: activeSession.label,
+  });
+
+  await interaction.reply({
+    content: "🎬 Session complete.\n\nArtifacts are being generated.",
+    ephemeral: true,
+  });
 }
 
 async function handleSleep(interaction: any): Promise<void> {
@@ -3146,6 +2740,21 @@ export const meepo = {
     .addSubcommand((sub) => sub.setName("status").setDescription("Show current Meepo state and diagnostics."))
     .addSubcommandGroup((group) =>
       group
+        .setName("showtime")
+        .setDescription("Control active session boundaries.")
+        .addSubcommand((sub) =>
+          sub
+            .setName("start")
+            .setDescription("Start a showtime session.")
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("end")
+            .setDescription("End the active showtime session.")
+        )
+    )
+    .addSubcommandGroup((group) =>
+      group
         .setName("settings")
         .setDescription("Show or edit awakening settings.")
         .addSubcommand((sub) => sub.setName("show").setDescription("Show awakening settings."))
@@ -3199,7 +2808,19 @@ export const meepo = {
     ),
 
   async handleComponentInteraction(interaction: any, ctx: CommandCtx | null): Promise<boolean> {
-    return handleAwakeningChoicePromptInteraction(interaction, ctx);
+    const legacyTarget = parsePromptTargetFromInteraction(interaction);
+    if (!legacyTarget) return false;
+
+    await replyEphemeral(
+      interaction,
+      "Awakening wizard prompts are retired. Use `/meepo awaken` once, then `/meepo showtime start` to begin sessions.",
+      {
+        ctx: ctx ?? undefined,
+        marker: "AWAKEN_LEGACY_COMPONENT_DISABLED",
+        originBranch: "resume",
+      }
+    );
+    return true;
   },
 
   async autocomplete(interaction: any) {
@@ -3253,7 +2874,8 @@ export const meepo = {
     const sub = interaction.options.getSubcommand();
     const requiresElevated =
       sub === "awaken" || sub === "wake" || sub === "talk" || sub === "hush" ||
-      (subGroup === "sessions" && sub === "recap");
+      (subGroup === "sessions" && sub === "recap") ||
+      (subGroup === "showtime" && (sub === "start" || sub === "end"));
 
     if (requiresElevated && !isElevated(interaction.member as GuildMember | null)) {
       await interaction.reply({ content: metaMeepoVoice.errors.notAuthorized(), ephemeral: true });
@@ -3268,6 +2890,17 @@ export const meepo = {
     if (subGroup === "sessions") {
       await handleSessions(interaction, ctx);
       return;
+    }
+
+    if (subGroup === "showtime") {
+      if (sub === "start") {
+        await handleShowtimeStart(interaction, ctx);
+        return;
+      }
+      if (sub === "end") {
+        await handleShowtimeEnd(interaction, ctx);
+        return;
+      }
     }
 
     if (sub === "awaken" || sub === "wake") {

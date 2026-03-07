@@ -98,7 +98,7 @@ export function startSession(
   });
 
   db.prepare(
-    "INSERT INTO sessions (session_id, guild_id, kind, mode_at_start, label, created_at_ms, started_at_ms, ended_at_ms, ended_reason, started_by_id, started_by_name, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO sessions (session_id, guild_id, kind, mode_at_start, status, label, created_at_ms, started_at_ms, ended_at_ms, ended_reason, started_by_id, started_by_name, source) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)"
   ).run(sessionId, guildId, sessionKind, modeAtStart, sessionLabel, now, now, null, null, startedById, startedByName, sessionSource);
 
   try {
@@ -138,6 +138,7 @@ export function startSession(
     guild_id: guildId,
     kind: sessionKind,
     mode_at_start: modeAtStart,
+    status: "active",
     label: sessionLabel,
     created_at_ms: now,
     started_at_ms: now,
@@ -169,6 +170,48 @@ export function endSession(guildId: string, reason: string | null = null): numbe
       changes: info.changes,
     });
   }
+  return info.changes;
+}
+
+export function interruptSessionById(
+  guildId: string,
+  sessionId: string,
+  reason: string | null = "boot_recovery_interrupted"
+): number {
+  const { db } = getSessionDbForGuild(guildId);
+  const scopedSessionLog = sessionLog.withContext({
+    guild_id: guildId,
+    campaign_slug: resolveCampaignSlug({ guildId }),
+    session_id: sessionId,
+  });
+
+  const now = Date.now();
+  const info = db
+    .prepare(
+      `
+      UPDATE sessions
+      SET
+        ended_at_ms = COALESCE(ended_at_ms, ?),
+        ended_reason = CASE
+          WHEN ended_reason IS NULL OR TRIM(ended_reason) = '' THEN ?
+          ELSE ended_reason
+        END,
+        status = 'interrupted'
+      WHERE guild_id = ?
+        AND session_id = ?
+        AND status = 'active'
+      `
+    )
+    .run(now, reason, guildId, sessionId);
+
+  if (info.changes > 0) {
+    markRuntimeSessionEnded(guildId);
+    scopedSessionLog.info("Session interrupted", {
+      ended_reason: reason,
+      changes: info.changes,
+    });
+  }
+
   return info.changes;
 }
 
