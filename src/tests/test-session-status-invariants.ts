@@ -95,7 +95,7 @@ describe("session status invariants", () => {
       kind: "canon",
       label: "C2E20",
     });
-    expect(first.status).toBeUndefined();
+    expect(first.status).toBe("active");
     expect(getActiveSession(guildId)?.session_id).toBe(first.session_id);
 
     expect(() =>

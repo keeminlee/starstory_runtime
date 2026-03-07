@@ -4,6 +4,11 @@ import { getActiveSessionId, markRuntimeSessionEnded, markRuntimeSessionStarted 
 
 const reconcileLog = log.withScope("session-reconcile");
 
+// Important contract split:
+// - Recovery mutates DB truth (active -> interrupted when needed).
+// - Reconciliation is runtime-only and derives in-memory markers from DB truth.
+// This module must never invent or repair persisted session truth.
+
 export type BootSessionReconcileResult = {
   guildId: string;
   dbActiveSessionId: string | null;

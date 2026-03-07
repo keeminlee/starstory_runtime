@@ -97,6 +97,21 @@ Fixture root:
 - Legacy wizard-flow checks:
   - old awaken component interactions are unreachable in production flow and return migration guidance
 
+## 5.4) Boot Recovery & Crash Safety (Sprint 4)
+
+- Startup runs recovery before reconciliation:
+  - recovery mutates DB truth (`active -> interrupted` when needed)
+  - reconciliation derives runtime state from post-recovery DB
+- Boot logging includes:
+  - `[BOOT] Recovering interrupted sessions...`
+  - `[BOOT] Marked interrupted: session_id=...`
+  - `[BOOT] Recovery complete.`
+- Session safety checks:
+  - lingering `active` sessions from crashes become `interrupted`
+  - `completed` sessions are unchanged by recovery
+  - interrupted sessions do not block a fresh showtime start
+  - no duplicate active session per guild
+
 ## 6) GitHub Release Draft (v1.0.0)
 
 ### Release Title (Primary)

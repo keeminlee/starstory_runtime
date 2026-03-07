@@ -3,8 +3,15 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 let activeSession: any | null = null;
 let recapArtifact: any | null = null;
 let baseExists = false;
+let awakened = false;
 
 vi.mock("../../campaign/guildConfig.js", () => ({
+  ensureGuildConfig: vi.fn(() => undefined),
+  getGuildAwakened: vi.fn(() => awakened),
+  setGuildAwakened: vi.fn((_guildId: string, value: boolean) => {
+    awakened = value;
+  }),
+  setGuildCampaignSlug: vi.fn(() => undefined),
   getGuildCanonPersonaId: vi.fn(() => null),
   getGuildCanonPersonaMode: vi.fn(() => "meta"),
   getGuildDmUserId: vi.fn(() => null),
@@ -73,6 +80,7 @@ vi.mock("../../ledger/system.js", () => ({
 
 vi.mock("../../sessions/sessionRuntime.js", () => ({
   resolveEffectiveMode: vi.fn(() => (activeSession ? "canon" : "ambient")),
+  setGuildMode: vi.fn(() => undefined),
 }));
 
 vi.mock("../../sessions/sessions.js", () => ({
@@ -212,11 +220,12 @@ afterEach(() => {
   activeSession = null;
   recapArtifact = null;
   baseExists = false;
+  awakened = false;
   vi.clearAllMocks();
 });
 
 describe("v1.1 golden path smoke (mocked)", () => {
-  test("wake -> recap -> view surfaces stable metadata", async () => {
+  test("wake -> showtime start -> recap -> view surfaces stable metadata", async () => {
     const { meepo } = await import("../../commands/meepo.js");
     const mockDb = {
       prepare: vi.fn(() => ({
@@ -248,7 +257,26 @@ describe("v1.1 golden path smoke (mocked)", () => {
       { guildId: "guild-1", campaignSlug: "default", dbPath: "test.sqlite", db: mockDb }
     );
 
+    const showtimeReply = vi.fn(async (_payload: any) => undefined);
+    await meepo.execute(
+      {
+        guildId: "guild-1",
+        channelId: "text-1",
+        guild: { name: "Test Guild", voiceAdapterCreator: {} },
+        user: { id: "user-1", username: "Tester" },
+        member: {},
+        options: {
+          getSubcommandGroup: vi.fn(() => "showtime"),
+          getSubcommand: vi.fn(() => "start"),
+          getString: vi.fn(() => null),
+        },
+        reply: showtimeReply,
+      } as any,
+      { guildId: "guild-1", campaignSlug: "default", dbPath: "test.sqlite", db: mockDb }
+    );
+
     const recapEditReply = vi.fn(async (_payload: any) => undefined);
+    const recapReply = vi.fn(async (_payload: any) => undefined);
     await meepo.execute(
       {
         guildId: "guild-1",
@@ -264,7 +292,7 @@ describe("v1.1 golden path smoke (mocked)", () => {
         },
         deferReply: vi.fn(async () => undefined),
         editReply: recapEditReply,
-        reply: vi.fn(async () => undefined),
+        reply: recapReply,
       } as any,
       { guildId: "guild-1", campaignSlug: "default", dbPath: "test.sqlite", db: mockDb }
     );
@@ -289,7 +317,8 @@ describe("v1.1 golden path smoke (mocked)", () => {
     );
 
     expect(wakeReply).toHaveBeenCalledTimes(1);
-    expect(recapEditReply).toHaveBeenCalledTimes(1);
+    expect(showtimeReply).toHaveBeenCalledTimes(1);
+    expect(recapEditReply.mock.calls.length + recapReply.mock.calls.length).toBe(1);
     expect(viewReply).toHaveBeenCalledTimes(1);
 
     const viewPayload = viewReply.mock.calls.at(0)?.[0];

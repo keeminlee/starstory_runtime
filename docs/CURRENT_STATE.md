@@ -80,6 +80,32 @@ Meepo now runs on a hardened multi-guild/session/ops substrate focused on reliab
 
 This closes the foundational reliability loop before further feature expansion.
 
+### Boot Recovery & Crash-Safe Sessions (Sprint 4)
+
+Sprint 4 hardens unexpected restart behavior so lifecycle state is always reconstructed from DB truth.
+
+Session status authority:
+
+- `sessions.status` values: `active | completed | interrupted`
+- at most one active session per guild is enforced by DB index (`idx_one_active_session_per_guild`)
+
+Boot flow contract:
+
+1. Recovery stage (DB mutation):
+- scan lingering `active` sessions at boot
+- mark them `interrupted`
+- emit explicit boot recovery logs
+2. Reconciliation stage (runtime derivation only):
+- read post-recovery DB truth
+- align runtime active-session marker
+- never invent or repair persisted session truth
+
+Crash behavior:
+
+- crash during Showtime: prior active session is marked `interrupted`; lifecycle returns to Awakened/Ambient
+- crash during Awakened/Ambient with no active session: no session mutation needed
+- crash during async artifact generation after showtime end: session remains `completed`; artifact retries are decoupled from session correctness
+
 ### Awakening Runtime (v1.6)
 
 Awakening Runtime is the deterministic onboarding interpreter used by `/meepo awaken` and future ritual-style flows.

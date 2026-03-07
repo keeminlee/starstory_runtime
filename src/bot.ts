@@ -10,6 +10,7 @@ import { autoJoinGeneralVoice } from "./meepo/autoJoinVoice.js";
 import { startAutoSleepChecker } from "./meepo/autoSleep.js";
 import { getActiveSession } from "./sessions/sessions.js";
 import { getGuildMode } from "./sessions/sessionRuntime.js";
+import { recoverInterruptedSessions } from "./sessions/sessionRecovery.js";
 import { reconcileSessionStateOnBootForGuilds } from "./sessions/reconcileSessionsOnBoot.js";
 import { appendLedgerEntry } from "./ledger/ledger.js";
 import { startMeepoContextActionWorker } from "./ledger/meepoContextWorker.js";
@@ -137,6 +138,13 @@ client.once("ready", async () => {
     bootLog.info("Startup restore skipped: bot is not in any guilds.");
   } else {
     const guildIds = Array.from(client.guilds.cache.keys());
+
+    // Recovery mutates DB truth; reconciliation then derives runtime state from that truth.
+    const bootRecoverySummary = recoverInterruptedSessions(guildIds);
+    bootLog.info(
+      `Session boot recovery: total=${bootRecoverySummary.totalGuilds} scanned_active=${bootRecoverySummary.scannedActiveSessions} interrupted=${bootRecoverySummary.interruptedSessions}`
+    );
+
     const bootReconcileSummary = reconcileSessionStateOnBootForGuilds(guildIds);
     bootLog.info(
       `Session boot reconciliation: total=${bootReconcileSummary.totalGuilds} changed=${bootReconcileSummary.changedGuilds} set=${bootReconcileSummary.setRuntimeActiveCount} cleared=${bootReconcileSummary.clearedRuntimeActiveCount}`
