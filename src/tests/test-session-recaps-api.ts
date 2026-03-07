@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
+import type { RecapStrategy } from "../sessions/recapEngine.js";
 
 const tempDirs: string[] = [];
 
@@ -171,4 +172,189 @@ test("sessionTranscript returns normalized transcript line contract", async () =
   expect(transcript.lines[0]?.lineIndex).toBe(0);
   expect(typeof transcript.lines[0]?.speaker).toBe("string");
   expect(typeof transcript.lines[0]?.text).toBe("string");
+});
+
+test("generateSessionRecap orchestrates all three styles and persists session_recaps contract", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-session-recaps-generate-"));
+  tempDirs.push(tempDir);
+  configureHermeticEnv(tempDir);
+
+  const guildId = "guild-recaps-generate";
+  const sessionId = "session-recaps-generate";
+  await seedSessionAndLedger(guildId, sessionId);
+
+  const {
+    generateSessionRecap,
+    getSessionRecap,
+  } = await import("../sessions/sessionRecaps.js");
+
+  const styleCalls: RecapStrategy[] = [];
+  const generated = await generateSessionRecap(
+    {
+      guildId,
+      sessionId,
+    },
+    {
+      generateStyleRecap: async ({ strategy }) => {
+        styleCalls.push(strategy);
+        return {
+          text: `${strategy.toUpperCase()} recap output`,
+          createdAtMs: Date.now(),
+          strategy,
+          engine: "megameecap",
+          strategyVersion: "megameecap-final-v1",
+          baseVersion: "megameecap-base-v1",
+          finalVersion: "megameecap-final-v1",
+          sourceTranscriptHash: `hash-${strategy}`,
+          cacheHit: false,
+          artifactPaths: {
+            recapPath: `${strategy}.md`,
+            metaPath: `${strategy}.json`,
+          },
+          sourceRange: {
+            startLine: 0,
+            endLine: 2,
+            lineCount: 3,
+          },
+        };
+      },
+    }
+  );
+
+  expect(styleCalls).toEqual(["concise", "balanced", "detailed"]);
+  expect(generated.views.concise).toContain("CONCISE");
+  expect(generated.views.balanced).toContain("BALANCED");
+  expect(generated.views.detailed).toContain("DETAILED");
+  expect(generated.generatedAt).toBeGreaterThan(0);
+  expect(generated.modelVersion).toBe("megameecap-final-v1");
+
+  const loaded = getSessionRecap(guildId, sessionId);
+  expect(loaded).toBeTruthy();
+  expect(loaded?.views.concise).toContain("CONCISE");
+  expect(loaded?.views.balanced).toContain("BALANCED");
+  expect(loaded?.views.detailed).toContain("DETAILED");
+  expect(loaded?.modelVersion).toBe("megameecap-final-v1");
+});
+
+test("regenerateSessionRecap overwrites safely and records regeneration reason", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-session-recaps-regenerate-"));
+  tempDirs.push(tempDir);
+  configureHermeticEnv(tempDir);
+
+  const guildId = "guild-recaps-regenerate";
+  const sessionId = "session-recaps-regenerate";
+  await seedSessionAndLedger(guildId, sessionId);
+
+  const {
+    generateSessionRecap,
+    regenerateSessionRecap,
+    getSessionRecap,
+  } = await import("../sessions/sessionRecaps.js");
+
+  await generateSessionRecap(
+    { guildId, sessionId },
+    {
+      generateStyleRecap: async ({ strategy }) => ({
+        text: `v1-${strategy}`,
+        createdAtMs: Date.now(),
+        strategy,
+        engine: "megameecap",
+        strategyVersion: "megameecap-final-v1",
+        baseVersion: "megameecap-base-v1",
+        finalVersion: "megameecap-final-v1",
+        sourceTranscriptHash: "hash-v1",
+        cacheHit: false,
+        artifactPaths: {
+          recapPath: `${strategy}-v1.md`,
+          metaPath: `${strategy}-v1.json`,
+        },
+      }),
+    }
+  );
+
+  const regenerated = await regenerateSessionRecap(
+    { guildId, sessionId, reason: "manual_qc" },
+    {
+      generateStyleRecap: async ({ strategy }) => ({
+        text: `v2-${strategy}`,
+        createdAtMs: Date.now() + 1,
+        strategy,
+        engine: "megameecap",
+        strategyVersion: "megameecap-final-v1",
+        baseVersion: "megameecap-base-v1",
+        finalVersion: "megameecap-final-v1",
+        sourceTranscriptHash: "hash-v2",
+        cacheHit: false,
+        artifactPaths: {
+          recapPath: `${strategy}-v2.md`,
+          metaPath: `${strategy}-v2.json`,
+        },
+      }),
+    }
+  );
+
+  expect(regenerated.views.balanced).toBe("v2-balanced");
+  const loaded = getSessionRecap(guildId, sessionId);
+  expect(loaded?.views.concise).toBe("v2-concise");
+  expect(loaded?.views.balanced).toBe("v2-balanced");
+  expect(loaded?.views.detailed).toBe("v2-detailed");
+  expect(loaded?.metaJson).toContain("manual_qc");
+});
+
+test("generateSessionRecap maps missing transcript and invalid output to typed recap-domain errors", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-session-recaps-errors-"));
+  tempDirs.push(tempDir);
+  configureHermeticEnv(tempDir);
+
+  const guildId = "guild-recaps-errors";
+  const sessionId = "session-recaps-errors";
+  await seedSessionAndLedger(guildId, sessionId);
+
+  const {
+    generateSessionRecap,
+    RecapDomainError,
+    isRecapDomainError,
+  } = await import("../sessions/sessionRecaps.js");
+
+  await expect(
+    generateSessionRecap(
+      { guildId, sessionId },
+      {
+        generateStyleRecap: async () => {
+          throw new Error(`No transcript lines found for session ${sessionId}`);
+        },
+      }
+    )
+  ).rejects.toMatchObject({
+    code: "RECAP_TRANSCRIPT_UNAVAILABLE",
+  });
+
+  await expect(
+    generateSessionRecap(
+      { guildId, sessionId },
+      {
+        generateStyleRecap: async ({ strategy }) => ({
+          text: strategy === "balanced" ? "   " : `${strategy}-ok`,
+          createdAtMs: Date.now(),
+          strategy,
+          engine: "megameecap",
+          strategyVersion: "megameecap-final-v1",
+          baseVersion: "megameecap-base-v1",
+          finalVersion: "megameecap-final-v1",
+          sourceTranscriptHash: "hash-invalid",
+          cacheHit: false,
+          artifactPaths: {
+            recapPath: `${strategy}.md`,
+            metaPath: `${strategy}.json`,
+          },
+        }),
+      }
+    )
+  ).rejects.toMatchObject({
+    code: "RECAP_INVALID_OUTPUT",
+  });
+
+  const error = new RecapDomainError("RECAP_GENERATION_FAILED", "boom");
+  expect(isRecapDomainError(error)).toBe(true);
+  expect(isRecapDomainError(new Error("plain"))).toBe(false);
 });
