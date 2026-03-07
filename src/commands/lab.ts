@@ -431,54 +431,8 @@ const wakeLab: LegacyCommand = {
     ),
 
   async execute(interaction: any): Promise<void> {
-    const guildId = interaction.guildId as string | null;
-    if (!guildId) {
-      await interaction.reply({ content: "Guild context is required.", ephemeral: true });
-      return;
-    }
-
-    const kindOpt = (interaction.options.getString("kind", false) ?? "canon") as LabWakeKind;
-    const labelOpt = interaction.options.getString("label", false);
-    const result = resolveOrStartLabSession({
-      guildId,
-      requestedKind: kindOpt,
-      label: labelOpt,
-      startedById: interaction.user?.id ?? null,
-      startedByName: interaction.user?.displayName ?? interaction.user?.username ?? null,
-    });
-
-    const sessionTitle = formatSessionTitle(result.session);
-    const sessionDetails = `Session: ${sessionTitle} • started ${formatStartedAtUtc(result.session.started_at_ms)}`;
-
-    if (result.action === "reused-official") {
-      await interaction.reply({
-        content: [
-          "Using existing official canon session (no changes made).",
-          sessionDetails,
-          "No lab session created because an official canon session is active.",
-          "Use /lab session-view or /meepo sessions list to inspect sessions.",
-        ].join("\n"),
-        ephemeral: true,
-      });
-      return;
-    }
-
-    if (result.action === "reused-existing") {
-      await interaction.reply({
-        content: [
-          `Using existing session: ${sessionTitle}`,
-          sessionDetails,
-        ].join("\n"),
-        ephemeral: true,
-      });
-      return;
-    }
-
     await interaction.reply({
-      content: [
-        `Started lab session: ${sessionTitle} in <#${interaction.channelId}>`,
-        sessionDetails,
-      ].join("\n"),
+      content: "Moved: use `/meepo showtime start` for session start.",
       ephemeral: true,
     });
   },
