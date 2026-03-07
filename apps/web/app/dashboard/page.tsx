@@ -1,10 +1,18 @@
 import Link from "next/link";
 import { ArchiveShell } from "@/components/layout/archive-shell";
 import { EmptyState } from "@/components/shared/empty-state";
-import { getDashboardModel } from "@/lib/server/readers";
+import { StatusChip } from "@/components/shared/status-chip";
+import { getCampaignsApi } from "@/lib/api/campaigns";
 
-export default async function DashboardPage() {
-  const model = await getDashboardModel();
+export const dynamic = "force-dynamic";
+
+type PageProps = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function DashboardPage({ searchParams }: PageProps) {
+  const query = await searchParams;
+  const { dashboard: model } = await getCampaignsApi(query);
 
   if (model.campaigns.length === 0) {
     return (
@@ -45,6 +53,14 @@ export default async function DashboardPage() {
             >
               <div className="text-xs uppercase tracking-widest text-primary/80">{campaign.guildName}</div>
               <h2 className="mt-1 text-2xl font-serif">{campaign.name}</h2>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <StatusChip label={`${campaign.sessionCount} sessions`} tone="info" />
+                {campaign.sessions.some((session) => session.status === "in_progress") ? (
+                  <StatusChip label="Active" tone="warning" />
+                ) : (
+                  <StatusChip label="Archive stable" tone="success" />
+                )}
+              </div>
               <p className="mt-2 text-sm text-muted-foreground">
                 {campaign.sessionCount} sessions / last session {campaign.lastSessionDate ?? "n/a"}
               </p>

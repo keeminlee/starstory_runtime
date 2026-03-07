@@ -63,6 +63,32 @@ Once running, invite Meepo to your Discord server and awaken her with:
 /meepo awaken
 ```
 
+### Run Web Archive Viewer (Next.js)
+
+The archive viewer now lives in `apps/web` and uses Next App Router.
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
+
+Web routes:
+
+- `/`
+- `/dashboard`
+- `/campaigns/[campaignSlug]`
+- `/sessions/[sessionId]`
+
+Useful local web env toggles:
+
+- `MEEPO_WEB_GUILD_ID=<guild_id>` to set default guild scope
+- `DEV_WEB_BYPASS=1` to allow local header/query guild override in non-production
+
+Current web build note:
+
+- `next build` in `apps/web` currently skips lint (`eslint.ignoreDuringBuilds`) as a temporary milestone tradeoff.
+
 ---
 
 ## Core Command Groups

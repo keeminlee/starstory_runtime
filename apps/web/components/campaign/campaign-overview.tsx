@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Calendar, ChevronRight, FileText, MessageSquare } from "lucide-react";
+import { Calendar, ChevronRight } from "lucide-react";
+import { StatusChip } from "@/components/shared/status-chip";
 import type { CampaignSummary } from "@/lib/types";
 
 type CampaignOverviewProps = {
@@ -7,6 +8,12 @@ type CampaignOverviewProps = {
 };
 
 export function CampaignOverview({ campaign }: CampaignOverviewProps) {
+  const artifactTone = (status: "available" | "missing" | "unavailable") => {
+    if (status === "available") return "success" as const;
+    if (status === "unavailable") return "danger" as const;
+    return "warning" as const;
+  };
+
   return (
     <div className="space-y-8">
       <header>
@@ -27,8 +34,9 @@ export function CampaignOverview({ campaign }: CampaignOverviewProps) {
                 <h2 className="mt-1 text-2xl font-serif group-hover:text-primary">{session.title}</h2>
                 <div className="mt-3 flex flex-wrap items-center gap-4 text-xs uppercase tracking-wider text-muted-foreground">
                   <span className="inline-flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />{session.date}</span>
-                  <span className={`inline-flex items-center gap-1 ${session.transcriptAvailable ? "text-green-400" : "text-amber-300"}`}><MessageSquare className="h-3.5 w-3.5" />Transcript</span>
-                  <span className={`inline-flex items-center gap-1 ${session.recapAvailable ? "text-blue-300" : "text-amber-300"}`}><FileText className="h-3.5 w-3.5" />Recap</span>
+                  <StatusChip label={session.status === "in_progress" ? "In progress" : "Completed"} tone={session.status === "in_progress" ? "warning" : "neutral"} />
+                  <StatusChip label={`Transcript ${session.artifacts.transcript}`} tone={artifactTone(session.artifacts.transcript)} />
+                  <StatusChip label={`Recap ${session.artifacts.recap}`} tone={artifactTone(session.artifacts.recap)} />
                 </div>
               </div>
               <ChevronRight className="h-5 w-5 text-primary opacity-70" />

@@ -1,24 +1,29 @@
-import {
-  MOCK_DASHBOARD,
-  getMockCampaignBySlug,
-  getMockCampaigns,
-  getMockSessionById,
-} from "@/lib/mock/data";
 import type { CampaignSummary, DashboardModel, SessionDetail } from "@/lib/types";
 
-// B0 uses typed mock adapters only; B1 swaps internals to canonical session/transcript/recap readers.
-export async function getDashboardModel(): Promise<DashboardModel> {
-  return MOCK_DASHBOARD;
+export async function getDashboardModel(searchParams?: Record<string, string | string[] | undefined>): Promise<DashboardModel> {
+  const { getWebDashboardModel } = await import("@/lib/server/campaignReaders");
+  return getWebDashboardModel({ searchParams });
 }
 
-export async function listCampaigns(): Promise<CampaignSummary[]> {
-  return getMockCampaigns();
+export async function listCampaigns(searchParams?: Record<string, string | string[] | undefined>): Promise<CampaignSummary[]> {
+  const { getWebDashboardModel } = await import("@/lib/server/campaignReaders");
+  const model = await getWebDashboardModel({ searchParams });
+  return model.campaigns;
 }
 
-export async function getCampaignDetail(campaignSlug: string): Promise<CampaignSummary | null> {
-  return getMockCampaignBySlug(campaignSlug);
+export async function getCampaignDetail(
+  campaignSlug: string,
+  searchParams?: Record<string, string | string[] | undefined>
+): Promise<CampaignSummary | null> {
+  const { getWebCampaignDetail } = await import("@/lib/server/campaignReaders");
+  return getWebCampaignDetail({ campaignSlug, searchParams });
 }
 
 export async function getSessionDetail(sessionId: string): Promise<SessionDetail | null> {
-  return getMockSessionById(sessionId);
+  try {
+    const { getWebSessionDetail } = await import("@/lib/server/sessionReaders");
+    return await getWebSessionDetail({ sessionId });
+  } catch {
+    return null;
+  }
 }

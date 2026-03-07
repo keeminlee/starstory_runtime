@@ -3,6 +3,7 @@ import type { CampaignSummary, DashboardModel, SessionDetail } from "@/lib/types
 const SESSIONS: SessionDetail[] = [
   {
     id: "s1",
+    guildId: "guild-recaps-api",
     campaignSlug: "shattered-crown",
     campaignName: "The Shattered Crown",
     title: "The Frozen Pass",
@@ -50,9 +51,15 @@ const SESSIONS: SessionDetail[] = [
       generatedAt: "2026-01-14T22:05:00.000Z",
       modelVersion: "megameecap-final-v1",
     },
+    artifacts: {
+      transcript: "available",
+      recap: "available",
+    },
+    warnings: [],
   },
   {
     id: "s2",
+    guildId: "guild-recaps-api",
     campaignSlug: "shattered-crown",
     campaignName: "The Shattered Crown",
     title: "The Whispering Woods",
@@ -88,6 +95,11 @@ const SESSIONS: SessionDetail[] = [
       generatedAt: "2026-01-21T22:15:00.000Z",
       modelVersion: "megameecap-final-v1",
     },
+    artifacts: {
+      transcript: "available",
+      recap: "available",
+    },
+    warnings: [],
   },
 ];
 
@@ -105,8 +117,12 @@ const CAMPAIGNS: CampaignSummary[] = [
       title: session.title,
       date: session.date,
       status: session.status,
-      transcriptAvailable: session.transcript.length > 0,
-      recapAvailable: session.recap !== null,
+      source: session.source,
+      artifacts: {
+        transcript: session.artifacts.transcript,
+        recap: session.artifacts.recap,
+      },
+      warnings: session.warnings,
     })),
   },
 ];

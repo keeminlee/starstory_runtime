@@ -1,9 +1,23 @@
-# Meepo Bot - Current State (March 6, 2026)
+# Meepo Bot - Current State (March 7, 2026)
 
 For documentation navigation, start at [README.md](README.md).
 
-**Status:** V0 complete, MeepoMind (V0.1) Phase 2-3 in progress + Sprint 3 hardening closure complete  
-**Last Updated:** March 6, 2026
+**Status:** V0 complete, MeepoMind (V0.1) Phase 2-3 in progress + Sprint 3 hardening closure complete + Track B web archive viewer complete  
+**Last Updated:** March 7, 2026
+
+## Track B Complete (Web Archive Viewer)
+
+- Web archive viewer is now first-class under `apps/web` (Next App Router).
+- Real web routes:
+  - `/`
+  - `/dashboard`
+  - `/campaigns/[campaignSlug]`
+  - `/sessions/[sessionId]`
+- Canonical reads now power dashboard, campaign, and session flows via the internal API boundary.
+- Recap regenerate action and transcript/recap downloads (`.txt` and `.json`) are live on session detail.
+- Artifact-aware states are implemented for missing/unavailable recap/transcript conditions.
+- Dev bypass for local web scope overrides is available only behind explicit env gate (`DEV_WEB_BYPASS=1`) and non-production mode.
+- Known tradeoff: web lint is currently skipped during `next build` (`apps/web/next.config.ts`) to avoid a flat-config/plugin detection mismatch during this milestone checkpoint.
 
 ---
 

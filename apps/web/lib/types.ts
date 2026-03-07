@@ -2,13 +2,22 @@ export type RecapTab = "concise" | "balanced" | "detailed";
 
 export type SessionStatus = "completed" | "in_progress";
 
+export type SessionArtifactStatus =
+  | "available"
+  | "missing"
+  | "unavailable";
+
 export type SessionSummary = {
   id: string;
   title: string;
   date: string;
   status: SessionStatus;
-  transcriptAvailable: boolean;
-  recapAvailable: boolean;
+  source: "live" | "ingest";
+  artifacts: {
+    transcript: SessionArtifactStatus;
+    recap: SessionArtifactStatus;
+  };
+  warnings: string[];
 };
 
 export type CampaignSummary = {
@@ -44,8 +53,14 @@ export type SessionDetail = {
   date: string;
   status: SessionStatus;
   source: "live" | "ingest";
+  guildId: string;
   transcript: TranscriptEntry[];
   recap: SessionRecap | null;
+  artifacts: {
+    transcript: SessionArtifactStatus;
+    recap: SessionArtifactStatus;
+  };
+  warnings: string[];
 };
 
 export type DashboardModel = {
