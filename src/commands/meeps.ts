@@ -13,7 +13,6 @@ import { SlashCommandBuilder, TextChannel, GuildMember } from 'discord.js';
 import { log } from '../utils/logger.js';
 import { loadRegistryForScope } from '../registry/loadRegistry.js';
 import { getActiveMeepo } from '../meepo/state.js';
-import { getDiscordClient } from '../bot.js';
 import {
   getMeepBalance,
   getMeepHistory,
@@ -25,6 +24,12 @@ import { isElevated } from '../security/isElevated.js';
 import type { CommandCtx } from './index.js';
 
 const meepsLog = log.withScope("meeps");
+
+async function loadDiscordClientForMeepLog() {
+  // Lazy import avoids booting Gateway side effects during deploy-time manifest imports.
+  const mod = await import("../bot.js");
+  return mod.getDiscordClient();
+}
 
 /**
  * Resolve a Discord user to a registered PC
@@ -163,7 +168,7 @@ async function handleSpend(interaction: any, guildId: string, campaignSlug: stri
   try {
     const meepo = getActiveMeepo(guildId);
     if (meepo) {
-      const client = getDiscordClient();
+      const client = await loadDiscordClientForMeepLog();
       const channel = await client.channels.fetch(meepo.channel_id) as TextChannel;
       if (channel?.isTextBased()) {
         await channel.send(`📋 ${invoker.username} spent 1 meep (balance: ${oldBalance} → ${newBalance})`);
@@ -245,7 +250,7 @@ async function handleReward(interaction: any, guildId: string, campaignSlug: str
   try {
     const meepo = getActiveMeepo(guildId);
     if (meepo) {
-      const client = getDiscordClient();
+      const client = await loadDiscordClientForMeepLog();
       const channel = await client.channels.fetch(meepo.channel_id) as TextChannel;
       if (channel?.isTextBased()) {
         await channel.send(`🎁 ${dm?.displayName ?? interaction.user.username} awarded 1 meep to ${targetPC.canonical_name} (balance: ${currentBalance} → ${newBalance})`);

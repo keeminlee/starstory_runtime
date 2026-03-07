@@ -6,7 +6,6 @@
 import { SlashCommandBuilder, TextChannel, GuildMember } from "discord.js";
 import { log } from "../utils/logger.js";
 import { getActiveMeepo } from "../meepo/state.js";
-import { getDiscordClient } from "../bot.js";
 import { getMeepBalance } from "../meeps/meeps.js";
 import { creditMeep, MEEP_MAX_BALANCE } from "../meeps/engine.js";
 import { getMissionById, listMissions } from "../missions/loadMissions.js";
@@ -16,6 +15,12 @@ import { loadRegistryForScope } from "../registry/loadRegistry.js";
 import type { CommandCtx } from "./index.js";
 
 const missionsLog = log.withScope("missions");
+
+async function loadDiscordClientForMissionLog() {
+  // Lazy import avoids booting Gateway side effects during deploy-time manifest imports.
+  const mod = await import("../bot.js");
+  return mod.getDiscordClient();
+}
 
 function resolvePcFromUser(
   user: any,
@@ -130,7 +135,7 @@ async function handleClaim(
       try {
         const meepo = getActiveMeepo(guildId);
         if (meepo) {
-          const client = getDiscordClient();
+          const client = await loadDiscordClientForMissionLog();
           const channel = (await client.channels.fetch(meepo.channel_id)) as TextChannel;
           if (channel?.isTextBased()) {
             const issuer = interaction.member?.displayName ?? interaction.user.username;
