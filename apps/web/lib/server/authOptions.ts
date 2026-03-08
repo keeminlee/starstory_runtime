@@ -19,6 +19,10 @@ type NextAuthOptionsWithTrustHost = NextAuthOptions & {
   trustHost: true;
 };
 
+const isProduction = process.env.NODE_ENV === "production";
+const securePrefix = isProduction ? "__Secure-" : "";
+const csrfPrefix = isProduction ? "__Host-" : "";
+
 async function fetchDiscordGuilds(accessToken: string): Promise<DiscordGuild[]> {
   const response = await fetch("https://discord.com/api/users/@me/guilds", {
     headers: {
@@ -57,6 +61,36 @@ async function fetchDiscordGuildsSafe(accessToken: string): Promise<{ ok: boolea
 
 export const authOptions: NextAuthOptionsWithTrustHost = {
   trustHost: true,
+  useSecureCookies: isProduction,
+  cookies: {
+    state: {
+      name: `${securePrefix}next-auth.state`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: isProduction,
+        maxAge: 900,
+      },
+    },
+    callbackUrl: {
+      name: `${securePrefix}next-auth.callback-url`,
+      options: {
+        sameSite: "lax",
+        path: "/",
+        secure: isProduction,
+      },
+    },
+    csrfToken: {
+      name: `${csrfPrefix}next-auth.csrf-token`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: isProduction,
+      },
+    },
+  },
   session: {
     strategy: "jwt",
   },
