@@ -15,6 +15,10 @@ type DiscordGuild = {
   permissions?: string;
 };
 
+type NextAuthOptionsWithTrustHost = NextAuthOptions & {
+  trustHost: true;
+};
+
 async function fetchDiscordGuilds(accessToken: string): Promise<DiscordGuild[]> {
   const response = await fetch("https://discord.com/api/users/@me/guilds", {
     headers: {
@@ -51,7 +55,8 @@ async function fetchDiscordGuildsSafe(accessToken: string): Promise<{ ok: boolea
   }
 }
 
-export const authOptions: NextAuthOptions = {
+export const authOptions: NextAuthOptionsWithTrustHost = {
+  trustHost: true,
   session: {
     strategy: "jwt",
   },
