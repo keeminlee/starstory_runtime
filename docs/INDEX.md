@@ -6,6 +6,7 @@ Primary documentation entrypoints for active architecture lanes.
 - [START_HERE.md](START_HERE.md) — first-time DM onboarding path
 - [MAP.md](MAP.md) — runtime and subsystem map
 - [CURRENT_STATE.md](CURRENT_STATE.md) — current implementation status
+- [../apps/web/README.md](../apps/web/README.md) — web archive runtime routes and scope/edit doctrine
 - [ops/ENV.md](ops/ENV.md) — runtime and deploy environment contract
 - [awakening/ARCHITECTURE.md](awakening/ARCHITECTURE.md) — Awakening Runtime guarantees and invariants
 - [awakening/SCRIPTS.md](awakening/SCRIPTS.md) — script authoring/runtime contract
@@ -20,4 +21,4 @@ Lane-specific references:
 Artifacts:
 
 - Silver-Seq artifacts: `data/artifacts/silver_seq/<session>/<run_id>/`
-- Campaign-scoped live events export: `data/campaigns/<campaign>/exports/events/`
+- Campaign-scoped live events export: `data/campaigns/g_<guild>__c_<campaign>/exports/events/`

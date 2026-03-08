@@ -1,9 +1,27 @@
-# Meepo Bot - Current State (March 7, 2026)
+# Meepo Bot - Current State (March 8, 2026)
 
 For documentation navigation, start at [README.md](README.md).
 
 **Status:** V0 complete, MeepoMind (V0.1) Phase 2-3 in progress + Sprint 3 hardening closure complete + Track B web archive viewer complete  
-**Last Updated:** March 7, 2026
+**Last Updated:** March 8, 2026
+
+## Campaign Scope Foundations (Current Doctrine)
+
+The runtime now uses a two-layer campaign scope model:
+
+- runtime container: `guild_id`
+- ambient/meta scope: `guild_config.meta_campaign_slug` (durable guild home)
+- showtime canon scope: guild-scoped showtime campaign records (`guild_campaigns`)
+
+Operational semantics:
+
+- `/meepo awaken` creates or confirms one durable `meta_campaign_slug` for the guild and does not regenerate it on later awakens.
+- `/meepo showtime start` now requires explicit campaign intent:
+  - reuse existing showtime campaign via `campaign`
+  - create new showtime campaign via `campaign_name`
+- showtime sessions bind to explicit showtime campaign slugs (not inferred from meta scope).
+- one active session per guild remains unchanged (`idx_one_active_session_per_guild`).
+- legacy/default fallback behavior is compatibility-only; new write paths do not create `homebrew_campaign_*` style slugs.
 
 ## Track C Complete (Discord Auth + Secure Scope)
 
@@ -14,15 +32,56 @@ For documentation navigation, start at [README.md](README.md).
 - Session detail/transcript/recap/regenerate enforce ownership in reader/action code, not in route handlers.
 - Implicit env guild fallback is removed; local fallback requires explicit dev bypass (`DEV_WEB_BYPASS=1` in non-production).
 
+## Campaign Identity Hardening Sprint (Phases 1-4)
+
+Route compatibility doctrine:
+
+- slug-only URLs are preserved for compatibility (`/campaigns/[campaignSlug]/...`)
+- slug alone is no longer authoritative campaign identity
+- canonical campaign identity is `guild_id + campaign_slug`
+
+Web/API disambiguation contract:
+
+- canonical route disambiguator is `guild_id` query param on slug routes
+- active campaign context now persists composite selection (`slug`, `guildId`) rather than slug-only local storage
+- server campaign resolution is explicit:
+  - if `guild_id` is provided, resolve only that authorized guild scope
+  - if `guild_id` is absent and slug matches multiple authorized guilds, return explicit ambiguity (`409 ambiguous_campaign_scope`)
+
+Ambiguity flow doctrine:
+
+- Case A (active context certainty): client has composite selection and passes both `campaign_slug` (route) and `guild_id` (query); no ambiguity remains
+- Case B (cold slug URL): server may detect multiple authorized guild matches and returns explicit ambiguity so UI requests guild disambiguation
+
+Storage/materialization hardening (Phase 4):
+
+- canonical campaign data roots are now guild-scoped directory keys:
+  - `data/campaigns/g_<guild>__c_<campaign>/...`
+  - `data/registry/g_<guild>__c_<campaign>/...`
+- legacy slug-only roots are compatibility-read fallback only during migration windows
+- migration tool is available for scoped backfill:
+  - `npx tsx src/tools/migrate-campaign-scope-paths.ts --dry-run`
+  - `npx tsx src/tools/migrate-campaign-scope-paths.ts`
+
 ## Track B Complete (Web Archive Viewer)
 
 - Web archive viewer is now first-class under `apps/web` (Next App Router).
 - Real web routes:
   - `/`
   - `/dashboard`
-  - `/campaigns/[campaignSlug]`
-  - `/sessions/[sessionId]`
+  - `/settings`
+  - `/campaigns/[campaignSlug]/sessions`
+  - `/campaigns/[campaignSlug]/sessions/[sessionId]`
+  - `/campaigns/[campaignSlug]/compendium`
 - Canonical reads now power dashboard, campaign, and session flows via the internal API boundary.
+- Campaign metadata editing is live in web:
+  - campaign rename (`PATCH /api/campaigns/[campaignSlug]`) with immutable slug identity
+  - session label edit (`PATCH /api/sessions/[sessionId]`) writing canonical `sessions.label`
+- Campaign/session display naming is centralized in shared helpers (`apps/web/lib/campaigns/display.ts`).
+- Web edit doctrine:
+  - campaign rename upsert is allowed only after proving slug ownership in authorized guild scope
+  - session label mutation updates canonical session row only (no shadow label store)
+  - UI edit flows use optimistic updates with rollback + user-safe error + canonical refetch
 - Recap regenerate action and transcript/recap downloads (`.txt` and `.json`) are live on session detail.
 - Artifact-aware states are implemented for missing/unavailable recap/transcript conditions.
 - Dev bypass for local web scope overrides is available only behind explicit env gate (`DEV_WEB_BYPASS=1`) and non-production mode.
