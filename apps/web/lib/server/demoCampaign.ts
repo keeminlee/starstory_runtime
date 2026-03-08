@@ -6,6 +6,7 @@ const DEMO_CAMPAIGN_SLUG = "demo";
 const DEMO_SESSIONS: SessionSummary[] = [
   {
     id: "demo-s1",
+    label: "Arrival at Moonwell Hollow",
     title: "Arrival at Moonwell Hollow",
     date: "2026-03-01",
     status: "completed",
@@ -18,6 +19,7 @@ const DEMO_SESSIONS: SessionSummary[] = [
   },
   {
     id: "demo-s2",
+    label: "The Lantern Archive Heist",
     title: "The Lantern Archive Heist",
     date: "2026-03-05",
     status: "in_progress",
@@ -35,6 +37,7 @@ const DEMO_SESSION_DETAILS: Record<string, SessionDetail> = {
     id: "demo-s1",
     campaignSlug: DEMO_CAMPAIGN_SLUG,
     campaignName: "Demo Campaign",
+    label: "Arrival at Moonwell Hollow",
     title: "Arrival at Moonwell Hollow",
     date: "2026-03-01",
     status: "completed",
@@ -80,6 +83,7 @@ const DEMO_SESSION_DETAILS: Record<string, SessionDetail> = {
     id: "demo-s2",
     campaignSlug: DEMO_CAMPAIGN_SLUG,
     campaignName: "Demo Campaign",
+    label: "The Lantern Archive Heist",
     title: "The Lantern Archive Heist",
     date: "2026-03-05",
     status: "in_progress",
@@ -126,6 +130,7 @@ const DEMO_SESSION_DETAILS: Record<string, SessionDetail> = {
 export function getDemoCampaignSummary(): CampaignSummary {
   return {
     slug: DEMO_CAMPAIGN_SLUG,
+    guildId: DEMO_GUILD_ID,
     name: "Demo Campaign",
     guildName: "System Demo",
     description: "Guided sample archive with example sessions, recaps, and compendium entries.",

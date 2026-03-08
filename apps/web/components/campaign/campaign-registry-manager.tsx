@@ -25,6 +25,7 @@ const TABS: Array<{ key: RegistryCategoryKey | "pending" | "ignore"; label: stri
 
 type CampaignRegistryManagerProps = {
   campaignSlug: string;
+  guildId?: string | null;
   initialRegistry: RegistrySnapshotDto;
   searchParams?: Record<string, string | string[] | undefined>;
   isEditable?: boolean;
@@ -49,6 +50,7 @@ function normalizeCsvAliases(value: string): string[] {
 
 export function CampaignRegistryManager({
   campaignSlug,
+  guildId,
   initialRegistry,
   searchParams,
   isEditable = true,
@@ -116,6 +118,14 @@ export function CampaignRegistryManager({
     return registry.ignoreTokens.filter((token) => token.toLowerCase().includes(q));
   }, [query, registry.ignoreTokens]);
 
+  const scopedSearchParams = useMemo(
+    () => ({
+      ...(searchParams ?? {}),
+      ...(guildId ? { guild_id: guildId } : {}),
+    }),
+    [guildId, searchParams]
+  );
+
   async function withUpdate(action: () => Promise<RegistrySnapshotDto>, successMessage: string) {
     setIsPending(true);
     setError(null);
@@ -150,7 +160,7 @@ export function CampaignRegistryManager({
             ? { discordUserId: newDiscordUserId.trim() }
             : {}),
         },
-        searchParams
+        scopedSearchParams
       );
       return response.registry;
     }, `Added ${canonicalName}.`);
@@ -182,7 +192,7 @@ export function CampaignRegistryManager({
           notes,
           ...(entity.category === "pcs" ? { discordUserId: discordUserId || null } : {}),
         },
-        searchParams
+        scopedSearchParams
       );
       return response.registry;
     }, `Updated ${canonicalName || entity.canonicalName}.`);
@@ -199,7 +209,7 @@ export function CampaignRegistryManager({
           key,
           category,
         },
-        searchParams
+        scopedSearchParams
       );
       return response.registry;
     }, "Pending candidate promoted.");
@@ -213,7 +223,7 @@ export function CampaignRegistryManager({
           action: "reject",
           key,
         },
-        searchParams
+        scopedSearchParams
       );
       return response.registry;
     }, "Pending candidate rejected and added to ignore.");
@@ -227,7 +237,7 @@ export function CampaignRegistryManager({
           action: "delete",
           key,
         },
-        searchParams
+        scopedSearchParams
       );
       return response.registry;
     }, "Pending candidate removed.");

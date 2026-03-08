@@ -1,10 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import yaml from "yaml";
-import { resolveWebAuthContext, WebAuthError } from "@/lib/server/authContext";
-import { listWebCampaignsForGuilds } from "@/lib/server/campaignReaders";
+import { getWebCampaignDetail } from "@/lib/server/campaignReaders";
 import { WebDataError } from "@/lib/mappers/errorMappers";
-import { getDemoCampaignSummary } from "@/lib/server/demoCampaign";
 import type {
   RegistryCategoryKey,
   RegistryCreateEntryRequest,
@@ -261,25 +259,7 @@ function loadRegistryIndex(campaignSlug: string): TolerantRegistryIndex {
 }
 
 async function getAuthorizedCampaign(campaignSlug: string, searchParams?: QueryInput) {
-  let auth = null as Awaited<ReturnType<typeof resolveWebAuthContext>> | null;
-  try {
-    auth = await resolveWebAuthContext(searchParams);
-  } catch (error) {
-    if (error instanceof WebAuthError && error.reason === "unsigned") {
-      if (campaignSlug === "demo") {
-        return getDemoCampaignSummary();
-      }
-      throw new WebDataError("unauthorized", 401, "Sign-in required for campaign compendium access.");
-    }
-    throw error;
-  }
-
-  const model = await listWebCampaignsForGuilds({
-    authorizedGuildIds: auth.authorizedGuildIds,
-    authorizedGuilds: auth.authorizedGuilds,
-  });
-
-  const campaign = model.campaigns.find((item) => item.slug === campaignSlug);
+  const campaign = await getWebCampaignDetail({ campaignSlug, searchParams });
   if (!campaign) {
     throw new WebDataError("not_found", 404, `Campaign not found: ${campaignSlug}`);
   }

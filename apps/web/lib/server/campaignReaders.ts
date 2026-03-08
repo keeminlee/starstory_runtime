@@ -11,7 +11,10 @@ import {
 } from "@/lib/server/readData/archiveReadStore";
 import { getDemoCampaignSummary } from "@/lib/server/demoCampaign";
 import { ScopeGuardError } from "@/lib/server/scopeGuards";
+import { WebDataError } from "@/lib/mappers/errorMappers";
 import type { CampaignSummary, DashboardModel, SessionArtifactStatus, SessionSummary } from "@/lib/types";
+
+type QueryInput = Record<string, string | string[] | undefined> | undefined;
 
 function toIsoDate(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
@@ -44,6 +47,71 @@ function resolveGuildDisplayName(guildName?: string): string {
 
 function buildCampaignDescription(guildDisplayName: string): string {
   return `Canonical archive stream for ${guildDisplayName}.`;
+}
+
+function normalizeGuildId(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : null;
+}
+
+function readGuildIdDisambiguator(searchParams?: QueryInput): string | null {
+  const raw = searchParams?.guild_id ?? searchParams?.guildId;
+  if (Array.isArray(raw)) {
+    return normalizeGuildId(raw[0] ?? null);
+  }
+  return normalizeGuildId(typeof raw === "string" ? raw : null);
+}
+
+function readGuildNameById(auth: Awaited<ReturnType<typeof resolveWebAuthContext>>, guildId: string): string | undefined {
+  return auth.authorizedGuilds.find((guild) => guild.id === guildId)?.name;
+}
+
+function resolveGuildScopeForSlug(args: {
+  auth: Awaited<ReturnType<typeof resolveWebAuthContext>>;
+  campaignSlug: string;
+  searchParams?: QueryInput;
+}): { guildId: string; guildName?: string } | null {
+  const requestedGuildId = readGuildIdDisambiguator(args.searchParams);
+  const campaignSlug = args.campaignSlug.trim();
+  if (!campaignSlug) {
+    throw new ScopeGuardError("Campaign is out of scope for the authorized guild set.");
+  }
+
+  if (requestedGuildId) {
+    const inAuthorizedSet = args.auth.authorizedGuildIds.some((guildId) => guildId === requestedGuildId);
+    if (!inAuthorizedSet) {
+      throw new ScopeGuardError("Campaign is out of scope for the authorized guild set.");
+    }
+
+    if (!isCampaignSlugOwnedByGuild({ guildId: requestedGuildId, campaignSlug })) {
+      return null;
+    }
+
+    return {
+      guildId: requestedGuildId,
+      guildName: readGuildNameById(args.auth, requestedGuildId),
+    };
+  }
+
+  const matches: Array<{ guildId: string; guildName?: string }> = [];
+  for (const guildId of args.auth.authorizedGuildIds) {
+    if (!isCampaignSlugOwnedByGuild({ guildId, campaignSlug })) continue;
+    matches.push({ guildId, guildName: readGuildNameById(args.auth, guildId) });
+  }
+
+  if (matches.length === 0) {
+    return null;
+  }
+
+  if (matches.length > 1) {
+    throw new WebDataError(
+      "ambiguous_campaign_scope",
+      409,
+      `Campaign slug '${campaignSlug}' matches multiple authorized guilds. Provide guild_id to disambiguate.`
+    );
+  }
+
+  return matches[0] ?? null;
 }
 
 export async function listWebSessionsForCampaign(args: {
@@ -132,6 +200,7 @@ async function listWebCampaignForGuild(args: {
 
   const campaign: CampaignSummary = {
     slug: campaignSlug,
+    guildId: args.guildId,
     name: campaignName,
     guildName: guildDisplayName,
     description: buildCampaignDescription(guildDisplayName),
@@ -242,7 +311,7 @@ export async function getWebDashboardModel(args?: {
 
 export async function getWebCampaignDetail(args: {
   campaignSlug: string;
-  searchParams?: Record<string, string | string[] | undefined>;
+  searchParams?: QueryInput;
 }): Promise<CampaignSummary | null> {
   let auth = null as Awaited<ReturnType<typeof resolveWebAuthContext>> | null;
   try {
@@ -254,53 +323,58 @@ export async function getWebCampaignDetail(args: {
     throw error;
   }
 
-  for (const guildId of auth.authorizedGuildIds) {
-    if (!isCampaignSlugOwnedByGuild({ guildId, campaignSlug: args.campaignSlug })) {
-      continue;
-    }
+  const resolvedScope = resolveGuildScopeForSlug({
+    auth,
+    campaignSlug: args.campaignSlug,
+    searchParams: args.searchParams,
+  });
 
-    const detail = await listWebCampaignForGuild({
-      guildId,
-      guildName: auth.authorizedGuilds.find((guild) => guild.id === guildId)?.name,
-    });
+  if (!resolvedScope) {
+    return null;
+  }
 
-    if (detail?.campaign.slug === args.campaignSlug) {
-      return {
-        ...detail.campaign,
-        name: getGuildCampaignDisplayName({ guildId, campaignSlug: args.campaignSlug })
-          ?? prettifyCampaignSlug(args.campaignSlug),
-      };
-    }
+  const guildId = resolvedScope.guildId;
 
-    const sessions = await listWebSessionsForCampaign({
-      guildId,
-      campaignSlug: args.campaignSlug,
-      limit: 50,
-    });
-    const guildDisplayName = resolveGuildDisplayName(auth.authorizedGuilds.find((guild) => guild.id === guildId)?.name);
+  const detail = await listWebCampaignForGuild({
+    guildId,
+    guildName: resolvedScope.guildName,
+  });
 
+  if (detail?.campaign.slug === args.campaignSlug) {
     return {
-      slug: args.campaignSlug,
+      ...detail.campaign,
       name: getGuildCampaignDisplayName({ guildId, campaignSlug: args.campaignSlug })
         ?? prettifyCampaignSlug(args.campaignSlug),
-      guildName: guildDisplayName,
-      description: buildCampaignDescription(guildDisplayName),
-      sessionCount: sessions.length,
-      lastSessionDate: sessions[0]?.session.date ?? null,
-      sessions: sessions.map((entry) => entry.session),
-      type: "user",
-      editable: true,
-      persisted: true,
     };
   }
 
-  return null;
+  const sessions = await listWebSessionsForCampaign({
+    guildId,
+    campaignSlug: args.campaignSlug,
+    limit: 50,
+  });
+  const guildDisplayName = resolveGuildDisplayName(resolvedScope.guildName);
+
+  return {
+    slug: args.campaignSlug,
+    guildId,
+    name: getGuildCampaignDisplayName({ guildId, campaignSlug: args.campaignSlug })
+      ?? prettifyCampaignSlug(args.campaignSlug),
+    guildName: guildDisplayName,
+    description: buildCampaignDescription(guildDisplayName),
+    sessionCount: sessions.length,
+    lastSessionDate: sessions[0]?.session.date ?? null,
+    sessions: sessions.map((entry) => entry.session),
+    type: "user",
+    editable: true,
+    persisted: true,
+  };
 }
 
 export async function updateWebCampaignName(args: {
   campaignSlug: string;
   campaignName: string;
-  searchParams?: Record<string, string | string[] | undefined>;
+  searchParams?: QueryInput;
 }): Promise<CampaignSummary> {
   const auth = await resolveWebAuthContext(args.searchParams);
   const campaignSlug = args.campaignSlug.trim();
@@ -318,13 +392,12 @@ export async function updateWebCampaignName(args: {
     throw new Error("campaignName exceeds max length (100).");
   }
 
-  let ownerGuildId: string | null = null;
-  for (const guildId of auth.authorizedGuildIds) {
-    if (isCampaignSlugOwnedByGuild({ guildId, campaignSlug })) {
-      ownerGuildId = guildId;
-      break;
-    }
-  }
+  const resolvedScope = resolveGuildScopeForSlug({
+    auth,
+    campaignSlug,
+    searchParams: args.searchParams,
+  });
+  const ownerGuildId = resolvedScope?.guildId ?? null;
 
   // Upsert is allowed only after proving campaign slug ownership in authorized guild scope.
   if (!ownerGuildId) {

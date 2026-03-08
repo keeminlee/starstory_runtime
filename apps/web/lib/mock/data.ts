@@ -6,6 +6,7 @@ const SESSIONS: SessionDetail[] = [
     guildId: "guild-recaps-api",
     campaignSlug: "shattered-crown",
     campaignName: "The Shattered Crown",
+    label: "The Frozen Pass",
     title: "The Frozen Pass",
     date: "2026-01-14",
     status: "completed",
@@ -62,6 +63,7 @@ const SESSIONS: SessionDetail[] = [
     guildId: "guild-recaps-api",
     campaignSlug: "shattered-crown",
     campaignName: "The Shattered Crown",
+    label: "The Whispering Woods",
     title: "The Whispering Woods",
     date: "2026-01-21",
     status: "completed",
@@ -106,6 +108,7 @@ const SESSIONS: SessionDetail[] = [
 const CAMPAIGNS: CampaignSummary[] = [
   {
     slug: "shattered-crown",
+    guildId: "guild-recaps-api",
     name: "The Shattered Crown",
     guildName: "Northern Table",
     description:
@@ -114,6 +117,7 @@ const CAMPAIGNS: CampaignSummary[] = [
     lastSessionDate: "2026-01-21",
     sessions: SESSIONS.map((session) => ({
       id: session.id,
+      label: session.label,
       title: session.title,
       date: session.date,
       status: session.status,

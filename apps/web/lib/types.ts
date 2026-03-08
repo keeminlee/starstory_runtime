@@ -9,6 +9,7 @@ export type SessionArtifactStatus =
 
 export type SessionSummary = {
   id: string;
+  label: string | null;
   title: string;
   date: string;
   status: SessionStatus;
@@ -22,6 +23,7 @@ export type SessionSummary = {
 
 export type CampaignSummary = {
   slug: string;
+  guildId: string | null;
   name: string;
   guildName: string;
   description: string;
@@ -52,6 +54,7 @@ export type SessionDetail = {
   id: string;
   campaignSlug: string;
   campaignName: string;
+  label: string | null;
   title: string;
   date: string;
   status: SessionStatus;

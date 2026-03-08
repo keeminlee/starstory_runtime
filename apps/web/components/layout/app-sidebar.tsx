@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LayoutDashboard, BookOpen, History, Sparkles, SlidersHorizontal } from "lucide-react";
 import type { ComponentType } from "react";
-import { useCampaignContext } from "@/components/providers/campaign-context-provider";
+import { resolveCampaignTargetPath, useCampaignContext } from "@/components/providers/campaign-context-provider";
 
 type SidebarItem = {
   key: "dashboard" | "sessions" | "compendium" | "settings";
@@ -16,11 +16,15 @@ type SidebarItem = {
 
 export function AppSidebar() {
   const pathname = usePathname();
-  const { activeCampaignSlug } = useCampaignContext();
+  const { activeCampaignSlug, activeGuildId } = useCampaignContext();
 
   const hasActiveCampaign = Boolean(activeCampaignSlug);
-  const sessionsHref = hasActiveCampaign ? `/campaigns/${activeCampaignSlug}/sessions` : "/dashboard";
-  const compendiumHref = hasActiveCampaign ? `/campaigns/${activeCampaignSlug}/compendium` : "/dashboard";
+  const sessionsHref = hasActiveCampaign
+    ? resolveCampaignTargetPath({ routeType: "campaign-sessions", campaignSlug: activeCampaignSlug ?? "", guildId: activeGuildId })
+    : "/dashboard";
+  const compendiumHref = hasActiveCampaign
+    ? resolveCampaignTargetPath({ routeType: "campaign-compendium", campaignSlug: activeCampaignSlug ?? "", guildId: activeGuildId })
+    : "/dashboard";
 
   const items: SidebarItem[] = [
     { key: "dashboard", href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },

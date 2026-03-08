@@ -5,6 +5,7 @@ export type WebDataErrorCode =
   | "unauthorized"
   | "not_found"
   | "invalid_request"
+  | "ambiguous_campaign_scope"
   | "conflict"
   | "transcript_unavailable"
   | "recap_unavailable"

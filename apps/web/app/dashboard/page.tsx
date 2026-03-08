@@ -82,8 +82,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         <div className="grid gap-4">
           {model.campaigns.map((campaign) => (
             <Link
-              key={campaign.slug}
-              href={`/campaigns/${campaign.slug}/sessions`}
+              key={`${campaign.slug}::${campaign.guildId ?? ""}`}
+              href={{
+                pathname: `/campaigns/${campaign.slug}/sessions`,
+                ...(campaign.guildId ? { query: { guild_id: campaign.guildId } } : {}),
+              }}
               className="rounded-xl card-glass p-6 transition-all hover:border-primary/40"
             >
               <div className="text-xs uppercase tracking-widest text-primary/80">{campaign.guildName}</div>

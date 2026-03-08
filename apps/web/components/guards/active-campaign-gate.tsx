@@ -1,14 +1,16 @@
 "use client";
 
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { CampaignsResponse } from "@/lib/api/types";
 import {
   resolveActiveCampaign,
   SYSTEM_DEMO_SLUG,
+  type CampaignSelection,
   type CampaignCandidate,
 } from "@/lib/campaigns/resolveActiveCampaign";
 import {
+  buildCampaignScopeKey,
   CampaignContextProvider,
   resolveCampaignRouteState,
   resolveCampaignTargetPath,
@@ -26,8 +28,12 @@ type DashboardAuthState = CampaignsResponse["dashboard"]["authState"];
 
 function mapCampaignOption(campaign: CampaignsResponse["dashboard"]["campaigns"][number]): CampaignSelectorOption {
   const type = campaign.type === "system" ? "system" : "user";
+  const guildId = campaign.guildId?.trim() ? campaign.guildId : null;
   return {
+    scopeKey: buildCampaignScopeKey({ campaignSlug: campaign.slug, guildId }),
     slug: campaign.slug,
+    guildId,
+    guildName: campaign.guildName,
     name: campaign.name,
     type,
     editable: campaign.editable ?? type !== "system",
@@ -35,34 +41,57 @@ function mapCampaignOption(campaign: CampaignsResponse["dashboard"]["campaigns"]
   };
 }
 
-function readPersistedCampaignSlug(): string | null {
-  if (typeof window === "undefined") return null;
-  const value = window.localStorage.getItem(ACTIVE_CAMPAIGN_STORAGE_KEY);
+function normalizeGuildId(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : null;
 }
 
-function writePersistedCampaignSlug(slug: string | null): void {
+function readPersistedCampaignSelection(): CampaignSelection | null {
+  if (typeof window === "undefined") return null;
+  const value = window.localStorage.getItem(ACTIVE_CAMPAIGN_STORAGE_KEY);
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed.length === 0) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed) as { slug?: unknown; guildId?: unknown };
+    if (typeof parsed.slug === "string" && parsed.slug.trim().length > 0) {
+      return {
+        slug: parsed.slug.trim(),
+        guildId: typeof parsed.guildId === "string" ? normalizeGuildId(parsed.guildId) : null,
+      };
+    }
+  } catch {
+    return {
+      slug: trimmed,
+      guildId: null,
+    };
+  }
+
+  return null;
+}
+
+function writePersistedCampaignSelection(selection: CampaignSelection | null): void {
   if (typeof window === "undefined") return;
-  if (!slug) {
+  if (!selection) {
     window.localStorage.removeItem(ACTIVE_CAMPAIGN_STORAGE_KEY);
     return;
   }
-  window.localStorage.setItem(ACTIVE_CAMPAIGN_STORAGE_KEY, slug);
+  window.localStorage.setItem(ACTIVE_CAMPAIGN_STORAGE_KEY, JSON.stringify(selection));
 }
 
 export function ActiveCampaignGate({ children }: ActiveCampaignGateProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
-  const route = useMemo(() => resolveCampaignRouteState(pathname), [pathname]);
+  const route = useMemo(() => resolveCampaignRouteState(pathname, searchParams), [pathname, searchParams]);
 
   const [campaigns, setCampaigns] = useState<CampaignSelectorOption[]>([]);
   const [loadState, setLoadState] = useState<CampaignLoadState>("loading");
   const [dashboardAuthState, setDashboardAuthState] = useState<DashboardAuthState>("ok");
-  const [persistedSlug, setPersistedSlug] = useState<string | null>(null);
+  const [persistedSelection, setPersistedSelection] = useState<CampaignSelection | null>(null);
 
   useEffect(() => {
-    setPersistedSlug(readPersistedCampaignSlug());
+    setPersistedSelection(readPersistedCampaignSelection());
   }, []);
 
   useEffect(() => {
@@ -115,14 +144,19 @@ export function ActiveCampaignGate({ children }: ActiveCampaignGateProps) {
     () =>
       resolveActiveCampaign({
         routeSlug: route.routeCampaignSlug,
-        persistedSlug,
+        routeGuildId: route.routeGuildId,
+        persistedSelection,
         campaigns: campaigns as CampaignCandidate[],
         allowDemoFallback: loadState !== "error" && dashboardAuthState !== "signed_in_no_authorized_campaigns",
       }),
-    [campaigns, dashboardAuthState, loadState, persistedSlug, route.routeCampaignSlug]
+    [campaigns, dashboardAuthState, loadState, persistedSelection, route.routeCampaignSlug, route.routeGuildId]
   );
 
   const activeCampaignSlug = resolved.resolvedSlug;
+  const activeGuildId = resolved.resolvedGuildId;
+  const activeScopeKey = activeCampaignSlug
+    ? buildCampaignScopeKey({ campaignSlug: activeCampaignSlug, guildId: activeGuildId })
+    : null;
   const isDemoCampaign = activeCampaignSlug === SYSTEM_DEMO_SLUG;
 
   const realCampaigns = useMemo(
@@ -133,37 +167,49 @@ export function ActiveCampaignGate({ children }: ActiveCampaignGateProps) {
   useEffect(() => {
     if (loadState !== "ready") return;
 
-    const selected = campaigns.find((campaign) => campaign.slug === activeCampaignSlug) ?? null;
+    const selected = campaigns.find((campaign) => campaign.scopeKey === activeScopeKey) ?? null;
     if (!selected || !selected.persisted) {
-      writePersistedCampaignSlug(null);
-      setPersistedSlug(null);
+      writePersistedCampaignSelection(null);
+      setPersistedSelection(null);
       return;
     }
 
-    const currentPersisted = readPersistedCampaignSlug();
-    if (currentPersisted !== selected.slug) {
-      writePersistedCampaignSlug(selected.slug);
-      setPersistedSlug(selected.slug);
+    const nextSelection: CampaignSelection = {
+      slug: selected.slug,
+      guildId: selected.guildId,
+    };
+    const currentPersisted = readPersistedCampaignSelection();
+    const changed =
+      currentPersisted?.slug !== nextSelection.slug
+      || currentPersisted?.guildId !== nextSelection.guildId;
+    if (changed) {
+      writePersistedCampaignSelection(nextSelection);
+      setPersistedSelection(nextSelection);
     }
-  }, [activeCampaignSlug, campaigns, loadState]);
+  }, [activeScopeKey, campaigns, loadState]);
 
   const selectCampaign = useCallback(
-    (campaignSlug: string) => {
-      if (!campaignSlug) return;
-      const targetCampaign = campaigns.find((campaign) => campaign.slug === campaignSlug);
+    (campaignScopeKey: string) => {
+      if (!campaignScopeKey) return;
+      const targetCampaign = campaigns.find((campaign) => campaign.scopeKey === campaignScopeKey);
       if (!targetCampaign) return;
 
       if (targetCampaign.persisted) {
-        writePersistedCampaignSlug(targetCampaign.slug);
-        setPersistedSlug(targetCampaign.slug);
+        const nextSelection: CampaignSelection = {
+          slug: targetCampaign.slug,
+          guildId: targetCampaign.guildId,
+        };
+        writePersistedCampaignSelection(nextSelection);
+        setPersistedSelection(nextSelection);
       } else {
-        writePersistedCampaignSlug(null);
-        setPersistedSlug(null);
+        writePersistedCampaignSelection(null);
+        setPersistedSelection(null);
       }
 
       const nextPath = resolveCampaignTargetPath({
         routeType: route.routeType,
         campaignSlug: targetCampaign.slug,
+        guildId: targetCampaign.guildId,
       });
       router.push(nextPath);
     },
@@ -174,6 +220,8 @@ export function ActiveCampaignGate({ children }: ActiveCampaignGateProps) {
     <CampaignContextProvider
       value={{
         activeCampaignSlug,
+        activeGuildId,
+        activeScopeKey,
         isDemoCampaign,
         route,
         campaigns,
