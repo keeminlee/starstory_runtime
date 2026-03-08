@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import path from "node:path";
+import Database from "better-sqlite3";
+
 type GuildMetadataRow = {
   guild_id: string;
   guild_name: string;
@@ -14,17 +18,66 @@ export type DiscordGuildDisplayMetadata = {
   lastSeenAtMs?: number | null;
 };
 
-let ensureTableOnce = false;
+const dbCache = new Map<string, Database.Database>();
+const ensuredTableByDbPath = new Set<string>();
 
-async function getControlDb() {
-  const { getControlDb } = await import("../../../../src/db.js");
-  return getControlDb();
+function resolveDataRoot(): string {
+  const explicitRoot = process.env.DATA_ROOT?.trim();
+  if (explicitRoot) {
+    return path.resolve(explicitRoot);
+  }
+
+  const candidateRoots = [
+    path.resolve(process.cwd(), "..", "..", "data"),
+    path.resolve(process.cwd(), "data"),
+  ];
+
+  function scoreDataRoot(root: string): number {
+    if (!fs.existsSync(root)) return -1;
+
+    let score = 0;
+    if (fs.existsSync(path.join(root, "campaigns"))) score += 4;
+    if (fs.existsSync(path.join(root, "control", "control.sqlite"))) score += 4;
+    if (fs.existsSync(path.join(root, "bot.sqlite"))) score += 2;
+    return score;
+  }
+
+  let bestRoot = candidateRoots[0];
+  let bestScore = scoreDataRoot(bestRoot);
+
+  for (const root of candidateRoots.slice(1)) {
+    const score = scoreDataRoot(root);
+    if (score > bestScore) {
+      bestRoot = root;
+      bestScore = score;
+    }
+  }
+
+  return bestRoot;
+}
+
+function getControlDbPath(): string {
+  return path.join(resolveDataRoot(), "control", "control.sqlite");
+}
+
+function getControlDb(): { db: Database.Database; dbPath: string } {
+  const dbPath = getControlDbPath();
+  const cached = dbCache.get(dbPath);
+  if (cached) {
+    return { db: cached, dbPath };
+  }
+
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new Database(dbPath);
+  db.pragma("journal_mode = WAL");
+  dbCache.set(dbPath, db);
+  return { db, dbPath };
 }
 
 function ensureGuildMetadataTable(db: {
   exec: (sql: string) => void;
-}): void {
-  if (ensureTableOnce) return;
+}, dbPath: string): void {
+  if (ensuredTableByDbPath.has(dbPath)) return;
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS discord_guild_metadata (
@@ -42,7 +95,7 @@ function ensureGuildMetadataTable(db: {
     ON discord_guild_metadata(last_seen_at_ms DESC);
   `);
 
-  ensureTableOnce = true;
+  ensuredTableByDbPath.add(dbPath);
 }
 
 function dedupeGuildMetadata(guilds: DiscordGuildDisplayMetadata[]): DiscordGuildDisplayMetadata[] {
@@ -71,8 +124,8 @@ export async function upsertGuildDisplayMetadata(args: {
   guilds: DiscordGuildDisplayMetadata[];
   nowMs?: number;
 }): Promise<void> {
-  const db = await getControlDb();
-  ensureGuildMetadataTable(db);
+  const { db, dbPath } = getControlDb();
+  ensureGuildMetadataTable(db, dbPath);
 
   const nowMs = args.nowMs ?? Date.now();
   const guilds = dedupeGuildMetadata(
@@ -117,8 +170,8 @@ export async function getGuildDisplayMetadataByIds(args: {
   const guildIds = Array.from(new Set(args.guildIds.map((id) => id.trim()).filter(Boolean)));
   if (guildIds.length === 0) return [];
 
-  const db = await getControlDb();
-  ensureGuildMetadataTable(db);
+  const { db, dbPath } = getControlDb();
+  ensureGuildMetadataTable(db, dbPath);
 
   const placeholders = guildIds.map(() => "?").join(", ");
   const query = db.prepare(
@@ -148,8 +201,8 @@ export async function hasFreshGuildDisplayMetadata(args: {
   const nowMs = args.nowMs ?? Date.now();
   const minUpdatedAtMs = nowMs - Math.max(1_000, Math.floor(args.maxAgeMs));
 
-  const db = await getControlDb();
-  ensureGuildMetadataTable(db);
+  const { db, dbPath } = getControlDb();
+  ensureGuildMetadataTable(db, dbPath);
 
   const placeholders = guildIds.map(() => "?").join(", ");
   const query = db.prepare(
