@@ -55,7 +55,9 @@ Auth/scope posture:
 
 - guild-scoped auth resolution: `apps/web/lib/server/authContext.ts`
 - scope guards: `apps/web/lib/server/scopeGuards.ts`
-- dev bypass override allowed only in non-production with explicit `DEV_WEB_BYPASS=1`
+- dashboard and campaign discovery are filtered by `authorizedGuildIds`
+- session detail/transcript/recap/regenerate are authorized by reader/action ownership checks against `authorizedGuildIds`
+- no implicit env guild fallback; dev bypass override is allowed only in non-production with explicit `DEV_WEB_BYPASS=1`
 
 ## 1.5 Awakening Runtime
 

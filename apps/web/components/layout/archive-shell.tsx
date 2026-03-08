@@ -4,18 +4,19 @@ import { AppSidebar } from "@/components/layout/app-sidebar";
 
 type ArchiveShellProps = {
   section: string;
-  activePath: string;
   campaignName?: string;
   children: ReactNode;
 };
 
-export function ArchiveShell({ section, activePath, campaignName, children }: ArchiveShellProps) {
+export function ArchiveShell({ section, campaignName, children }: ArchiveShellProps) {
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
-      <AppSidebar activePath={activePath} />
+    <div className="archive-shell-root flex min-h-screen text-foreground">
+      <AppSidebar />
       <main className="flex min-h-screen flex-1 flex-col overflow-hidden">
         <AppHeader section={section} campaignName={campaignName} />
-        <div className="custom-scrollbar mx-auto w-full max-w-7xl flex-1 overflow-y-auto p-8">{children}</div>
+        <div className="archive-shell-transition-target custom-scrollbar mx-auto w-full max-w-7xl flex-1 overflow-y-auto p-8">
+          {children}
+        </div>
       </main>
     </div>
   );

@@ -100,6 +100,93 @@ type SessionRecapRow = {
   detailed_text: string;
 };
 
+function getLegacyRecapRow(db: ReturnType<typeof getRecapDbForGuild>["db"], sessionId: string): SessionRecapRow | null {
+  // Legacy contract v1: recap_final artifacts stored a single balanced body.
+  try {
+    const artifact = db
+      .prepare(
+        `
+        SELECT created_at_ms, engine, source_hash, strategy_version, meta_json, content_text
+        FROM session_artifacts
+        WHERE session_id = ?
+          AND artifact_type = 'recap_final'
+        ORDER BY created_at_ms DESC
+        LIMIT 1
+        `
+      )
+      .get(sessionId) as
+      | {
+          created_at_ms: number;
+          engine: string | null;
+          source_hash: string | null;
+          strategy_version: string | null;
+          meta_json: string | null;
+          content_text: string | null;
+        }
+      | undefined;
+
+    const content = artifact?.content_text?.trim();
+    if (artifact && content) {
+      return {
+        session_id: sessionId,
+        created_at_ms: artifact.created_at_ms,
+        updated_at_ms: artifact.created_at_ms,
+        engine: artifact.engine,
+        source_hash: artifact.source_hash,
+        strategy_version: artifact.strategy_version ?? "session-recaps-legacy-artifact-v1",
+        meta_json: artifact.meta_json,
+        concise_text: content,
+        balanced_text: content,
+        detailed_text: content,
+      };
+    }
+  } catch {
+    // Table/column can be absent in some DB generations.
+  }
+
+  // Older meecap contract: narrative body in meecaps table.
+  try {
+    const meecap = db
+      .prepare(
+        `
+        SELECT created_at_ms, updated_at_ms, model, meecap_narrative, meecap_json
+        FROM meecaps
+        WHERE session_id = ?
+        LIMIT 1
+        `
+      )
+      .get(sessionId) as
+      | {
+          created_at_ms: number;
+          updated_at_ms: number;
+          model: string | null;
+          meecap_narrative: string | null;
+          meecap_json: string | null;
+        }
+      | undefined;
+
+    const narrative = meecap?.meecap_narrative?.trim();
+    if (meecap && narrative) {
+      return {
+        session_id: sessionId,
+        created_at_ms: meecap.created_at_ms,
+        updated_at_ms: meecap.updated_at_ms,
+        engine: meecap.model,
+        source_hash: null,
+        strategy_version: "session-recaps-legacy-meecap-v1",
+        meta_json: null,
+        concise_text: narrative,
+        balanced_text: narrative,
+        detailed_text: narrative,
+      };
+    }
+  } catch {
+    // Table/column can be absent in some DB generations.
+  }
+
+  return null;
+}
+
 function getRecapDbForGuild(guildId: string) {
   const campaignSlug = resolveCampaignSlug({ guildId });
   return {
@@ -175,7 +262,12 @@ export function getSessionRecap(guildId: string, sessionId: string): SessionReca
     )
     .get(sessionId) as SessionRecapRow | undefined;
 
-  return row ? mapRowToSessionRecap(row, guildId, campaignSlug) : null;
+  if (row) {
+    return mapRowToSessionRecap(row, guildId, campaignSlug);
+  }
+
+  const legacyRow = getLegacyRecapRow(db, sessionId);
+  return legacyRow ? mapRowToSessionRecap(legacyRow, guildId, campaignSlug) : null;
 }
 
 export async function generateSessionRecap(

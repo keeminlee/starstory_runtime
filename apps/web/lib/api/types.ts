@@ -1,4 +1,10 @@
 import type { CampaignSummary, DashboardModel, SessionDetail, SessionRecap, TranscriptEntry } from "@/lib/types";
+import type {
+  RegistryCreateEntryRequest,
+  RegistryPendingActionRequest,
+  RegistrySnapshotDto,
+  RegistryUpdateEntryRequest,
+} from "@/lib/registry/types";
 
 export type ApiErrorResponse = {
   error: {
@@ -41,3 +47,13 @@ export type RegenerateSessionRecapRequest = {
 };
 
 export type RegenerateSessionRecapResponse = SessionRecapResponse;
+
+export type CampaignRegistryResponse = {
+  registry: RegistrySnapshotDto;
+};
+
+export type RegistryCreateEntryApiRequest = RegistryCreateEntryRequest;
+
+export type RegistryUpdateEntryApiRequest = RegistryUpdateEntryRequest;
+
+export type RegistryPendingActionApiRequest = RegistryPendingActionRequest;

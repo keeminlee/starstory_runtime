@@ -1,6 +1,8 @@
-import type { Session } from "../../../../src/sessions/sessions";
-import type { SessionRecap as CanonicalSessionRecap } from "../../../../src/sessions/sessionRecaps";
-import type { SessionTranscript } from "../../../../src/sessions/sessionTranscript";
+import type {
+  ArchiveRecap as CanonicalSessionRecap,
+  ArchiveSessionRow as Session,
+  ArchiveTranscript as SessionTranscript,
+} from "@/lib/server/readData/archiveReadStore";
 import type { SessionArtifactStatus, SessionDetail, SessionRecap, SessionStatus, TranscriptEntry } from "@/lib/types";
 
 function toIsoDate(ms: number): string {

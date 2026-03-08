@@ -5,6 +5,15 @@ For documentation navigation, start at [README.md](README.md).
 **Status:** V0 complete, MeepoMind (V0.1) Phase 2-3 in progress + Sprint 3 hardening closure complete + Track B web archive viewer complete  
 **Last Updated:** March 7, 2026
 
+## Track C Complete (Discord Auth + Secure Scope)
+
+- Web auth uses Auth.js + Discord OAuth as the primary access model.
+- Canonical auth context is stable and refresh-aware (`session_snapshot|discord_refresh|session_snapshot_fallback`).
+- Guild authorization is ID-driven via `authorizedGuildIds`; guild display metadata is non-authoritative.
+- Dashboard/campaign discovery and session object access share the same guild authorization boundary.
+- Session detail/transcript/recap/regenerate enforce ownership in reader/action code, not in route handlers.
+- Implicit env guild fallback is removed; local fallback requires explicit dev bypass (`DEV_WEB_BYPASS=1` in non-production).
+
 ## Track B Complete (Web Archive Viewer)
 
 - Web archive viewer is now first-class under `apps/web` (Next App Router).

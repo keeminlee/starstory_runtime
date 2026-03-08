@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readSearchParams, jsonError } from "@/app/api/_utils";
-import { resolveWebAuthContext } from "@/lib/server/authContext";
-import { getWebSessionDetail } from "@/lib/server/sessionReaders";
+import { regenerateWebSessionRecap } from "@/lib/server/sessionReaders";
 
 type RouteContext = {
   params: Promise<{ sessionId: string }>;
@@ -15,7 +14,6 @@ export async function POST(request: NextRequest, context: RouteContext): Promise
   try {
     const { sessionId } = await context.params;
     const searchParams = readSearchParams(request);
-    const auth = await resolveWebAuthContext(searchParams);
 
     let body: RegenerateBody = {};
     try {
@@ -24,14 +22,11 @@ export async function POST(request: NextRequest, context: RouteContext): Promise
       body = {};
     }
 
-    const { regenerateSessionRecap } = await import("../../../../../../../src/sessions/sessionRecaps");
-    await regenerateSessionRecap({
-      guildId: auth.guildId,
+    const session = await regenerateWebSessionRecap({
       sessionId,
       reason: body.reason,
+      searchParams,
     });
-
-    const session = await getWebSessionDetail({ sessionId, searchParams });
 
     return NextResponse.json(
       {

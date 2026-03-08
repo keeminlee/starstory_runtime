@@ -28,6 +28,9 @@ export type CampaignSummary = {
   sessionCount: number;
   lastSessionDate: string | null;
   sessions: SessionSummary[];
+  type?: "user" | "system";
+  editable?: boolean;
+  persisted?: boolean;
 };
 
 export type TranscriptEntry = {
@@ -68,4 +71,5 @@ export type DashboardModel = {
   campaignCount: number;
   wordsRecorded: number;
   campaigns: CampaignSummary[];
+  authState?: "ok" | "unsigned_demo_fallback" | "signed_in_no_authorized_campaigns";
 };

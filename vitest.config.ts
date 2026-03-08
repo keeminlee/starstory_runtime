@@ -74,6 +74,8 @@ export default defineConfig({
       "src/tests/test-session-recovery.ts",
       "src/tests/test-session-recaps-api.ts",
       "src/tests/test-web-auth-context-guard.ts",
+      "src/tests/test-web-active-campaign-resolver.ts",
+      "src/tests/test-web-discord-guild-cache-policy.ts",
       "src/tests/test-web-scope-guards.ts",
       "src/tests/test-lab-session-resolve.ts",
       "src/tests/test-lab-autocomplete-routing.ts",

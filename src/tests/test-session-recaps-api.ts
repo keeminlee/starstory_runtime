@@ -148,6 +148,110 @@ test("sessionRecaps upsert/get round-trip preserves canonical three-view shape",
   expect(loaded?.sourceHash).toBe("hash-abc");
 });
 
+test("getSessionRecap falls back to legacy session_artifacts recap when canonical row is missing", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-session-recaps-legacy-artifact-"));
+  tempDirs.push(tempDir);
+  configureHermeticEnv(tempDir);
+
+  const guildId = "guild-recaps-legacy-artifact";
+  const sessionId = "session-recaps-legacy-artifact";
+  await seedSessionAndLedger(guildId, sessionId);
+
+  const { getDbForCampaign } = await import("../db.js");
+  const db = getDbForCampaign("default");
+  const now = Date.now();
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_artifacts (
+      session_id TEXT,
+      artifact_type TEXT,
+      content_text TEXT,
+      created_at_ms INTEGER,
+      engine TEXT,
+      source_hash TEXT,
+      strategy_version TEXT,
+      meta_json TEXT
+    )
+  `);
+
+  db.prepare(
+    `
+      INSERT INTO session_artifacts (
+        session_id, artifact_type, content_text, created_at_ms,
+        engine, source_hash, strategy_version, meta_json
+      ) VALUES (?, 'recap_final', ?, ?, ?, ?, ?, ?)
+    `
+  ).run(
+    sessionId,
+    "Legacy artifact recap body",
+    now,
+    "megameecap",
+    "hash-legacy-artifact",
+    "legacy-artifact-v1",
+    JSON.stringify({ legacy: true })
+  );
+
+  const { getSessionRecap } = await import("../sessions/sessionRecaps.js");
+  const loaded = getSessionRecap(guildId, sessionId);
+
+  expect(loaded).toBeTruthy();
+  expect(loaded?.views.concise).toBe("Legacy artifact recap body");
+  expect(loaded?.views.balanced).toBe("Legacy artifact recap body");
+  expect(loaded?.views.detailed).toBe("Legacy artifact recap body");
+  expect(loaded?.modelVersion).toBe("legacy-artifact-v1");
+  expect(loaded?.sourceHash).toBe("hash-legacy-artifact");
+});
+
+test("getSessionRecap falls back to legacy meecaps narrative when canonical row is missing", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-session-recaps-legacy-meecap-"));
+  tempDirs.push(tempDir);
+  configureHermeticEnv(tempDir);
+
+  const guildId = "guild-recaps-legacy-meecap";
+  const sessionId = "session-recaps-legacy-meecap";
+  await seedSessionAndLedger(guildId, sessionId);
+
+  const { getDbForCampaign } = await import("../db.js");
+  const db = getDbForCampaign("default");
+  const now = Date.now();
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS meecaps (
+      session_id TEXT,
+      created_at_ms INTEGER,
+      updated_at_ms INTEGER,
+      model TEXT,
+      meecap_narrative TEXT,
+      meecap_json TEXT
+    )
+  `);
+
+  db.prepare(
+    `
+      INSERT INTO meecaps (
+        session_id, created_at_ms, updated_at_ms, model, meecap_narrative, meecap_json
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `
+  ).run(
+    sessionId,
+    now - 1000,
+    now,
+    "legacy-model",
+    "Legacy meecap narrative body",
+    JSON.stringify({ legacy: true })
+  );
+
+  const { getSessionRecap } = await import("../sessions/sessionRecaps.js");
+  const loaded = getSessionRecap(guildId, sessionId);
+
+  expect(loaded).toBeTruthy();
+  expect(loaded?.views.concise).toBe("Legacy meecap narrative body");
+  expect(loaded?.views.balanced).toBe("Legacy meecap narrative body");
+  expect(loaded?.views.detailed).toBe("Legacy meecap narrative body");
+  expect(loaded?.modelVersion).toBe("session-recaps-legacy-meecap-v1");
+  expect(loaded?.engine).toBe("legacy-model");
+});
+
 test("sessionTranscript returns normalized transcript line contract", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-session-transcript-api-"));
   tempDirs.push(tempDir);

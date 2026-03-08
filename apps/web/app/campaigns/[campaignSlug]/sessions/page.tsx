@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { CampaignOverview } from "@/components/campaign/campaign-overview";
 import { ArchiveShell } from "@/components/layout/archive-shell";
 import { WebApiError } from "@/lib/api/http";
@@ -11,7 +12,7 @@ type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-export default async function CampaignPage({ params, searchParams }: PageProps) {
+export default async function CampaignSessionsPage({ params, searchParams }: PageProps) {
   const { campaignSlug } = await params;
   const query = await searchParams;
   let campaign = null as Awaited<ReturnType<typeof getCampaignSessionsApi>>["campaign"] | null;
@@ -32,8 +33,18 @@ export default async function CampaignPage({ params, searchParams }: PageProps) 
   }
 
   return (
-    <ArchiveShell section="Campaign" activePath="/campaigns" campaignName={campaign.name}>
-      <CampaignOverview campaign={campaign} />
+    <ArchiveShell section="Sessions" campaignName={campaign.name}>
+      <div className="space-y-4">
+        <div className="flex justify-end">
+          <Link
+            href={`/campaigns/${campaign.slug}/compendium`}
+            className="rounded-full border border-border bg-background/35 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-foreground transition-colors hover:bg-background/55"
+          >
+            Open Compendium
+          </Link>
+        </div>
+        <CampaignOverview campaign={campaign} />
+      </div>
     </ArchiveShell>
   );
 }

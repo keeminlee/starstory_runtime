@@ -3,7 +3,7 @@ import type { ApiErrorResponse } from "@/lib/api/types";
 type QueryValue = string | number | boolean | null | undefined;
 
 type FetchJsonOptions = {
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "PATCH";
   query?: Record<string, QueryValue | QueryValue[]>;
   body?: unknown;
   headers?: Record<string, string>;
@@ -62,6 +62,21 @@ async function resolveApiBaseUrl(): Promise<string> {
   return "http://localhost:3000";
 }
 
+async function resolveServerCookieHeader(): Promise<string | null> {
+  if (typeof window !== "undefined") {
+    return null;
+  }
+
+  try {
+    const nextHeaders = await import("next/headers");
+    const headerStore = await nextHeaders.headers();
+    return headerStore.get("cookie");
+  } catch {
+    // No request header context is available (for example during static tasks).
+    return null;
+  }
+}
+
 function toErrorMessage(status: number, fallbackMessage: string): string {
   if (status === 401) return "Unauthorized request.";
   if (status === 404) return "Requested resource was not found.";
@@ -72,11 +87,13 @@ export async function fetchJson<T>(path: string, options: FetchJsonOptions = {})
   const baseUrl = await resolveApiBaseUrl();
   const url = new URL(path, baseUrl || "http://localhost");
   appendQuery(url, options.query);
+  const cookie = await resolveServerCookieHeader();
 
   const response = await fetch(baseUrl ? url.toString() : `${path}${url.search}`, {
     method: options.method ?? "GET",
     headers: {
       "content-type": "application/json",
+      ...(cookie && !options.headers?.cookie ? { cookie } : {}),
       ...(options.headers ?? {}),
     },
     cache: "no-store",

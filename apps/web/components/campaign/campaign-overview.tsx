@@ -25,7 +25,7 @@ export function CampaignOverview({ campaign }: CampaignOverviewProps) {
         {campaign.sessions.map((session, index) => (
           <Link
             key={session.id}
-            href={`/sessions/${session.id}`}
+            href={`/campaigns/${campaign.slug}/sessions/${session.id}`}
             className="group block rounded-xl card-glass p-6 transition-all hover:border-primary/40"
           >
             <div className="flex items-start justify-between">

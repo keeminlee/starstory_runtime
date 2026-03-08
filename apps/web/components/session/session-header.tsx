@@ -9,19 +9,20 @@ type SessionHeaderProps = {
 
 export function SessionHeader({ session }: SessionHeaderProps) {
   const statusTone = session.status === "in_progress" ? "warning" : "success";
+  const sessionLabel = session.title.trim().length > 0 ? session.title : "Untitled Session";
 
   return (
     <header className="space-y-4">
       <nav className="flex flex-wrap items-center gap-1 text-xs uppercase tracking-wider text-muted-foreground">
         <Link href="/dashboard" className="hover:text-primary">Dashboard</Link>
         <ChevronRight className="h-3 w-3" />
-        <Link href={`/campaigns/${session.campaignSlug}`} className="hover:text-primary">{session.campaignSlug}</Link>
+          <Link href={`/campaigns/${session.campaignSlug}/sessions`} className="hover:text-primary">{session.campaignSlug}</Link>
         <ChevronRight className="h-3 w-3" />
-        <span className="text-foreground/80">{session.id}</span>
+        <span className="text-foreground/80">{sessionLabel}</span>
       </nav>
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-5xl font-serif italic">{session.title}</h1>
+          <h1 className="text-5xl font-serif italic">{sessionLabel}</h1>
           <p className="mt-2 text-sm uppercase tracking-widest text-primary/70">{session.campaignName}</p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <StatusChip label={session.status === "in_progress" ? "In progress" : "Completed"} tone={statusTone} />

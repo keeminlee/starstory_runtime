@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isCampaignSlugInScope, assertSessionScope } from "../../apps/web/lib/server/scopeGuards";
+import { isCampaignSlugInScope, assertSessionScope, assertSessionGuildInAuthorizedScope } from "../../apps/web/lib/server/scopeGuards";
 
 describe("web scope guards", () => {
   it("campaign scope helper denies cross-guild slug mismatch", () => {
@@ -18,5 +18,23 @@ describe("web scope guards", () => {
         sessionGuildId: "guild-b",
       })
     ).toThrowError(/out of scope/i);
+  });
+
+  it("authorized guild set assertion rejects cross-guild session access", () => {
+    expect(() =>
+      assertSessionGuildInAuthorizedScope({
+        authorizedGuildIds: ["guild-a", "guild-c"],
+        sessionGuildId: "guild-b",
+      })
+    ).toThrowError(/out of scope/i);
+  });
+
+  it("authorized guild set assertion allows in-scope session access", () => {
+    expect(() =>
+      assertSessionGuildInAuthorizedScope({
+        authorizedGuildIds: ["guild-a", "guild-b"],
+        sessionGuildId: "guild-b",
+      })
+    ).not.toThrow();
   });
 });

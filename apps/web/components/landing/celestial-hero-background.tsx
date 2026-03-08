@@ -4,18 +4,29 @@ import React, { useEffect, useMemo, useRef } from "react";
 
 type CelestialHeroBackgroundProps = {
   className?: string;
-  intensity?: number;
-  scrollReactive?: boolean;
+  profile?: "landing" | "archive";
+  motionEnabled?: boolean;
+  parallaxEnabled?: boolean;
 };
 
 type Star = {
   x: number;
   y: number;
-  r: number;
-  alpha: number;
+  size: number;
+  brightness: number;
   twinkleSpeed: number;
   twinkleOffset: number;
-  depth: number;
+  depthFactor: number;
+  parallaxFactor: number;
+  glowStrength: number;
+};
+
+type ProfileState = {
+  veilOpacity: number;
+  glowIntensity: number;
+  motionCalmness: number;
+  parallaxAmplitude: number;
+  starIntensity: number;
 };
 
 type ShootingStar = {
@@ -31,6 +42,24 @@ type ShootingStar = {
 
 const STAR_COUNT_BASE = 110;
 const SHOOTING_STARS_MAX = 4;
+const STAR_SEED = 289014241;
+
+const PROFILE_TARGETS: Record<"landing" | "archive", ProfileState> = {
+  landing: {
+    veilOpacity: 0.18,
+    glowIntensity: 1,
+    motionCalmness: 1,
+    parallaxAmplitude: 1,
+    starIntensity: 1,
+  },
+  archive: {
+    veilOpacity: 0.3,
+    glowIntensity: 0.78,
+    motionCalmness: 0.58,
+    parallaxAmplitude: 0.62,
+    starIntensity: 0.76,
+  },
+};
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -40,18 +69,41 @@ function random(min: number, max: number) {
   return Math.random() * (max - min) + min;
 }
 
+function createSeededRandom(seed: number) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+}
+
+function seededRange(rand: () => number, min: number, max: number) {
+  return min + rand() * (max - min);
+}
+
 export default function CelestialHeroBackground({
   className = "",
-  intensity = 1,
-  scrollReactive = true,
+  profile = "archive",
+  motionEnabled = true,
+  parallaxEnabled = true,
 }: CelestialHeroBackgroundProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const shootingStarsRef = useRef<ShootingStar[]>([]);
   const starsRef = useRef<Star[]>([]);
+  const profileStateRef = useRef<ProfileState>(PROFILE_TARGETS[profile]);
+  const profileTargetRef = useRef<ProfileState>(PROFILE_TARGETS[profile]);
   const scrollProgressRef = useRef(0);
+  const scrollParallaxTargetRef = useRef(0);
+  const scrollParallaxCurrentRef = useRef(0);
+  const viewportTargetRef = useRef({ x: 0, y: 0 });
+  const viewportCurrentRef = useRef({ x: 0, y: 0 });
 
-  const density = useMemo(() => clamp(intensity, 0.6, 1.8), [intensity]);
+  const scrollReactive = useMemo(() => profile === "landing", [profile]);
+
+  useEffect(() => {
+    profileTargetRef.current = PROFILE_TARGETS[profile];
+  }, [profile]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -64,8 +116,6 @@ export default function CelestialHeroBackground({
     let height = 0;
     let dpr = 1;
     let startTime = performance.now();
-
-    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     const resize = () => {
       const parent = canvas.parentElement;
@@ -82,36 +132,39 @@ export default function CelestialHeroBackground({
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      const starCount = Math.floor(STAR_COUNT_BASE * density);
-      starsRef.current = Array.from({ length: starCount }).map(() => ({
-        x: Math.random() * width,
-        y: Math.random() * height,
-        r: random(0.4, 1.6),
-        alpha: random(0.18, 0.82),
-        twinkleSpeed: random(0.3, 1.2),
-        twinkleOffset: random(0, Math.PI * 2),
-        depth: random(0.6, 1.25),
-      }));
+      if (starsRef.current.length === 0) {
+        const rand = createSeededRandom(STAR_SEED);
+        starsRef.current = Array.from({ length: STAR_COUNT_BASE }).map(() => ({
+          x: rand(),
+          y: rand(),
+          size: seededRange(rand, 0.35, 1.95),
+          brightness: seededRange(rand, 0.16, 0.9),
+          twinkleSpeed: seededRange(rand, 0.3, 1.2),
+          twinkleOffset: seededRange(rand, 0, Math.PI * 2),
+          depthFactor: seededRange(rand, 0.65, 1.45),
+          parallaxFactor: seededRange(rand, 0.35, 1.4),
+          glowStrength: seededRange(rand, 0.02, 0.09),
+        }));
+      }
+
+      const normalizedViewportX = clamp((width - 1440) / 1440, -1, 1);
+      const normalizedViewportY = clamp((height - 900) / 900, -1, 1);
+      viewportTargetRef.current = {
+        x: normalizedViewportX,
+        y: normalizedViewportY,
+      };
     };
 
     const updateScrollProgress = () => {
       if (!scrollReactive) {
         scrollProgressRef.current = 0;
-        return;
+      } else {
+        const progressed = clamp(window.scrollY / Math.max(1, window.innerHeight * 1.25), 0, 1);
+        scrollProgressRef.current = progressed;
       }
 
-      const hero = canvas.parentElement;
-      if (!hero) {
-        scrollProgressRef.current = 0;
-        return;
-      }
-
-      const rect = hero.getBoundingClientRect();
-      const heroHeight = Math.max(rect.height, window.innerHeight * 0.8);
-
-      // 0 at rest, approaches 1 as user scrolls through hero region
-      const progressed = clamp((-rect.top) / heroHeight, 0, 1);
-      scrollProgressRef.current = progressed;
+      const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+      scrollParallaxTargetRef.current = clamp(window.scrollY / maxScroll, 0, 1);
     };
 
     const spawnShootingStar = () => {
@@ -151,8 +204,9 @@ export default function CelestialHeroBackground({
         height * 0.18,
         width * 0.42
       );
-      radial.addColorStop(0, "rgba(234, 200, 120, 0.09)");
-      radial.addColorStop(0.3, "rgba(160, 120, 60, 0.04)");
+      const profileState = profileStateRef.current;
+      radial.addColorStop(0, `rgba(234, 200, 120, ${0.09 * profileState.glowIntensity})`);
+      radial.addColorStop(0.3, `rgba(160, 120, 60, ${0.04 * profileState.glowIntensity})`);
       radial.addColorStop(1, "rgba(0, 0, 0, 0)");
       ctx.fillStyle = radial;
       ctx.fillRect(0, 0, width, height);
@@ -172,30 +226,34 @@ export default function CelestialHeroBackground({
       ctx.fillRect(0, 0, width, height);
     };
 
-    const drawStars = (t: number) => {
+    const drawStars = (t: number, globalParallaxX: number, globalParallaxY: number) => {
       const stars = starsRef.current;
       const scrollBoost = scrollProgressRef.current;
+      const profileState = profileStateRef.current;
 
       for (const star of stars) {
         const twinkle =
           0.65 +
-          Math.sin(t * 0.001 * star.twinkleSpeed + star.twinkleOffset) * 0.22;
-        const alpha = clamp(star.alpha * twinkle + scrollBoost * 0.05, 0.06, 1);
+          Math.sin(t * 0.001 * star.twinkleSpeed * profileState.motionCalmness + star.twinkleOffset) * 0.22;
+        const alpha = clamp((star.brightness * twinkle + scrollBoost * 0.05) * profileState.starIntensity, 0.06, 1);
+
+        const x = star.x * width + globalParallaxX * star.parallaxFactor;
+        const y = star.y * height + globalParallaxY * star.parallaxFactor;
 
         // keep center slightly calmer for headline readability
-        const dx = Math.abs(star.x - width * 0.5) / width;
-        const dy = Math.abs(star.y - height * 0.32) / height;
+        const dx = Math.abs(x - width * 0.5) / width;
+        const dy = Math.abs(y - height * 0.32) / height;
         const centerSuppression = dx < 0.16 && dy < 0.16 ? 0.55 : 1;
 
         ctx.beginPath();
-        ctx.arc(star.x, star.y, star.r * star.depth, 0, Math.PI * 2);
+        ctx.arc(x, y, star.size * star.depthFactor, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(248, 235, 202, ${alpha * centerSuppression})`;
         ctx.fill();
 
-        if (star.r > 1.15 && Math.random() < 0.014 + scrollBoost * 0.01) {
+        if (star.size > 1.05 && Math.random() < 0.014 + scrollBoost * 0.01) {
           ctx.beginPath();
-          ctx.arc(star.x, star.y, star.r * 3.2, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(230, 191, 110, ${0.05 * centerSuppression})`;
+          ctx.arc(x, y, star.size * 3.2, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(230, 191, 110, ${star.glowStrength * profileState.glowIntensity * centerSuppression})`;
           ctx.fill();
         }
       }
@@ -203,6 +261,7 @@ export default function CelestialHeroBackground({
 
     const drawDust = (t: number) => {
       const drift = Math.sin(t * 0.00012) * 20;
+      const profileState = profileStateRef.current;
       const glow = ctx.createRadialGradient(
         width * 0.68 + drift,
         height * 0.28,
@@ -211,11 +270,46 @@ export default function CelestialHeroBackground({
         height * 0.28,
         width * 0.26
       );
-      glow.addColorStop(0, "rgba(201, 156, 77, 0.05)");
-      glow.addColorStop(0.5, "rgba(125, 92, 42, 0.02)");
+      glow.addColorStop(0, `rgba(201, 156, 77, ${0.05 * profileState.glowIntensity})`);
+      glow.addColorStop(0.5, `rgba(125, 92, 42, ${0.02 * profileState.glowIntensity})`);
       glow.addColorStop(1, "rgba(0, 0, 0, 0)");
       ctx.fillStyle = glow;
       ctx.fillRect(0, 0, width, height);
+    };
+
+    const drawVeil = () => {
+      const profileState = profileStateRef.current;
+      const radial = ctx.createRadialGradient(
+        width * 0.5,
+        height * 0.2,
+        0,
+        width * 0.5,
+        height * 0.2,
+        width * 0.5
+      );
+      radial.addColorStop(0, `rgba(42, 34, 12, ${0.12 * profileState.veilOpacity})`);
+      radial.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.fillStyle = radial;
+      ctx.fillRect(0, 0, width, height);
+
+      const linear = ctx.createLinearGradient(0, 0, 0, height);
+      linear.addColorStop(0, `rgba(9, 12, 25, ${0.1 * profileState.veilOpacity})`);
+      linear.addColorStop(1, `rgba(6, 8, 16, ${0.4 * profileState.veilOpacity})`);
+      ctx.fillStyle = linear;
+      ctx.fillRect(0, 0, width, height);
+    };
+
+    const updateProfileTween = () => {
+      const target = profileTargetRef.current;
+      const current = profileStateRef.current;
+      const step = 0.04;
+      profileStateRef.current = {
+        veilOpacity: current.veilOpacity + (target.veilOpacity - current.veilOpacity) * step,
+        glowIntensity: current.glowIntensity + (target.glowIntensity - current.glowIntensity) * step,
+        motionCalmness: current.motionCalmness + (target.motionCalmness - current.motionCalmness) * step,
+        parallaxAmplitude: current.parallaxAmplitude + (target.parallaxAmplitude - current.parallaxAmplitude) * step,
+        starIntensity: current.starIntensity + (target.starIntensity - current.starIntensity) * step,
+      };
     };
 
     const drawShootingStars = () => {
@@ -256,24 +350,44 @@ export default function CelestialHeroBackground({
     };
 
     const animate = (now: number) => {
-      if (prefersReducedMotion) {
+      if (!motionEnabled) {
+        updateProfileTween();
         drawBackground();
         drawDust(now);
-        drawStars(now);
+        drawStars(now, 0, 0);
+        drawVeil();
+        // Intentionally no RAF scheduling in static mode so the sky remains visible and stable.
         return;
       }
 
       updateScrollProgress();
+      updateProfileTween();
+
+      scrollParallaxCurrentRef.current +=
+        (scrollParallaxTargetRef.current - scrollParallaxCurrentRef.current) * 0.05;
+      viewportCurrentRef.current.x += (viewportTargetRef.current.x - viewportCurrentRef.current.x) * 0.04;
+      viewportCurrentRef.current.y += (viewportTargetRef.current.y - viewportCurrentRef.current.y) * 0.04;
+
+      const parallaxAmplitude = profileStateRef.current.parallaxAmplitude;
+      const motionCalmness = profileStateRef.current.motionCalmness;
+      const scrollOffsetX = (scrollParallaxCurrentRef.current - 0.5) * 3.2 * parallaxAmplitude;
+      const scrollOffsetY = (scrollParallaxCurrentRef.current - 0.5) * 8.6 * parallaxAmplitude;
+      const viewportOffsetX = viewportCurrentRef.current.x * 2.4 * parallaxAmplitude;
+      const viewportOffsetY = viewportCurrentRef.current.y * 1.9 * parallaxAmplitude;
+
+      const globalParallaxX = clamp(scrollOffsetX + viewportOffsetX, -8, 8);
+      const globalParallaxY = clamp(scrollOffsetY + viewportOffsetY, -10, 10);
 
       const scrollBoost = scrollProgressRef.current;
       const elapsed = now - startTime;
 
       drawBackground();
       drawDust(elapsed);
-      drawStars(elapsed);
+      drawStars(elapsed, parallaxEnabled ? globalParallaxX : 0, parallaxEnabled ? globalParallaxY : 0);
       drawShootingStars();
+      drawVeil();
 
-      const spawnChance = 0.002 + scrollBoost * 0.01;
+      const spawnChance = (0.0016 + scrollBoost * 0.0085) * motionCalmness;
       if (Math.random() < spawnChance) {
         spawnShootingStar();
       }
@@ -295,7 +409,7 @@ export default function CelestialHeroBackground({
       window.removeEventListener("resize", resize);
       window.removeEventListener("scroll", updateScrollProgress);
     };
-  }, [density, scrollReactive]);
+  }, [motionEnabled, parallaxEnabled, scrollReactive]);
 
   return (
     <div
@@ -306,7 +420,6 @@ export default function CelestialHeroBackground({
         ref={canvasRef}
         className="absolute inset-0 h-full w-full"
       />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,0,0,0)_0%,rgba(0,0,0,0.10)_45%,rgba(0,0,0,0.34)_100%)]" />
     </div>
   );
 }

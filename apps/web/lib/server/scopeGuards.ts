@@ -23,3 +23,13 @@ export function assertSessionScope(args: {
     throw new ScopeGuardError("Session is out of scope for the active guild.");
   }
 }
+
+export function assertSessionGuildInAuthorizedScope(args: {
+  authorizedGuildIds: string[];
+  sessionGuildId: string;
+}): void {
+  const inScope = args.authorizedGuildIds.includes(args.sessionGuildId);
+  if (!inScope) {
+    throw new ScopeGuardError("Session is out of scope for the authorized guild set.");
+  }
+}

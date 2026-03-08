@@ -66,6 +66,125 @@
   }
 }
 
+.ambient-root {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.ambient-sky {
+  position: absolute;
+  inset: 0;
+}
+
+.ambient-veil {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 700ms ease;
+}
+
+.ambient-veil-landing {
+  background:
+    radial-gradient(circle at 50% 26%, hsla(42, 74%, 66%, 0.09), transparent 42%),
+    linear-gradient(to bottom, hsla(232, 42%, 7%, 0.06), hsla(232, 46%, 4%, 0.28));
+}
+
+.ambient-veil-archive {
+  background:
+    radial-gradient(circle at 50% 18%, hsla(42, 74%, 66%, 0.05), transparent 36%),
+    linear-gradient(to bottom, hsla(232, 40%, 6%, 0.1), hsla(232, 44%, 4%, 0.33));
+}
+
+.ambient-profile-landing .ambient-veil-landing {
+  opacity: 1;
+}
+
+.ambient-profile-archive .ambient-veil-archive {
+  opacity: 1;
+}
+
+.app-foreground-root {
+  position: relative;
+  z-index: 10;
+}
+
+.archive-shell-root {
+  position: relative;
+  z-index: 10;
+}
+
+.route-template-layer {
+  width: 100%;
+  min-height: 100vh;
+}
+
+.route-template-hydrating {
+  opacity: 1;
+}
+
+.route-template-idle {
+  opacity: 1;
+}
+
+.route-template-out {
+  opacity: 1;
+}
+
+.route-template-in {
+  opacity: 1;
+}
+
+.route-template-generic.route-template-idle {
+  opacity: 1;
+  transition: opacity 220ms ease;
+}
+
+.route-template-generic.route-template-out {
+  opacity: 0;
+  transition: opacity 170ms ease;
+}
+
+.route-template-generic.route-template-in {
+  opacity: 1;
+  transition: opacity 230ms ease;
+}
+
+.archive-shell-transition-target {
+  opacity: 1;
+  transition: opacity 220ms ease;
+}
+
+.route-template-archive.route-template-out .archive-shell-transition-target {
+  opacity: 0;
+  transition: opacity 170ms ease;
+}
+
+.route-template-archive.route-template-in .archive-shell-transition-target {
+  opacity: 1;
+  transition: opacity 230ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient-veil,
+  .archive-shell-transition-target,
+  .route-template-idle,
+  .route-template-out,
+  .route-template-in {
+    transition: none !important;
+    transform: none !important;
+  }
+
+  .button-primary {
+    transition: none;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+}
+
 .card-glass {
   background: hsla(228, 25%, 9%, 0.72);
   border: 1px solid var(--color-border);
@@ -82,11 +201,111 @@
     0 0 0 1px hsla(45, 100%, 85%, 0.15) inset,
     0 8px 20px hsla(40, 70%, 50%, 0.18);
   transition: all 0.2s ease;
+  cursor: pointer;
 }
 
 .button-primary:hover {
   filter: brightness(1.04);
   transform: translateY(-1px);
+}
+
+.button-primary:active {
+  transform: translateY(0);
+  filter: brightness(0.98);
+}
+
+.button-primary:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+
+.control-input,
+.control-select {
+  border: 1px solid var(--color-border);
+  background: hsla(226, 16%, 14%, 0.68);
+  color: var(--color-foreground);
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.control-input::placeholder {
+  color: var(--color-muted-foreground);
+}
+
+.control-input:hover,
+.control-select:hover {
+  border-color: hsla(42, 74%, 66%, 0.42);
+}
+
+.control-input:focus-visible,
+.control-select:focus-visible {
+  outline: none;
+  border-color: hsla(42, 74%, 66%, 0.72);
+  box-shadow: 0 0 0 2px hsla(42, 74%, 66%, 0.24);
+}
+
+.control-select {
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none'%3E%3Cpath d='M3.5 5.25L7 8.75L10.5 5.25' stroke='%23d8caa4' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.65rem center;
+  padding-right: 2rem;
+}
+
+.control-select option {
+  background: hsl(226 16% 14%);
+  color: hsl(40 24% 92%);
+}
+
+.control-select:disabled,
+.control-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.control-button-ghost,
+.control-button-danger {
+  border: 1px solid var(--color-border);
+  background: hsla(226, 16%, 14%, 0.45);
+  color: var(--color-foreground);
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease, transform 120ms ease;
+}
+
+.control-button-ghost:hover {
+  border-color: hsla(42, 74%, 66%, 0.4);
+  background: hsla(226, 16%, 14%, 0.65);
+}
+
+.control-button-danger {
+  border-color: hsla(0, 65%, 55%, 0.46);
+  background: hsla(0, 52%, 22%, 0.3);
+}
+
+.control-button-danger:hover {
+  border-color: hsla(0, 70%, 62%, 0.65);
+  background: hsla(0, 56%, 24%, 0.46);
+}
+
+.control-button-ghost:active,
+.control-button-danger:active {
+  transform: translateY(1px);
+}
+
+.control-button-ghost:focus-visible,
+.control-button-danger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px hsla(42, 74%, 66%, 0.24);
+  border-color: hsla(42, 74%, 66%, 0.72);
+}
+
+.control-button-ghost:disabled,
+.control-button-danger:disabled,
+.button-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .sidebar-gradient {

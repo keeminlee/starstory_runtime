@@ -1,11 +1,16 @@
 import { WebAuthError } from "@/lib/server/authContext";
+import { CapabilityUnavailableError } from "@/lib/server/capabilityErrors";
 
 export type WebDataErrorCode =
   | "unauthorized"
   | "not_found"
+  | "invalid_request"
+  | "conflict"
   | "transcript_unavailable"
   | "recap_unavailable"
   | "generation_failed"
+  | "openai_unconfigured"
+  | "discord_refresh_unconfigured"
   | "internal";
 
 export class WebDataError extends Error {
@@ -36,6 +41,10 @@ export function mapToWebDataError(error: unknown): WebDataError {
     return new WebDataError("unauthorized", 401, error.message, { cause: error });
   }
 
+  if (error instanceof CapabilityUnavailableError) {
+    return new WebDataError(error.code, error.status, error.message, { cause: error });
+  }
+
   const recapCode =
     typeof error === "object" && error !== null && "code" in error
       ? String((error as { code?: unknown }).code ?? "")
@@ -64,6 +73,24 @@ export function mapToWebDataError(error: unknown): WebDataError {
   }
   if (/transcript|no bronze transcript|no transcript/i.test(message)) {
     return new WebDataError("transcript_unavailable", 424, message, { cause: error });
+  }
+
+  if (/OPENAI_API_KEY|openai api key/i.test(message)) {
+    return new WebDataError(
+      "openai_unconfigured",
+      503,
+      "This action is unavailable until OPENAI_API_KEY is configured.",
+      { cause: error }
+    );
+  }
+
+  if (/DISCORD_TOKEN/i.test(message)) {
+    return new WebDataError(
+      "discord_refresh_unconfigured",
+      503,
+      "Discord refresh capability is unavailable because DISCORD_TOKEN is not configured.",
+      { cause: error }
+    );
   }
 
   return new WebDataError("internal", 500, message || "Unknown session data error", { cause: error });

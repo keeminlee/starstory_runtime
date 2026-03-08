@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ArrowRight, BookOpen, Sparkles, Star } from "lucide-react";
 import type { ComponentType } from "react";
-import CelestialHeroBackground from "@/components/landing/celestial-hero-background";
 
 type LandingFeature = {
   icon: ComponentType<{ className?: string }>;
@@ -15,7 +14,6 @@ type LandingPageProps = {
 export function LandingPage(props: LandingPageProps) {
   return (
     <div className="relative min-h-screen selection:bg-primary/30">
-      <CelestialHeroBackground className="fixed inset-0 z-0" />
       <section className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6 text-center">
         <div className="flex items-center justify-center space-x-2">
           <Sparkles className="h-6 w-6 animate-pulse text-primary" />
@@ -23,7 +21,7 @@ export function LandingPage(props: LandingPageProps) {
         </div>
         <h1 className="mt-6 text-7xl font-serif italic tracking-tight md:text-9xl">Meepo</h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground md:text-2xl">
-          A living chronicle of adventures. Every session leaves a star behind.
+          A living chronicle of D&D adventures. Every session leaves a star behind.
         </p>
         <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row">
           <Link href="/dashboard" className="button-primary rounded-full px-8 py-4 text-lg font-semibold">

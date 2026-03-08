@@ -3,7 +3,7 @@ import { RouteLoading } from "@/components/shared/route-loading";
 
 export default function Loading() {
   return (
-    <ArchiveShell section="Campaign" activePath="/campaigns">
+    <ArchiveShell section="Campaign">
       <RouteLoading label="Loading campaign archive" />
     </ArchiveShell>
   );
