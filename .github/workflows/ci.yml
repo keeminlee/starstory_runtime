@@ -22,3 +22,22 @@ jobs:
 
       - name: Verify
         run: npm run ci:verify
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare SSH key
+        run: |
+          install -m 0700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Add EC2 host key
+        run: ssh-keyscan -p "${{ secrets.EC2_SSH_PORT || '22' }}" -H "${{ secrets.EC2_SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy on EC2
+        run: |
+          ssh -p "${{ secrets.EC2_SSH_PORT || '22' }}" "${{ secrets.EC2_SSH_USER }}@${{ secrets.EC2_SSH_HOST }}" \
+            'cd /home/meepo/meepo-bot && ./deploy-meepo.sh main'

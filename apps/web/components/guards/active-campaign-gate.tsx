@@ -147,7 +147,7 @@ export function ActiveCampaignGate({ children }: ActiveCampaignGateProps) {
         routeGuildId: route.routeGuildId,
         persistedSelection,
         campaigns: campaigns as CampaignCandidate[],
-        allowDemoFallback: loadState !== "error" && dashboardAuthState !== "signed_in_no_authorized_campaigns",
+        allowDemoFallback: loadState !== "error" && dashboardAuthState !== "signed_in_no_authorized_guilds",
       }),
     [campaigns, dashboardAuthState, loadState, persistedSelection, route.routeCampaignSlug, route.routeGuildId]
   );

@@ -1,0 +1,18 @@
+[Unit]
+Description=Meepo Bot
+After=network.target
+
+[Service]
+Type=simple
+User=meepo
+Group=meepo
+WorkingDirectory=/home/meepo/meepo-bot
+EnvironmentFile=/etc/meepo/meepo-bot.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run dev:bot
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
