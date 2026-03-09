@@ -7,6 +7,7 @@ export default defineConfig({
       "@": path.resolve(__dirname, "apps/web"),
       "next/headers": path.resolve(__dirname, "src/tests/stubs/next-headers.ts"),
       "next/link": path.resolve(__dirname, "src/tests/stubs/next-link.ts"),
+      "lucide-react": path.resolve(__dirname, "src/tests/stubs/lucide-react.ts"),
     },
   },
   test: {
