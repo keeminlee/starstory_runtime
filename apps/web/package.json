@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "next dev -p 3000",
-    "build": "next build",
-    "start": "next start -p 3000",
+    "dev": "node ./scripts/run-with-app-version.mjs next dev -p 3000",
+    "build": "node ./scripts/run-with-app-version.mjs next build",
+    "start": "node ./scripts/run-with-app-version.mjs next start -p 3000",
     "clean": "powershell -NoProfile -Command \"if (Test-Path .next) { Remove-Item -Recurse -Force .next }\"",
     "typecheck": "tsc --noEmit",
     "lint": "next lint"

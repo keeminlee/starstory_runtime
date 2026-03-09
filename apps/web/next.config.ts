@@ -1,9 +1,24 @@
 import path from "node:path";
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(__dirname, "../..");
+
+function runGit(args: string[]): string | null {
+  try {
+    const output = execFileSync("git", args, {
+      cwd: repoRoot,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8",
+    }).trim();
+    return output.length > 0 ? output : null;
+  } catch {
+    return null;
+  }
+}
 
 function resolveWebPackageVersion(): string | null {
   try {
@@ -16,7 +31,12 @@ function resolveWebPackageVersion(): string | null {
   }
 }
 
-const resolvedAppVersion = process.env.NEXT_PUBLIC_APP_VERSION ?? resolveWebPackageVersion() ?? "dev";
+const resolvedAppVersion =
+  runGit(["describe", "--tags", "--abbrev=0"]) ??
+  runGit(["rev-parse", "--short", "HEAD"]) ??
+  process.env.NEXT_PUBLIC_APP_VERSION ??
+  resolveWebPackageVersion() ??
+  "dev";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
