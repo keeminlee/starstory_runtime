@@ -6,6 +6,7 @@ let baseExists = false;
 let awakened = false;
 let currentCampaignSlug = "default";
 let metaCampaignSlug: string | null = null;
+let dmUserId: string | null = "user-1";
 const showtimeCampaigns: Array<{ campaign_slug: string; campaign_name: string }> = [];
 
 vi.mock("../../campaign/guildConfig.js", () => ({
@@ -23,7 +24,7 @@ vi.mock("../../campaign/guildConfig.js", () => ({
   }),
   getGuildCanonPersonaId: vi.fn(() => null),
   getGuildCanonPersonaMode: vi.fn(() => "meta"),
-  getGuildDmUserId: vi.fn(() => null),
+  getGuildDmUserId: vi.fn(() => dmUserId),
   getGuildConfig: vi.fn(() => ({ campaign_slug: "default", setup_version: 1, default_recap_style: "balanced" })),
   getGuildDefaultRecapStyle: vi.fn(() => "balanced"),
   getGuildHomeTextChannelId: vi.fn(() => "text-1"),
@@ -35,7 +36,9 @@ vi.mock("../../campaign/guildConfig.js", () => ({
   setGuildCanonPersonaId: vi.fn(),
   setGuildCanonPersonaMode: vi.fn(),
   setGuildDefaultRecapStyle: vi.fn(),
-  setGuildDmUserId: vi.fn(),
+  setGuildDmUserId: vi.fn((_guildId: string, value: string | null) => {
+    dmUserId = value;
+  }),
 }));
 
 vi.mock("../../campaign/ensureGuildSetup.js", () => ({
@@ -234,7 +237,7 @@ vi.mock("../../voice/receiver.js", () => ({
 }));
 
 vi.mock("../../voice/state.js", () => ({
-  getVoiceState: vi.fn(() => null),
+  getVoiceState: vi.fn(() => ({ channelId: "voice-1" })),
   isVoiceHushEnabled: vi.fn(() => true),
   setVoiceHushEnabled: vi.fn(),
   setVoiceState: vi.fn(),
@@ -265,6 +268,7 @@ afterEach(() => {
   awakened = false;
   currentCampaignSlug = "default";
   metaCampaignSlug = null;
+  dmUserId = "user-1";
   showtimeCampaigns.length = 0;
   vi.clearAllMocks();
 });
