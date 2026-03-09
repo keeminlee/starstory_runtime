@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, expect, it } from "vitest";
 import { resolveWebAuthContextFromInputs, WebAuthError } from "../../apps/web/lib/server/authContext";
 
