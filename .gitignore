@@ -3,6 +3,8 @@
 .env.*
 
 data/
+# runtime scoped registry storage
+data/registry/g_*__c_*/
 runs/
 out/
 *.sqlite

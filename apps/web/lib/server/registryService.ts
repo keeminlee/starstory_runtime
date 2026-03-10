@@ -20,7 +20,7 @@ import {
   removePendingAtIndex,
 } from "../../../../src/registry/reviewNamesCore";
 import type { Faction, Location, Misc } from "../../../../src/registry/types";
-import { getRegistryDirForCampaign, getRegistryDirForScope } from "../../../../src/registry/scaffold";
+import { ensureRegistryScaffold, getRegistryDirForCampaign, getRegistryDirForScope } from "../../../../src/registry/scaffold";
 
 type QueryInput = Record<string, string | string[] | undefined> | undefined;
 type RegistryScope = { campaignSlug: string; guildId: string | null };
@@ -85,6 +85,11 @@ function getRepoRoot(): string {
 }
 
 function getRegistryBaseDir(): string {
+  const dataRoot = process.env.DATA_ROOT?.trim();
+  if (dataRoot) {
+    return path.join(path.resolve(dataRoot), "registry");
+  }
+
   return path.join(getRepoRoot(), "data", "registry");
 }
 
@@ -123,6 +128,10 @@ function getIgnorePath(scope: RegistryScope): string {
 function getCategoryPath(scope: RegistryScope, category: RegistryCategoryKey): string {
   const mapping = CATEGORY_FILE_MAP[category];
   return path.join(getRegistryDir(scope), mapping.file);
+}
+
+function ensureRegistryScopeScaffold(scope: RegistryScope): void {
+  ensureRegistryScaffold(getRegistryDir(scope));
 }
 
 function parseYamlFile<T>(filePath: string, fallback: T): T {
@@ -389,6 +398,7 @@ export async function createWebRegistryEntry(args: {
 }): Promise<RegistrySnapshotDto> {
   const campaign = await assertCampaignEditable(args.campaignSlug, args.searchParams);
   const scope = toRegistryScope(campaign);
+  ensureRegistryScopeScaffold(scope);
 
   const category = args.body.category;
   const canonicalName = args.body.canonicalName?.trim();
@@ -452,6 +462,7 @@ export async function updateWebRegistryEntry(args: {
 }): Promise<RegistrySnapshotDto> {
   const campaign = await assertCampaignEditable(args.campaignSlug, args.searchParams);
   const scope = toRegistryScope(campaign);
+  ensureRegistryScopeScaffold(scope);
 
   const category = args.body.category;
   const doc = readCategoryDoc(scope, category);
@@ -505,6 +516,7 @@ export async function applyWebRegistryPendingAction(args: {
 }): Promise<RegistrySnapshotDto> {
   const campaign = await assertCampaignEditable(args.campaignSlug, args.searchParams);
   const scope = toRegistryScope(campaign);
+  ensureRegistryScopeScaffold(scope);
 
   const pendingPath = getPendingPath(scope);
   const pendingDoc = parseYamlFile<PendingDoc>(pendingPath, { version: 1, pending: [] });

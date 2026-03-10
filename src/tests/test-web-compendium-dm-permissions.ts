@@ -247,12 +247,14 @@ describe("compendium DM-only write enforcement", () => {
     await setAuth({ userId: dmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
     const snapshot = await getWebRegistrySnapshot({ campaignSlug });
 
-    const repoRoot = path.resolve(process.cwd());
+    const { getRegistryDirForScope } = await import("../registry/scaffold.js");
+    const dataRoot = process.env.DATA_ROOT ?? path.resolve(process.cwd(), "data");
     const pendingPath = path.join(
-      repoRoot,
-      "data",
-      "registry",
-      `g_${guildId}__c_${campaignSlug}`,
+      getRegistryDirForScope({
+        guildId,
+        campaignSlug,
+        baseDir: path.join(dataRoot, "registry"),
+      }),
       "decisions.pending.yml"
     );
     fs.mkdirSync(path.dirname(pendingPath), { recursive: true });

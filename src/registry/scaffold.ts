@@ -15,6 +15,19 @@ const DEFAULT_FILES: Array<{ name: string; content: string }> = [
   { name: "ignore.yml", content: "version: 1\n\ntokens:\n" },
 ];
 
+function resolveRegistryBaseDir(baseDir?: string): string {
+  if (baseDir) {
+    return path.resolve(baseDir);
+  }
+
+  const dataRoot = process.env.DATA_ROOT?.trim();
+  if (dataRoot) {
+    return path.join(path.resolve(dataRoot), "registry");
+  }
+
+  return path.join(process.cwd(), "data", "registry");
+}
+
 /**
  * Ensure registry directory exists and contains default files. Idempotent.
  */
@@ -39,7 +52,7 @@ export function getRegistryDirForScope(args: {
   campaignSlug: string;
   baseDir?: string;
 }): string {
-  const base = args.baseDir ?? path.join(process.cwd(), "data", "registry");
+  const base = resolveRegistryBaseDir(args.baseDir);
   const slug = args.campaignSlug.trim().toLowerCase();
   const guild = args.guildId.trim().toLowerCase();
   const safeSlug = slug.replace(/[^a-z0-9-_]+/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "") || "default";
@@ -52,6 +65,6 @@ export function getRegistryDirForScope(args: {
  * Legacy slug-only path kept for compatibility tooling.
  */
 export function getRegistryDirForCampaign(campaignSlug: string, baseDir?: string): string {
-  const base = baseDir ?? path.join(process.cwd(), "data", "registry");
+  const base = resolveRegistryBaseDir(baseDir);
   return path.join(base, campaignSlug);
 }

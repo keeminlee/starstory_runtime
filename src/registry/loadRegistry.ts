@@ -3,7 +3,7 @@ import path from "path";
 import yaml from "yaml";
 import { Character, Location, Faction, Misc, Entity, LoadedRegistry, RawRegistryYaml } from "./types.js";
 import { getDefaultCampaignSlug } from "../campaign/defaultCampaign.js";
-import { ensureRegistryScaffold, getRegistryDirForCampaign, getRegistryDirForScope } from "./scaffold.js";
+import { getRegistryDirForCampaign, getRegistryDirForScope } from "./scaffold.js";
 
 export type RegistryScope = {
   guildId: string;
@@ -29,7 +29,7 @@ function normKey(s: string): string {
  * Load and validate the character registry from multiple YAML files.
  * Registry is campaign-scoped: data/registry/<campaign_slug>/.
  * If campaignSlug is omitted, uses DEFAULT_CAMPAIGN_SLUG env or "default".
- * If the campaign directory does not exist, creates a minimal scaffold (empty yaml files).
+ * If the campaign directory does not exist, returns an empty registry view without creating files.
  * @returns LoadedRegistry with fast lookup maps
  */
 export function loadRegistry(opts?: {
@@ -52,10 +52,6 @@ export function loadRegistry(opts?: {
         ? legacyRegistryDir
         : scopedRegistryDir ?? legacyRegistryDir);
   const ignorePath = opts?.ignorePath ?? path.join(registryDir, "ignore.yml");
-
-  if (!fs.existsSync(registryDir)) {
-    ensureRegistryScaffold(registryDir);
-  }
 
   // Collect all characters, locations, factions, misc
   const allCharacters: Character[] = [];
