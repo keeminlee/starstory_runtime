@@ -73,6 +73,7 @@ const DEMO_SESSION_DETAILS: Record<string, SessionDetail> = {
       generatedAt: "2026-03-01T19:42:00.000Z",
       modelVersion: "demo-seeded-v1",
     },
+    recapReadiness: "ready",
     artifacts: {
       transcript: "available",
       recap: "available",
@@ -119,6 +120,7 @@ const DEMO_SESSION_DETAILS: Record<string, SessionDetail> = {
       generatedAt: "2026-03-05T20:34:00.000Z",
       modelVersion: "demo-seeded-v1",
     },
+    recapReadiness: "ready",
     artifacts: {
       transcript: "available",
       recap: "available",

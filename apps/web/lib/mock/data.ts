@@ -52,6 +52,7 @@ const SESSIONS: SessionDetail[] = [
       generatedAt: "2026-01-14T22:05:00.000Z",
       modelVersion: "megameecap-final-v1",
     },
+    recapReadiness: "ready",
     artifacts: {
       transcript: "available",
       recap: "available",
@@ -97,6 +98,7 @@ const SESSIONS: SessionDetail[] = [
       generatedAt: "2026-01-21T22:15:00.000Z",
       modelVersion: "megameecap-final-v1",
     },
+    recapReadiness: "ready",
     artifacts: {
       transcript: "available",
       recap: "available",

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronRight, Clock } from "lucide-react";
 import { StatusChip } from "@/components/shared/status-chip";
+import type { StatusChipTone } from "@/components/shared/status-chip";
 import type { SessionDetail } from "@/lib/types";
 import { formatSessionDisplayTitle } from "@/lib/campaigns/display";
 import { updateSessionLabelApi } from "@/lib/api/sessions";
@@ -22,12 +23,13 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const statusTone = session.status === "in_progress" ? "warning" : "success";
+  type StatusChipModel = { label: string; tone: StatusChipTone };
   const sessionLabel = useMemo(
     () => formatSessionDisplayTitle({ label, sessionId: session.id }),
     [label, session.id]
   );
   const statusChips = useMemo(() => {
-    const chips = [
+    const chips: StatusChipModel[] = [
       {
         label: session.status === "in_progress" ? "In progress" : "Completed",
         tone: statusTone,

@@ -1,4 +1,4 @@
-type StatusChipTone = "neutral" | "success" | "warning" | "danger" | "info";
+export type StatusChipTone = "neutral" | "success" | "warning" | "danger" | "info";
 
 const TONE_STYLES: Record<StatusChipTone, string> = {
   neutral: "border-border/60 bg-background/40 text-muted-foreground",
