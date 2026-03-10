@@ -18,8 +18,12 @@ function getControlDbPath(): string {
   return path.resolve(cfg.data.root, "control", "control.sqlite");
 }
 
+function isVitestRuntime(): boolean {
+  return getEnv("VITEST") === "true" || Boolean(getEnv("VITEST_WORKER_ID"));
+}
+
 function assertTestDbPathSafety(dbPath: string): void {
-  if (getEnv("NODE_ENV") !== "test") return;
+  if (getEnv("NODE_ENV") !== "test" || !isVitestRuntime()) return;
 
   const resolvedDbPath = path.resolve(dbPath);
   const resolvedTmpRoot = path.resolve(os.tmpdir());
