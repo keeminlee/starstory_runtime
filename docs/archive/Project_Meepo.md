@@ -1,5 +1,8 @@
 # Project Meepo
 
+Status note (Phase A): `candidate-phaseB`.
+This document remains available for context, but canonical philosophy and current doctrine should be read from `../NORTH_STAR.md`, `CURRENT_STATE.md`, and `INDEX.md` first.
+
 **Status:** Meepo V0 Complete, MeepoMind Phases 1-2 Complete, Phase 3 In Progress  
 **Current Phase:** Character-Scoped Memory Retrieval (Phase 3)  
 **Last Updated:** February 14, 2026
@@ -343,4 +346,4 @@ Meepo may act physically in imagination:
 
 ---
 
-*For current implementation details, see [CURRENT_STATE.md](CURRENT_STATE.md). For archived phase breakdowns and deep-dives, see HANDOFF.md, HANDOFF_V0.md, and related docs.*
+*For current implementation details, see [../CURRENT_STATE.md](../CURRENT_STATE.md). For archived phase breakdowns and deep-dives, see `old/HANDOFF.md`, `old/HANDOFF_V0.md`, and related docs.*

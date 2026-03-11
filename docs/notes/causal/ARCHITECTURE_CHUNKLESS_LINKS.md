@@ -1,6 +1,6 @@
 # Chunkless Causal Link Architecture - MVP Implementation Guide
 
-> Note: The current canonical mass/strength convergence contract lives in [../../CAUSAL_CORE_PHYSICS.md](../../CAUSAL_CORE_PHYSICS.md). Use this MVP guide as historical implementation context.
+> Note: The current canonical mass/strength convergence contract lives in [../../systems/CAUSAL_CORE_PHYSICS.md](../../systems/CAUSAL_CORE_PHYSICS.md). Use this MVP guide as historical implementation context.
 
 ## Overview
 

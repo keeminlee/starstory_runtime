@@ -38,7 +38,7 @@ It completes:
 - added stopline regression test:
   - `src/tests/test-stopline-observability-runtime.ts`
 - added ops runbook:
-  - `docs/OPS_RUNBOOK.md`
+  - `docs/runtime/OPS_RUNBOOK.md`
 
 ## Why
 

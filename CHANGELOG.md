@@ -60,7 +60,7 @@
 - Completed observability closure in strict runtime zones:
   - structured runtime failure logging normalization,
   - new runtime observability stopline (`stopline:observability-runtime`) wired into CI,
-  - concise operational runbook in `docs/OPS_RUNBOOK.md`.
+  - concise operational runbook in `docs/runtime/OPS_RUNBOOK.md`.
 
 ### Reliability Notes
 

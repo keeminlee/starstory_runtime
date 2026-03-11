@@ -98,5 +98,5 @@ Persistence / artifacts:
 ## Related docs
 
 - System map: `docs/MAP.md`
-- Core physics reference: `docs/CAUSAL_CORE_PHYSICS.md`
+- Core physics reference: `docs/systems/CAUSAL_CORE_PHYSICS.md`
 - Deep math notes: `src/causal/CAUSAL_LEVER_MATH.md`
