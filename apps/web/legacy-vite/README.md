@@ -1,5 +1,7 @@
 # Legacy Vite Snapshot
 
+Status note (Phase A): `candidate-phaseB`.
+
 This folder contains the pre-B0 Vite SPA implementation that was replaced by the Next.js app-router shell.
 
 Status:

@@ -4,19 +4,20 @@ This index is the entry point for project docs. It separates active references f
 
 ## Start Here
 
-- [MAP.md](MAP.md) — system-first troubleshooting and flow map
-- [INDEX.md](INDEX.md) — lane index and artifact locations
+- [INDEX.md](INDEX.md) — canonical router for all documentation traversal
 - [CURRENT_STATE.md](CURRENT_STATE.md) — current feature status, command surface, schema, and roadmap
-- [Project_Meepo.md](Project_Meepo.md) — product vision and MeepoMind model
+- [START_HERE.md](START_HERE.md) — P0 onboarding contract and success criteria
+- [MAP.md](MAP.md) — system-first architecture map and boundaries
+- [../NORTH_STAR.md](../NORTH_STAR.md) — product philosophy and long-term direction
 - [V1_RELEASE_CHECKLIST.md](V1_RELEASE_CHECKLIST.md) — ship checklist and gate contract
 
 ## Active References
 
 - [OVERLAY.md](OVERLAY.md) — OBS overlay architecture and setup
-- [ops/ENV.md](ops/ENV.md) — deploy/runtime env contract (prod-safe defaults)
+- [runtime/ops/ENV.md](runtime/ops/ENV.md) — deploy/runtime env contract (prod-safe defaults)
 - [apps/web/README.md](../apps/web/README.md) — web archive routes, auth/scope doctrine, and edit capabilities
 - [MISSIONS_V0.md](MISSIONS_V0.md) — mission economy design and command behavior
-- [CAUSAL_CORE_PHYSICS.md](CAUSAL_CORE_PHYSICS.md) — mass vs strength contract, rounds, and convergence behavior
+- [systems/CAUSAL_CORE_PHYSICS.md](systems/CAUSAL_CORE_PHYSICS.md) — mass vs strength contract, rounds, and convergence behavior
 - Silver-Seq lane (`src/silver/seq/*`) — deterministic transcript segmentation for sequential summarization
 - Online Events lane (`src/tools/events/compile-and-export-events-live.ts`) — campaign-scoped live event artifacts
 - [notes/ops/LOGGING_REFERENCE.md](notes/ops/LOGGING_REFERENCE.md) — logging scopes and operations
@@ -43,4 +44,4 @@ Use these when working directly on the chunkless link pivot workstream:
 
 ## Historical Handoffs
 
-Older handoff documents are archived in [old/README.md](old/README.md).
+Older handoff documents are indexed in [archive/old/README.md](archive/old/README.md) and treated as historical context, not canonical runtime doctrine.

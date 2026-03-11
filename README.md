@@ -21,10 +21,10 @@ For first-time setup, start here:
 ➡ **[docs/START_HERE.md](docs/START_HERE.md)**
 
 Closed Alpha release control (branch alignment + scope freeze):
-➡ **[docs/ops/CLOSED_ALPHA_PHASE0_RELEASE_CONTROL.md](docs/ops/CLOSED_ALPHA_PHASE0_RELEASE_CONTROL.md)**
+➡ **[docs/runtime/ops/CLOSED_ALPHA_PHASE0_RELEASE_CONTROL.md](docs/runtime/ops/CLOSED_ALPHA_PHASE0_RELEASE_CONTROL.md)**
 
 Closed Alpha Phase 5 deploy/runtime versioning (in-repo deploy hook + systemd units):
-➡ **[docs/ops/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md](docs/ops/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md)**
+➡ **[docs/runtime/ops/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md](docs/runtime/ops/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md)**
 
 ### Prerequisites
 
@@ -203,7 +203,7 @@ Start with the documentation map:
 - [docs/MAP.md](docs/MAP.md)
 - [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md)
 - [DB routing guardrail](docs/CURRENT_STATE.md#db-routing-guardrail-campaign-isolation)
-- [docs/CAUSAL_CORE_PHYSICS.md](docs/CAUSAL_CORE_PHYSICS.md)
+- [docs/systems/CAUSAL_CORE_PHYSICS.md](docs/systems/CAUSAL_CORE_PHYSICS.md)
 - [docs/notes/ops/LOGGING_REFERENCE.md](docs/notes/ops/LOGGING_REFERENCE.md)
 - [docs/notes/causal/causal-debug.md](docs/notes/causal/causal-debug.md)
 

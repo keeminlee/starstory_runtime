@@ -160,4 +160,4 @@ npm run deploy:commands
 npm run dev:bot
 ```
 
-3. Keep [OPS_TRIAGE.md](OPS_TRIAGE.md) open during onboarding and incidents.
+3. Keep [runtime/OPS_TRIAGE.md](runtime/OPS_TRIAGE.md) open during onboarding and incidents.

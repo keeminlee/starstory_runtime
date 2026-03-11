@@ -1,34 +1,59 @@
-# Docs Index
+LLM ENTRYPOINT:
+This document serves as the canonical starting point for repository documentation traversal.
+LLM tools should read this file first to locate subsystem documentation.
 
-Primary documentation entrypoints for active architecture lanes.
+# Documentation Index
 
-- [README.md](README.md) — top-level docs navigation
-- [START_HERE.md](START_HERE.md) — first-time DM onboarding path
-- [ops/CLOSED_ALPHA_PHASE0_RELEASE_CONTROL.md](ops/CLOSED_ALPHA_PHASE0_RELEASE_CONTROL.md) — integration branch + scope freeze contract
-- [ops/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md](ops/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md) — deploy hook + systemd unit versioning contract
-- [OPS_TRIAGE.md](OPS_TRIAGE.md) — closed alpha incident triage checklist
-- [MAP.md](MAP.md) — runtime and subsystem map
-- [CURRENT_STATE.md](CURRENT_STATE.md) — current implementation status
-- [MEGAMEECAP_CANONIZATION_BLUEPRINT.md](MEGAMEECAP_CANONIZATION_BLUEPRINT.md) — multi-track convergence plan for single canonical recap generation and legacy retirement
-- [RECAP_SURFACE_MAP.md](RECAP_SURFACE_MAP.md) — Sprint D1 code-first inventory of recap entrypoints, stores, fallback semantics, and migration risks
-- [RECAP_API_CONTRACT_C1.md](RECAP_API_CONTRACT_C1.md) — C1 canonical recap boundary and API contract stabilization notes
-- [RECAP_COMPAT_FREEZE_B1.md](RECAP_COMPAT_FREEZE_B1.md) — B1 fallback semantics freeze to balanced-only legacy mapping across bot/web contract surfaces
-- [RECAP_RUNTIME_CONVERGENCE_A1.md](RECAP_RUNTIME_CONVERGENCE_A1.md) — A1 command/lifecycle rewiring to canonical recap boundary with preserved lifecycle guarantees
-- [RECAP_SERVICE_BOUNDARY_A2.md](RECAP_SERVICE_BOUNDARY_A2.md) — A2 strict boundary enforcement with stopline guards against direct recapEngine command/lifecycle usage
-- [RECAP_LIFECYCLE_A3.md](RECAP_LIFECYCLE_A3.md) — A3 explicit recap readiness lifecycle states, deterministic transitions, and bounded post-session retry policy
-- [../apps/web/README.md](../apps/web/README.md) — web archive runtime routes and scope/edit doctrine
-- [ops/ENV.md](ops/ENV.md) — runtime and deploy environment contract
-- [awakening/ARCHITECTURE.md](awakening/ARCHITECTURE.md) — Awakening Runtime guarantees and invariants
-- [awakening/SCRIPTS.md](awakening/SCRIPTS.md) — script authoring/runtime contract
-- [MEGAMEECAP_WORKER.md](MEGAMEECAP_WORKER.md) — action contract + receipts + artifact triage
+This is the single router for active documentation. Start here, then follow only the linked branch relevant to the task.
 
-Lane-specific references:
+## Canonical Core
 
-- Silver-Seq lane: deterministic segmentation (`src/silver/seq/*`)
-- Online Events lane: live event compilation (`src/tools/events/compile-and-export-events-live.ts`)
-- Shared compile core: event labeling primitives (`src/events/compileEvents/*`)
+- [MAP.md](MAP.md) - Conceptual architecture and subsystem boundaries.
+- [REPO_SKELETON.md](REPO_SKELETON.md) - Repository layout and where systems live.
+- [CURRENT_STATE.md](CURRENT_STATE.md) - Current release posture, health, and in-flight work.
+- [../NORTH_STAR.md](../NORTH_STAR.md) - Product philosophy and long-term direction (Phase B target path: `docs/NORTH_STAR.md`).
 
-Artifacts:
+## Operational Onboarding
 
-- Silver-Seq artifacts: `data/artifacts/silver_seq/<session>/<run_id>/`
-- Campaign-scoped live events export: `data/campaigns/g_<guild>__c_<campaign>/exports/events/`
+- [START_HERE.md](START_HERE.md) - P0 onboarding contract and success criteria.
+- [runtime/OPS_TRIAGE.md](runtime/OPS_TRIAGE.md) - Closed alpha operational triage checklist.
+- [../OAUTH_PROD_HARDENING.md](../OAUTH_PROD_HARDENING.md) - Production OAuth hardening and incident guardrails.
+
+## Runtime And Deployment
+
+- [runtime/OPS_RUNBOOK.md](runtime/OPS_RUNBOOK.md) - Runtime operations playbook.
+- [runtime/ops/ENV.md](runtime/ops/ENV.md) - Runtime and deploy environment contract.
+- [runtime/ops/CLOSED_ALPHA_PHASE0_RELEASE_CONTROL.md](runtime/ops/CLOSED_ALPHA_PHASE0_RELEASE_CONTROL.md) - Scope freeze and release control.
+- [runtime/ops/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md](runtime/ops/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md) - Deploy/runtime versioning.
+- [runtime/ops/V1_5_CLOSED_ALPHA_REALIGNMENT_KNOWLEDGE_PASS.md](runtime/ops/V1_5_CLOSED_ALPHA_REALIGNMENT_KNOWLEDGE_PASS.md) - Surface audit and realignment notes.
+
+## Systems
+
+- [systems/awakening/ARCHITECTURE.md](systems/awakening/ARCHITECTURE.md) - Awakening runtime architecture.
+- [systems/awakening/SCRIPTS.md](systems/awakening/SCRIPTS.md) - Awakening script contract.
+- [ONBOARDING-CAMPAIGN-REGISTRY.md](ONBOARDING-CAMPAIGN-REGISTRY.md) - Campaign registry model.
+- [systems/CAUSAL_CORE_PHYSICS.md](systems/CAUSAL_CORE_PHYSICS.md) - Causal model contract.
+- [OVERLAY.md](OVERLAY.md) - OBS overlay architecture.
+- [MISSIONS_V0.md](MISSIONS_V0.md) - Mission economy surface.
+- [MEGAMEECAP_CANONIZATION_BLUEPRINT.md](MEGAMEECAP_CANONIZATION_BLUEPRINT.md) - Canonical recap convergence plan.
+- [MEGAMEECAP_WORKER.md](MEGAMEECAP_WORKER.md) - MegaMeecap worker contract.
+
+## Recap Convergence Track
+
+- [RECAP_SURFACE_MAP.md](RECAP_SURFACE_MAP.md)
+- [RECAP_API_CONTRACT_C1.md](RECAP_API_CONTRACT_C1.md)
+- [RECAP_COMPAT_FREEZE_B1.md](RECAP_COMPAT_FREEZE_B1.md)
+- [RECAP_RUNTIME_CONVERGENCE_A1.md](RECAP_RUNTIME_CONVERGENCE_A1.md)
+- [RECAP_SERVICE_BOUNDARY_A2.md](RECAP_SERVICE_BOUNDARY_A2.md)
+- [RECAP_LIFECYCLE_A3.md](RECAP_LIFECYCLE_A3.md)
+
+## Product Surface
+
+- [product/README.md](product/README.md) - Product-docs branch and philosophy-location note.
+- [../README.md](../README.md) - Repository entry and quick-start commands.
+- [../apps/web/README.md](../apps/web/README.md) - Web archive runtime and route surface.
+
+## Working Notes And Historical Material
+
+- [notes/](notes/) - Research and implementation notes (not canonical contracts).
+- [archive/old/README.md](archive/old/README.md) - Historical handoff index.

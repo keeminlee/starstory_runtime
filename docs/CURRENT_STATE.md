@@ -1,6 +1,6 @@
 # Meepo Bot - Current State (March 8, 2026)
 
-For documentation navigation, start at [README.md](README.md).
+For documentation navigation, start at [INDEX.md](INDEX.md).
 
 **Status:** V0 complete, MeepoMind (V0.1) Phase 2-3 in progress + Sprint 3 hardening closure complete + Track B web archive viewer complete  
 **Last Updated:** March 8, 2026
@@ -363,7 +363,7 @@ Channel drift behavior:
 - updates runtime channel context for current run only
 - persists selected channel key; runtime channel context is not persisted
 
-See [docs/awakening/ARCHITECTURE.md](awakening/ARCHITECTURE.md) and [docs/awakening/SCRIPTS.md](awakening/SCRIPTS.md).
+See [docs/systems/awakening/ARCHITECTURE.md](systems/awakening/ARCHITECTURE.md) and [docs/systems/awakening/SCRIPTS.md](systems/awakening/SCRIPTS.md).
 
 ### Dynamic STT Prompt Refresh (v1.5)
 
@@ -1207,21 +1207,23 @@ Restructured meecap storage to support dual-lane Silver architecture (Meecaps + 
 ```
 docs/
 ├── CURRENT_STATE.md                 ← You are here (unified current state)
-├── Project_Meepo.md                 (strategic vision + philosophy)
-├── HANDOFF.md                       (Feb 11 snapshot, archived)
-├── HANDOFF_V0.md                    (V0 deep-dive, archived)
-├── HANDOFF_MEEP_MVP.md              (sprint 1 phases, archived)
-└── HANDOFF_MEECAP_FIXES.md          (Feb 13 incremental improvements, archived)
+├── INDEX.md                         (canonical documentation router)
+├── MAP.md                           (architecture and boundaries)
+├── START_HERE.md                    (P0 onboarding contract)
+└── archive/old/README.md            (historical handoff index)
 
 src/db/schema.sql                    (Canonical database schema)
 ```
+
+Product philosophy source (Phase A location): `NORTH_STAR.md`
 
 ---
 
 ## Questions or Clarifications?
 
-- **Architecture**: See `Project_Meepo.md`
-- **V0 Details**: See `HANDOFF_V0.md`
+- **Architecture**: See `MAP.md`
+- **Product direction**: See `../NORTH_STAR.md`
+- **V0 Details**: See `archive/old/HANDOFF_V0.md`
 - **Logging Setup**: See `src/utils/logger.ts` code comments
 - **Registry Format**: See `data/registry/*.yml` examples
 - **Meecap Schema**: See `src/sessions/meecap.ts` type definitions

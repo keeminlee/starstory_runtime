@@ -90,8 +90,8 @@ Primary runtime modules:
 
 Primary docs:
 
-- `docs/awakening/ARCHITECTURE.md`
-- `docs/awakening/SCRIPTS.md`
+- `docs/systems/awakening/ARCHITECTURE.md`
+- `docs/systems/awakening/SCRIPTS.md`
 
 Common failure modes:
 
@@ -328,18 +328,26 @@ Artifact location:
 
 ## 8. Docs Index and Deprecation Rules
 
+- Canonical router: `docs/INDEX.md`
 - Operational snapshot: `docs/CURRENT_STATE.md`
-- Awakening architecture: `docs/awakening/ARCHITECTURE.md`
-- Awakening scripts guide: `docs/awakening/SCRIPTS.md`
+- Awakening architecture: `docs/systems/awakening/ARCHITECTURE.md`
+- Awakening scripts guide: `docs/systems/awakening/SCRIPTS.md`
 - MegaMeecap worker ops: `docs/MEGAMEECAP_WORKER.md`
-- Philosophy / north star: `docs/Project_Meepo.md`
+- Philosophy / north star: `NORTH_STAR.md`
 - System map (this file): `docs/MAP.md`
 
-Doc placement rule:
+Doc placement rule (current topology):
 
-- Active docs live under `docs/`
+- Runtime/deploy docs live under `docs/runtime/`
+- System docs live under `docs/systems/`
+- Product branch docs live under `docs/product/`
 - Research/work notes live under `docs/notes/`
-- Historical handoffs live under `docs/old/`
+- Historical handoffs live under `docs/archive/old/`
+
+Compatibility notes:
+
+- Some legacy paths still exist as redirect stubs to reduce link churn.
+- Root `NORTH_STAR.md` remains a deliberate philosophy exception in this pass.
 
 ## Appendix: Repo Skeleton
 

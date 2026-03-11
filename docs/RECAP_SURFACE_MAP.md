@@ -19,7 +19,7 @@ Code-first evidence rule:
 Lifecycle note (closed-alpha protection):
 - D1 distinguishes lifecycle correctness from recap/artifact correctness.
 - A path may intentionally keep session-end success decoupled from async recap/artifact outcomes.
-- Reference behavior: showtime end should succeed independently from async artifact failures ([docs/V1_RELEASE_CHECKLIST.md](docs/V1_RELEASE_CHECKLIST.md#L103)).
+- Reference behavior: showtime end should succeed independently from async artifact failures ([V1_RELEASE_CHECKLIST.md](V1_RELEASE_CHECKLIST.md#L103)).
 
 ## Inventory schema and frozen taxonomies
 
@@ -67,7 +67,7 @@ Behavioral ambiguity flags (used below):
 | legacy /session recap | command | [src/commands/session.ts](src/commands/session.ts#L321) | `if (sub === "recap")` | summarizes stored meecap narrative via LLM (`chat`) | none (response-only) | `regenerate_semantics_differs` | depends on `meecaps.meecap_narrative` existence |
 | legacy /session meecap | command | [src/commands/session.ts](src/commands/session.ts#L473) | `if (sub === "meecap")` -> `generateMeecapStub()` | narrative or v1_json meecap generation | `meecaps`, `meecap_beats`, filesystem meecap narrative export | `writes_derived_maybe_treated_as_truth` | legacy lane; may be consumed by legacy recap command |
 | recap:test tool | cli_offline | [src/tools/recap-test.ts](src/tools/recap-test.ts#L1) | `main()` -> sessionRecaps generate/regenerate | canonical sessionRecaps generation/regeneration | `session_recaps` (and underlying recapEngine side-effects) | `writes_truth_directly` | offline validation tool |
-| worker-triggered recap generation | worker | none found in active runtime code sweep | none found | none found | none found | none | worker docs exist ([docs/MEGAMEECAP_WORKER.md](docs/MEGAMEECAP_WORKER.md)), but D1 found no direct runtime recap generation entrypoint wired as worker trigger |
+| worker-triggered recap generation | worker | none found in active runtime code sweep | none found | none found | none found | none | worker docs exist ([MEGAMEECAP_WORKER.md](MEGAMEECAP_WORKER.md)), but D1 found no direct runtime recap generation entrypoint wired as worker trigger |
 
 ## Persistence store table
 
@@ -79,7 +79,7 @@ Behavioral ambiguity flags (used below):
 | filesystem exports under campaign meecaps dir | `derived_output` | recapEngine + megameecap IO [src/sessions/recapEngine.ts](src/sessions/recapEngine.ts#L272) | artifact locator status/read [src/sessions/megameecapArtifactLocator.ts](src/sessions/megameecapArtifactLocator.ts#L169) | derived | includes legacy filename fallback behavior |
 | `meecaps` | `compatibility_truth` | `/session meecap` [src/commands/session.ts](src/commands/session.ts#L473) | `/session recap` [src/commands/session.ts](src/commands/session.ts#L321), bot/web fallback layers | legacy compatibility | narrative + optional json lane [src/db/schema.sql](src/db/schema.sql#L244) |
 | `meecap_beats` | `derived_output` | beats derivation in legacy meecap command flow [src/commands/session.ts](src/commands/session.ts#L501) | downstream tools/lanes; not canonical recap read path | derived | normalized beat artifacts [src/db/schema.sql](src/db/schema.sql#L257) |
-| offline replay/chunk worker artifacts | `debug_export_only` | documented worker/offline replay docs lane | operator diagnostics docs/tools | debug/export | evidence in [docs/MEGAMEECAP_WORKER.md](docs/MEGAMEECAP_WORKER.md#L100); not mapped as active recap truth path |
+| offline replay/chunk worker artifacts | `debug_export_only` | documented worker/offline replay docs lane | operator diagnostics docs/tools | debug/export | evidence in [MEGAMEECAP_WORKER.md](MEGAMEECAP_WORKER.md#L100); not mapped as active recap truth path |
 
 ## Read precedence + field-shape drift matrix
 
@@ -193,11 +193,11 @@ Reconciliation rule:
 - Rationale: generated build metadata, not runtime surface.
 
 2. Historical or planning docs
-- [CHANGELOG.md](CHANGELOG.md)
-- [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md)
-- [docs/MEGAMEECAP_CANONIZATION_BLUEPRINT.md](docs/MEGAMEECAP_CANONIZATION_BLUEPRINT.md)
-- [docs/old/HANDOFF.md](docs/old/HANDOFF.md)
-- [docs/ops/V1_5_CLOSED_ALPHA_REALIGNMENT_KNOWLEDGE_PASS.md](docs/ops/V1_5_CLOSED_ALPHA_REALIGNMENT_KNOWLEDGE_PASS.md)
+- [../CHANGELOG.md](../CHANGELOG.md)
+- [CURRENT_STATE.md](CURRENT_STATE.md)
+- [MEGAMEECAP_CANONIZATION_BLUEPRINT.md](MEGAMEECAP_CANONIZATION_BLUEPRINT.md)
+- [archive/old/HANDOFF.md](archive/old/HANDOFF.md)
+- [runtime/ops/V1_5_CLOSED_ALPHA_REALIGNMENT_KNOWLEDGE_PASS.md](runtime/ops/V1_5_CLOSED_ALPHA_REALIGNMENT_KNOWLEDGE_PASS.md)
 - Rationale: evidence inputs; not authoritative runtime path definitions.
 
 3. Type/API declarations only
@@ -206,7 +206,7 @@ Reconciliation rule:
 
 4. UI copy and route references
 - `src/ui/metaMeepoVoice.ts`
-- [docs/MAP.md](docs/MAP.md)
+- [MAP.md](MAP.md)
 - Rationale: string/docs references only.
 
 Unreconciled active-runtime hits: none identified in D1 sweep.

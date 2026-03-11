@@ -7,7 +7,7 @@ This checklist is the source of truth for shipping `v1.0.0`.
 - Integration branch for closed-alpha finish-line work is `v1.5_finish_line_to_v2`.
 - Unrelated feature merges are frozen while launch-critical lanes are in progress.
 - Deferred lanes are explicitly documented in:
-  - `docs/ops/CLOSED_ALPHA_PHASE0_RELEASE_CONTROL.md`
+  - `docs/runtime/ops/CLOSED_ALPHA_PHASE0_RELEASE_CONTROL.md`
 
 ## 1) Automated Ship Gate
 
@@ -162,7 +162,7 @@ Fixture root:
   - `deploy/env/meepo-bot.env.example`
   - `deploy/env/meepo-web.env.example`
 - Host procedure and checks are documented in:
-  - `docs/ops/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md`
+  - `docs/runtime/ops/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md`
 
 ## 6) GitHub Release Draft (v1.0.0)
 

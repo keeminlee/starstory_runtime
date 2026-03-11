@@ -62,32 +62,28 @@ Session metrics with new approach:
 
 ```
 src/tools/
-├── README.md                    (Overview + quick reference)
-├── scaffold/
-│   └── INDEX.md                (Event scaffold building)
-├── debug/
-│   └── INDEX.md                (Intent graph & causal loops)
-├── export/
-│   └── INDEX.md                (Annotated transcripts, beats)
-├── analysis/
-│   └── INDEX.md                (Event metrics, word frequency, memory)
-├── admin/
-│   └── INDEX.md                (Cleanup, reset, labeling)
-└── [Original tool files remain in place for now]
+├── compile-scaffold.ts
+├── compile-transcripts.ts
+├── debug-intent-graph.ts
+├── export-annotated-transcript.ts
+├── recap-test.ts
+├── run-causal-cycles.ts
+└── ... (domain folders: causal/, events/, gold/, meecaps/, megameecap/, registry/, silver/)
 ```
 
 ### Documentation Added:
 
-1. **Main README:** [src/tools/README.md](src/tools/README.md)
+1. **Main tooling root:** `src/tools/`
    - Directory structure overview
    - Quick reference for all major tools
    - Key concepts (scaffold, intent graph, legacy loops)
    - Common patterns and code snippets
 
-2. **Folder INDEX files:**
-   - Each subfolder has INDEX.md pointing to relevant tools
-   - Usage examples and flag descriptions
-   - Purpose and workflow
+2. **Tool-level references in code paths:**
+   - Debug: [src/tools/debug-intent-graph.ts](src/tools/debug-intent-graph.ts)
+   - Export: [src/tools/export-annotated-transcript.ts](src/tools/export-annotated-transcript.ts)
+   - Causal runs: [src/tools/run-causal-cycles.ts](src/tools/run-causal-cycles.ts)
+   - Recap validation: [src/tools/recap-test.ts](src/tools/recap-test.ts)
 
 3. **Tool-level documentation:**
    - **debug-intent-graph.ts:** Full CLI reference, scoring formula, output details
@@ -148,12 +144,7 @@ L235 (consequence) marked as [dm_statement]
 - [src/tools/debug-intent-graph.ts](src/tools/debug-intent-graph.ts) - Added documentation header
 - [src/tools/debug-causal-loops.ts](src/tools/debug-causal-loops.ts) - Added documentation header
 - [src/tools/export-annotated-transcript.ts](src/tools/export-annotated-transcript.ts) - Added documentation header
-- [src/tools/README.md](src/tools/README.md) - Created comprehensive overview
-- [src/tools/scaffold/INDEX.md](src/tools/scaffold/INDEX.md) - Created
-- [src/tools/debug/INDEX.md](src/tools/debug/INDEX.md) - Created
-- [src/tools/export/INDEX.md](src/tools/export/INDEX.md) - Created
-- [src/tools/analysis/INDEX.md](src/tools/analysis/INDEX.md) - Created
-- [src/tools/admin/INDEX.md](src/tools/admin/INDEX.md) - Created
+- `src/tools/` - Tooling root and command entrypoint directory
 
 ---
 
