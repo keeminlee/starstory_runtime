@@ -1,12 +1,32 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Download, RefreshCw } from "lucide-react";
 import { EmptyState } from "@/components/shared/empty-state";
-import { regenerateSessionRecapApi } from "@/lib/api/sessions";
+import { EntityResolutionPanel } from "@/components/session/entity-resolution-panel";
+import { EntityPreviewPanel } from "@/components/session/entity-preview-panel";
+import { regenerateSessionRecapApi, getAnnotatedRecapsApi } from "@/lib/api/sessions";
 import { WebApiError } from "@/lib/api/http";
-import type { RecapTab, SessionArtifactStatus, SessionRecap } from "@/lib/types";
+import type { RecapTab, SessionArtifactStatus, SessionRecap, SessionAnnotatedRecaps, AnnotatedRecapLine } from "@/lib/types";
+import type { RegistryCategoryKey } from "@/lib/registry/types";
+
+const HOVER_OPEN_DELAY_MS = 180;
+const HOVER_CLOSE_DELAY_MS = 120;
+
+type PreviewEntityState = {
+  entityId: string;
+  entityName: string;
+  category: RegistryCategoryKey;
+  anchorRect: {
+    top: number;
+    left: number;
+    right: number;
+    bottom: number;
+    width: number;
+    height: number;
+  };
+};
 
 const TABS: Array<{ id: RecapTab; label: string }> = [
   { id: "concise", label: "Concise" },
@@ -21,6 +41,7 @@ type RecapTabsProps = {
   campaignSlug: string;
   searchParams?: Record<string, string | string[] | undefined>;
   canRegenerate: boolean;
+  canWrite?: boolean;
   showRegenerateUnavailableBanner?: boolean;
   status?: SessionArtifactStatus;
   emptyDescription?: string;
@@ -133,6 +154,18 @@ function normalizeRecapLines(recapText: string): string[] {
     .filter(Boolean);
 }
 
+function getAnchorRect(target: HTMLElement): PreviewEntityState["anchorRect"] {
+  const rect = target.getBoundingClientRect();
+  return {
+    top: rect.top,
+    left: rect.left,
+    right: rect.right,
+    bottom: rect.bottom,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
 export function RecapTabs({
   recap,
   sessionId,
@@ -140,6 +173,7 @@ export function RecapTabs({
   campaignSlug,
   searchParams,
   canRegenerate,
+  canWrite = false,
   showRegenerateUnavailableBanner = true,
   status = "available",
   emptyDescription,
@@ -157,6 +191,46 @@ export function RecapTabs({
         }
   );
 
+  // Annotation state
+  const [annotations, setAnnotations] = useState<SessionAnnotatedRecaps | null>(null);
+  const [hoverPreviewEntity, setHoverPreviewEntity] = useState<PreviewEntityState | null>(null);
+  const [pinnedPreviewEntity, setPinnedPreviewEntity] = useState<PreviewEntityState | null>(null);
+  const hoverOpenTimerRef = useRef<number | null>(null);
+  const hoverCloseTimerRef = useRef<number | null>(null);
+
+  const scopedSearchParams = useMemo(
+    () => ({
+      ...searchParams,
+      campaign_slug: campaignSlug,
+    }),
+    [campaignSlug, searchParams]
+  );
+
+  const loadAnnotations = useCallback(async () => {
+    if (!recap) return;
+    try {
+      const result = await getAnnotatedRecapsApi(sessionId, scopedSearchParams);
+      setAnnotations(result.annotations ?? null);
+    } catch {
+      // Non-fatal — annotations are optional enrichment
+    }
+  }, [sessionId, recap, scopedSearchParams]);
+
+  useEffect(() => {
+    loadAnnotations();
+  }, [loadAnnotations]);
+
+  useEffect(() => {
+    return () => {
+      if (hoverOpenTimerRef.current !== null) {
+        window.clearTimeout(hoverOpenTimerRef.current);
+      }
+      if (hoverCloseTimerRef.current !== null) {
+        window.clearTimeout(hoverCloseTimerRef.current);
+      }
+    };
+  }, []);
+
   const availableTabs = useMemo(() => {
     if (!recap) {
       return {
@@ -173,14 +247,6 @@ export function RecapTabs({
     } as const;
   }, [recap]);
 
-  const scopedSearchParams = useMemo(
-    () => ({
-      ...searchParams,
-      campaign_slug: campaignSlug,
-    }),
-    [campaignSlug, searchParams]
-  );
-
   async function handleRegenerateRecap() {
     setIsPending(true);
     setBanner(null);
@@ -194,6 +260,7 @@ export function RecapTabs({
         tone: "success",
         message: "Recap regenerated successfully.",
       });
+      await loadAnnotations();
       router.refresh();
     } catch (error) {
       setBanner({
@@ -208,13 +275,116 @@ export function RecapTabs({
   const recapBaseName = `${campaignSlug}-${sessionId}-recap`;
   const activeRecapText = recap ? recap[activeTab] : "";
   const activeRecapLines = useMemo(() => normalizeRecapLines(activeRecapText), [activeRecapText]);
+  const activeAnnotatedLines: AnnotatedRecapLine[] | null = useMemo(() => {
+    const tabAnnotation = annotations?.[activeTab];
+    return tabAnnotation?.lines ?? null;
+  }, [annotations, activeTab]);
   const isTabEnabled = (tab: RecapTab) => availableTabs[tab];
+  const activePreviewEntity = pinnedPreviewEntity ?? hoverPreviewEntity;
   const shouldShowLegacyNotice = Boolean(
     recap
     && recap.source
     && recap.source !== "canonical"
     && activeRecapText.trim().length > 0
   );
+
+  function clearHoverOpenTimer() {
+    if (hoverOpenTimerRef.current !== null) {
+      window.clearTimeout(hoverOpenTimerRef.current);
+      hoverOpenTimerRef.current = null;
+    }
+  }
+
+  function clearHoverCloseTimer() {
+    if (hoverCloseTimerRef.current !== null) {
+      window.clearTimeout(hoverCloseTimerRef.current);
+      hoverCloseTimerRef.current = null;
+    }
+  }
+
+  function buildPreviewEntity(
+    target: HTMLElement,
+    entityId: string,
+    entityName: string,
+    category: RegistryCategoryKey
+  ): PreviewEntityState {
+    return {
+      entityId,
+      entityName,
+      category,
+      anchorRect: getAnchorRect(target),
+    };
+  }
+
+  function scheduleHoverClose() {
+    clearHoverCloseTimer();
+    hoverCloseTimerRef.current = window.setTimeout(() => {
+      setHoverPreviewEntity(null);
+      hoverCloseTimerRef.current = null;
+    }, HOVER_CLOSE_DELAY_MS);
+  }
+
+  function handleEntityMouseEnter(
+    target: HTMLElement,
+    entityId: string,
+    entityName: string,
+    category: RegistryCategoryKey
+  ) {
+    if (pinnedPreviewEntity) return;
+    clearHoverCloseTimer();
+    clearHoverOpenTimer();
+
+    const preview = buildPreviewEntity(target, entityId, entityName, category);
+    hoverOpenTimerRef.current = window.setTimeout(() => {
+      setHoverPreviewEntity(preview);
+      hoverOpenTimerRef.current = null;
+    }, HOVER_OPEN_DELAY_MS);
+  }
+
+  function handleEntityMouseLeave() {
+    if (pinnedPreviewEntity) return;
+    clearHoverOpenTimer();
+    scheduleHoverClose();
+  }
+
+  function handleEntityClick(
+    target: HTMLElement,
+    entityId: string,
+    entityName: string,
+    category: RegistryCategoryKey
+  ) {
+    clearHoverOpenTimer();
+    clearHoverCloseTimer();
+
+    const preview = buildPreviewEntity(target, entityId, entityName, category);
+    setHoverPreviewEntity(preview);
+    setPinnedPreviewEntity((current) => {
+      if (current && current.entityId === entityId) {
+        return null;
+      }
+      return preview;
+    });
+  }
+
+  function handlePreviewMouseEnter() {
+    clearHoverCloseTimer();
+  }
+
+  function handlePreviewMouseLeave() {
+    if (pinnedPreviewEntity) return;
+    scheduleHoverClose();
+  }
+
+  function handlePreviewClose() {
+    clearHoverOpenTimer();
+    clearHoverCloseTimer();
+    setHoverPreviewEntity(null);
+    setPinnedPreviewEntity(null);
+  }
+
+  function handleResolutionChange() {
+    loadAnnotations();
+  }
 
   return (
     <div className="rounded-2xl card-glass">
@@ -276,17 +446,66 @@ export function RecapTabs({
         </div>
       </div>
       <div className="space-y-4 p-6">
+        {/* Entity resolution panel — shown before recap content */}
+        {recap && (
+          <EntityResolutionPanel
+            sessionId={sessionId}
+            campaignSlug={campaignSlug}
+            searchParams={searchParams}
+            canWrite={canWrite}
+            onResolutionChange={handleResolutionChange}
+          />
+        )}
+
         {recap ? (
           <>
             {activeRecapLines.length > 0 ? (
               <>
                 <div className="space-y-2 text-sm leading-relaxed text-foreground/90">
-                  {activeRecapLines.map((line, index) => (
-                    <div key={`${activeTab}-${index}`} className="flex gap-2">
-                      <span className="text-amber-400">✦</span>
-                      <span>{line}</span>
-                    </div>
-                  ))}
+                  {activeAnnotatedLines
+                    ? activeAnnotatedLines.map((line, index) => (
+                        <div key={`${activeTab}-annotated-${index}`} className="flex gap-2">
+                          <span className="text-amber-400">✦</span>
+                          <span>
+                            {line.spans.map((span, si) =>
+                              span.type === "entity" ? (
+                                <button
+                                  key={si}
+                                  type="button"
+                                  onMouseEnter={(event) =>
+                                    handleEntityMouseEnter(
+                                      event.currentTarget,
+                                      span.entityId,
+                                      span.text,
+                                      span.category
+                                    )
+                                  }
+                                  onMouseLeave={handleEntityMouseLeave}
+                                  onClick={(event) =>
+                                    handleEntityClick(
+                                      event.currentTarget,
+                                      span.entityId,
+                                      span.text,
+                                      span.category
+                                    )
+                                  }
+                                  className="text-amber-400 font-semibold hover:text-amber-300 hover:underline cursor-pointer"
+                                >
+                                  {span.text}
+                                </button>
+                              ) : (
+                                <span key={si}>{span.text}</span>
+                              )
+                            )}
+                          </span>
+                        </div>
+                      ))
+                    : activeRecapLines.map((line, index) => (
+                        <div key={`${activeTab}-${index}`} className="flex gap-2">
+                          <span className="text-amber-400">✦</span>
+                          <span>{line}</span>
+                        </div>
+                      ))}
                 </div>
                 <div className="rounded-xl border border-border/60 bg-background/35 px-3 py-2 text-[11px] uppercase tracking-widest text-muted-foreground">
                   Generated {new Date(recap.generatedAt).toLocaleString()}
@@ -325,6 +544,22 @@ export function RecapTabs({
           </div>
         ) : null}
       </div>
+
+      {/* Entity preview side panel */}
+      {activePreviewEntity && (
+        <EntityPreviewPanel
+          entityId={activePreviewEntity.entityId}
+          entityName={activePreviewEntity.entityName}
+          category={activePreviewEntity.category}
+          campaignSlug={campaignSlug}
+          anchorRect={activePreviewEntity.anchorRect}
+          isPinned={Boolean(pinnedPreviewEntity)}
+          searchParams={searchParams}
+          onMouseEnter={handlePreviewMouseEnter}
+          onMouseLeave={handlePreviewMouseLeave}
+          onClose={handlePreviewClose}
+        />
+      )}
     </div>
   );
 }

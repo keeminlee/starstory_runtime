@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   applyCampaignRegistryPendingActionApi,
   createCampaignRegistryEntryApi,
+  getEntityAppearancesApi,
   updateCampaignRegistryEntryApi,
 } from "@/lib/api/registry";
 import { WebApiError } from "@/lib/api/http";
+import type { EntityAppearanceDto } from "@/lib/registry/types";
 import type {
   RegistryCategoryKey,
   RegistryEntityDto,
@@ -80,6 +82,40 @@ export function CampaignRegistryManager({
 
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
 
+  // Appearance history: expanded entity -> cached appearances
+  const [expandedAppearanceId, setExpandedAppearanceId] = useState<string | null>(null);
+  const [appearanceCache, setAppearanceCache] = useState<Record<string, EntityAppearanceDto[]>>({});
+  const [appearanceLoading, setAppearanceLoading] = useState(false);
+
+  const scopedSearchParams = useMemo(
+    () => ({
+      ...(searchParams ?? {}),
+      ...(guildId ? { guild_id: guildId } : {}),
+    }),
+    [guildId, searchParams]
+  );
+
+  const toggleAppearances = useCallback(
+    async (entityId: string) => {
+      if (expandedAppearanceId === entityId) {
+        setExpandedAppearanceId(null);
+        return;
+      }
+      setExpandedAppearanceId(entityId);
+      if (appearanceCache[entityId]) return;
+      setAppearanceLoading(true);
+      try {
+        const res = await getEntityAppearancesApi(campaignSlug, entityId, scopedSearchParams);
+        setAppearanceCache((prev) => ({ ...prev, [entityId]: res.appearances }));
+      } catch {
+        setAppearanceCache((prev) => ({ ...prev, [entityId]: [] }));
+      } finally {
+        setAppearanceLoading(false);
+      }
+    },
+    [expandedAppearanceId, appearanceCache, campaignSlug, scopedSearchParams]
+  );
+
   const categoryCounts = useMemo(
     () => ({
       pcs: registry.categories.pcs.length,
@@ -126,14 +162,6 @@ export function CampaignRegistryManager({
     if (!q) return registry.ignoreTokens;
     return registry.ignoreTokens.filter((token) => token.toLowerCase().includes(q));
   }, [query, registry.ignoreTokens]);
-
-  const scopedSearchParams = useMemo(
-    () => ({
-      ...(searchParams ?? {}),
-      ...(guildId ? { guild_id: guildId } : {}),
-    }),
-    [guildId, searchParams]
-  );
 
   async function withUpdate(action: () => Promise<RegistrySnapshotDto>, successMessage: string) {
     setIsPending(true);
@@ -479,6 +507,7 @@ export function CampaignRegistryManager({
                       </div>
                     </form>
                   ) : (
+                    <>
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <p className="font-semibold">{entity.canonicalName}</p>
@@ -487,8 +516,39 @@ export function CampaignRegistryManager({
                         {entity.notes ? <p className="mt-1 text-xs text-muted-foreground">Notes: {entity.notes}</p> : null}
                         {entity.category === "pcs" && entity.discordUserId ? <p className="mt-1 text-xs text-muted-foreground">Discord: {entity.discordUserId}</p> : null}
                       </div>
-                      <button type="button" disabled={isPending || !isEditable} onClick={() => setEditingEntryId(entity.id)} className="control-button-ghost rounded-full px-3 py-1 text-xs uppercase tracking-wider">Edit</button>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => toggleAppearances(entity.id)} className="control-button-ghost rounded-full px-3 py-1 text-xs uppercase tracking-wider">
+                          {expandedAppearanceId === entity.id ? "Hide Chronicle" : "Chronicle"}
+                        </button>
+                        <button type="button" disabled={isPending || !isEditable} onClick={() => setEditingEntryId(entity.id)} className="control-button-ghost rounded-full px-3 py-1 text-xs uppercase tracking-wider">Edit</button>
+                      </div>
                     </div>
+                    {expandedAppearanceId === entity.id ? (
+                      <div className="mt-3 border-t border-border/40 pt-3">
+                        {appearanceLoading && !appearanceCache[entity.id] ? (
+                          <p className="text-xs text-muted-foreground">Loading appearances…</p>
+                        ) : (appearanceCache[entity.id]?.length ?? 0) === 0 ? (
+                          <p className="text-xs text-muted-foreground">No session appearances recorded yet.</p>
+                        ) : (
+                          <div className="space-y-2">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                              Appeared in {appearanceCache[entity.id]!.length} session{appearanceCache[entity.id]!.length === 1 ? "" : "s"}
+                            </p>
+                            {appearanceCache[entity.id]!.map((a) => (
+                              <div key={a.sessionId} className="rounded-md border border-border/40 bg-background/25 px-3 py-2 text-xs">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-medium">{a.sessionLabel || a.sessionId}</span>
+                                  <span className="text-muted-foreground">{a.mentionCount} mention{a.mentionCount === 1 ? "" : "s"}</span>
+                                </div>
+                                {a.sessionDate ? <p className="mt-0.5 text-muted-foreground">{a.sessionDate}</p> : null}
+                                {a.excerpt ? <p className="mt-1 text-muted-foreground italic">&ldquo;{a.excerpt}&rdquo;</p> : null}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                    </>
                   )}
                 </div>
               );

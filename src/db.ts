@@ -175,12 +175,20 @@ export function getDb(): Database.Database {
 }
 
 export function getDbForCampaign(campaignSlug: string): Database.Database {
-  const dbPath = path.resolve(resolveCampaignDbPath(campaignSlug));
+  return getDbForCampaignScope({ campaignSlug });
+}
+
+export function getDbForCampaignScope(args: {
+  campaignSlug: string;
+  guildId?: string | null;
+}): Database.Database {
+  const dbPath = path.resolve(resolveCampaignDbPath(args.campaignSlug, args.guildId));
   const existing = dbByPath.get(dbPath);
   if (existing) {
     dbLog.debug("route", {
       type: "campaign",
-      slug: campaignSlug,
+      slug: args.campaignSlug,
+      guildId: args.guildId ?? null,
       dbPath,
       status: "cache-hit",
     });
@@ -191,7 +199,8 @@ export function getDbForCampaign(campaignSlug: string): Database.Database {
   dbByPath.set(dbPath, db);
   dbLog.debug("route", {
     type: "campaign",
-    slug: campaignSlug,
+    slug: args.campaignSlug,
+    guildId: args.guildId ?? null,
     dbPath,
     status: "opened-new",
   });

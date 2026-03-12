@@ -1,6 +1,7 @@
 import { fetchJson } from "@/lib/api/http";
 import type {
   CampaignRegistryResponse,
+  EntityAppearancesResponse,
   RegistryCreateEntryApiRequest,
   RegistryPendingActionApiRequest,
   RegistryUpdateEntryApiRequest,
@@ -73,6 +74,19 @@ export async function applyCampaignRegistryPendingActionApi(
     {
       method: "POST",
       body,
+      query: toQuery(searchParams),
+    }
+  );
+}
+
+export async function getEntityAppearancesApi(
+  campaignSlug: string,
+  entryId: string,
+  searchParams?: QueryInput
+): Promise<EntityAppearancesResponse> {
+  return fetchJson<EntityAppearancesResponse>(
+    `/api/campaigns/${encodeURIComponent(campaignSlug)}/registry/entries/${encodeURIComponent(entryId)}/appearances`,
+    {
       query: toQuery(searchParams),
     }
   );

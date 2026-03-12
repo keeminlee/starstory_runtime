@@ -64,3 +64,40 @@ export type RegistryPendingActionRequest =
       action: "delete";
       key: string;
     };
+
+// ── Chronicle Entity Resolution ─────────────────────────────────────
+
+export type EntityResolutionStatus = "resolved" | "created" | "ignored";
+
+/** A candidate name detected in a session, with evidence and possible matches. */
+export type EntityCandidateDto = {
+  candidateName: string;
+  mentions: number;
+  examples: string[];
+  possibleMatches: {
+    entityId: string;
+    canonicalName: string;
+    category: RegistryCategoryKey;
+    confidence: "exact" | "alias" | "fuzzy";
+  }[];
+  resolution: EntityResolutionDto | null;
+};
+
+/** A persisted resolution decision for one candidate name in one session. */
+export type EntityResolutionDto = {
+  id: string;
+  candidateName: string;
+  resolution: EntityResolutionStatus;
+  entityId: string | null;
+  entityCategory: RegistryCategoryKey | null;
+  resolvedAt: string;
+};
+
+/** One appearance of an entity in a session (derived from recap annotations). */
+export type EntityAppearanceDto = {
+  sessionId: string;
+  sessionLabel: string | null;
+  sessionDate: string;
+  excerpt: string | null;
+  mentionCount: number;
+};

@@ -69,3 +69,49 @@ export type RegistryCreateEntryApiRequest = RegistryCreateEntryRequest;
 export type RegistryUpdateEntryApiRequest = RegistryUpdateEntryRequest;
 
 export type RegistryPendingActionApiRequest = RegistryPendingActionRequest;
+
+// ── Chronicle Entity Resolution API types ───────────────────────────
+
+import type {
+  EntityCandidateDto,
+  EntityResolutionDto,
+  EntityAppearanceDto,
+  RegistryCategoryKey,
+} from "@/lib/registry/types";
+import type { SessionAnnotatedRecaps } from "@/lib/types";
+
+export type EntityCandidatesResponse = {
+  sessionId: string;
+  campaignSlug: string;
+  candidates: EntityCandidateDto[];
+};
+
+export type ResolveEntityRequest = {
+  candidateName: string;
+  entityId: string;
+};
+
+export type CreateEntityFromCandidateRequest = {
+  candidateName: string;
+  category: RegistryCategoryKey;
+  canonicalName?: string;
+  notes?: string;
+};
+
+export type IgnoreEntityCandidateRequest = {
+  candidateName: string;
+};
+
+export type EntityResolutionMutationResponse = {
+  resolution: EntityResolutionDto;
+};
+
+export type SessionAnnotatedRecapsResponse = {
+  sessionId: string;
+  annotations: SessionAnnotatedRecaps | null;
+};
+
+export type EntityAppearancesResponse = {
+  entityId: string;
+  appearances: EntityAppearanceDto[];
+};

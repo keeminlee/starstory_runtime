@@ -72,6 +72,7 @@ export default async function CampaignSessionPage({ params, searchParams }: Page
                 && Boolean(process.env.OPENAI_API_KEY?.trim())
                 && Boolean(session.canWrite)
               }
+              canWrite={Boolean(session.canWrite)}
               showRegenerateUnavailableBanner={session.campaignSlug !== "demo"}
               status={session.artifacts.recap}
               emptyDescription={recapEmptyDescription}

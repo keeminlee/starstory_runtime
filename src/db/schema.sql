@@ -698,3 +698,93 @@ CREATE TABLE IF NOT EXISTS gold_memory_candidate (
 
 CREATE INDEX IF NOT EXISTS idx_gold_candidate_scope
 ON gold_memory_candidate(guild_id, campaign_slug, status, updated_at_ms DESC);
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- Chronicle Entity Resolution (Concern A): Resolution Decisions
+-- Per-session candidate resolution state.
+-- Records the DM's decision for each candidate name found in a session:
+-- resolve to an existing entity, create a new entity, or ignore.
+-- ═══════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS entity_resolutions (
+  id TEXT PRIMARY KEY,                     -- UUID
+  session_id TEXT NOT NULL,                -- FK to sessions.session_id
+  guild_id TEXT NOT NULL,                  -- Guild scope (campaign isolation)
+  campaign_slug TEXT NOT NULL,             -- Campaign scope
+  candidate_name TEXT NOT NULL,            -- The surface name as detected in transcript/recap
+  resolution TEXT NOT NULL,                -- 'resolved' | 'created' | 'ignored'
+  entity_id TEXT,                          -- FK to registry entity id (NULL if ignored)
+  entity_category TEXT,                    -- Registry category at time of resolution (NULL if ignored)
+  resolved_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+
+  UNIQUE(session_id, candidate_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_entity_resolutions_session
+ON entity_resolutions(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_entity_resolutions_entity
+ON entity_resolutions(entity_id);
+
+CREATE INDEX IF NOT EXISTS idx_entity_resolutions_campaign
+ON entity_resolutions(guild_id, campaign_slug);
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- Chronicle Entity Resolution (Concern B): Recap Annotation Artifact
+-- Stored span structure for one recap version.
+-- Version-aware: tied to a specific session_recaps row via recap_updated_at_ms.
+-- On recap regeneration or resolution change, the entire artifact is
+-- recomputed (full rewrite, no surgical patching).
+-- ═══════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS recap_entity_annotations (
+  id TEXT PRIMARY KEY,                     -- UUID
+  session_id TEXT NOT NULL,                -- FK to sessions.session_id
+  recap_updated_at_ms INTEGER NOT NULL,    -- Version link: session_recaps.updated_at_ms this was derived from
+  recap_tab TEXT NOT NULL,                 -- 'concise' | 'balanced' | 'detailed'
+  line_index INTEGER NOT NULL,             -- 0-based line within the recap tab text
+  spans_json TEXT NOT NULL,                -- JSON array: [{type:"text",text:"..."},{type:"entity",text:"...",entityId:"...",category:"..."}]
+  created_at_ms INTEGER NOT NULL,
+
+  UNIQUE(session_id, recap_tab, line_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_recap_annotations_session
+ON recap_entity_annotations(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_recap_annotations_version
+ON recap_entity_annotations(session_id, recap_updated_at_ms);
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- Chronicle Entity Resolution (Concern C): Appearance History
+-- Entity/session rollup derived from the annotation artifact.
+-- Stores a small excerpt snapshot per entity per session for read performance.
+-- Treated as derived and replaceable: fully rewritten on annotation refresh.
+-- ═══════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS entity_appearance_history (
+  id TEXT PRIMARY KEY,                     -- UUID
+  entity_id TEXT NOT NULL,                 -- Registry entity id
+  session_id TEXT NOT NULL,                -- FK to sessions.session_id
+  guild_id TEXT NOT NULL,                  -- Guild scope
+  campaign_slug TEXT NOT NULL,             -- Campaign scope
+  recap_updated_at_ms INTEGER NOT NULL,    -- Version link: which recap version this derives from
+  session_label TEXT,                      -- sessions.label snapshot (e.g., "C2E03")
+  session_date TEXT,                       -- sessions.started_at_ms formatted as ISO date
+  excerpt TEXT,                            -- Small recap excerpt mentioning this entity
+  mention_count INTEGER NOT NULL DEFAULT 0, -- Number of mentions in this session's recap
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+
+  UNIQUE(entity_id, session_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_appearance_entity
+ON entity_appearance_history(entity_id);
+
+CREATE INDEX IF NOT EXISTS idx_appearance_session
+ON entity_appearance_history(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_appearance_campaign
+ON entity_appearance_history(guild_id, campaign_slug);
