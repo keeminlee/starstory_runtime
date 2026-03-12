@@ -175,12 +175,20 @@ export function getDb(): Database.Database {
 }
 
 export function getDbForCampaign(campaignSlug: string): Database.Database {
-  const dbPath = path.resolve(resolveCampaignDbPath(campaignSlug));
+  return getDbForCampaignScope({ campaignSlug });
+}
+
+export function getDbForCampaignScope(args: {
+  campaignSlug: string;
+  guildId?: string | null;
+}): Database.Database {
+  const dbPath = path.resolve(resolveCampaignDbPath(args.campaignSlug, args.guildId));
   const existing = dbByPath.get(dbPath);
   if (existing) {
     dbLog.debug("route", {
       type: "campaign",
-      slug: campaignSlug,
+      slug: args.campaignSlug,
+      guildId: args.guildId ?? null,
       dbPath,
       status: "cache-hit",
     });
@@ -191,7 +199,8 @@ export function getDbForCampaign(campaignSlug: string): Database.Database {
   dbByPath.set(dbPath, db);
   dbLog.debug("route", {
     type: "campaign",
-    slug: campaignSlug,
+    slug: args.campaignSlug,
+    guildId: args.guildId ?? null,
     dbPath,
     status: "opened-new",
   });
@@ -199,6 +208,80 @@ export function getDbForCampaign(campaignSlug: string): Database.Database {
 }
 
 function applyMigrations(db: Database.Database) {
+  const entityResolutionColumns = db.pragma("table_info(entity_resolutions)") as Array<{ name: string }>;
+  const entityResolutionTable = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'entity_resolutions'")
+    .get() as { sql?: string } | undefined;
+  const hasEntityResolutionBatchId = entityResolutionColumns.some((col) => col.name === "batch_id");
+  const hasEntityResolutionUniqueConstraint =
+    typeof entityResolutionTable?.sql === "string"
+    && entityResolutionTable.sql.includes("UNIQUE(session_id, candidate_name)");
+
+  if (!hasEntityResolutionBatchId || hasEntityResolutionUniqueConstraint) {
+    console.log("Migrating: Rebuilding entity_resolutions for append-only batch provenance");
+    db.exec(`
+      ALTER TABLE entity_resolutions RENAME TO entity_resolutions_legacy;
+
+      CREATE TABLE entity_resolutions (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        guild_id TEXT NOT NULL,
+        campaign_slug TEXT NOT NULL,
+        candidate_name TEXT NOT NULL,
+        resolution TEXT NOT NULL,
+        entity_id TEXT,
+        entity_category TEXT,
+        batch_id TEXT,
+        resolved_at_ms INTEGER NOT NULL,
+        updated_at_ms INTEGER NOT NULL
+      );
+
+      INSERT INTO entity_resolutions (
+        id,
+        session_id,
+        guild_id,
+        campaign_slug,
+        candidate_name,
+        resolution,
+        entity_id,
+        entity_category,
+        batch_id,
+        resolved_at_ms,
+        updated_at_ms
+      )
+      SELECT
+        id,
+        session_id,
+        guild_id,
+        campaign_slug,
+        candidate_name,
+        resolution,
+        entity_id,
+        entity_category,
+        NULL,
+        resolved_at_ms,
+        updated_at_ms
+      FROM entity_resolutions_legacy;
+
+      DROP TABLE entity_resolutions_legacy;
+
+      CREATE INDEX IF NOT EXISTS idx_entity_resolutions_session
+      ON entity_resolutions(session_id);
+
+      CREATE INDEX IF NOT EXISTS idx_entity_resolutions_session_candidate
+      ON entity_resolutions(session_id, candidate_name, updated_at_ms DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_entity_resolutions_entity
+      ON entity_resolutions(entity_id);
+
+      CREATE INDEX IF NOT EXISTS idx_entity_resolutions_batch
+      ON entity_resolutions(batch_id);
+
+      CREATE INDEX IF NOT EXISTS idx_entity_resolutions_campaign
+      ON entity_resolutions(guild_id, campaign_slug);
+    `);
+  }
+
   // Migration: Fix npc_instances schema (id should be TEXT, correct column order)
   const npcColumns = db.pragma("table_info(npc_instances)") as any[];
   const idColumn = npcColumns.find((col: any) => col.name === "id");

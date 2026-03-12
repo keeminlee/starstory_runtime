@@ -95,3 +95,36 @@ export type DashboardModel = {
     | "signed_in_no_meepo_installed"
     | "signed_in_no_sessions";
 };
+
+// ── Annotated Recap Segments ────────────────────────────────────────
+
+import type { RegistryCategoryKey } from "@/lib/registry/types";
+
+export type RecapTextSpan = { type: "text"; text: string };
+export type RecapEntitySpan = {
+  type: "entity";
+  text: string;
+  entityId: string;
+  category: RegistryCategoryKey;
+};
+export type RecapSpan = RecapTextSpan | RecapEntitySpan;
+
+/** Annotated recap line: original text plus entity spans if annotations exist. */
+export type AnnotatedRecapLine = {
+  lineIndex: number;
+  raw: string;
+  spans: RecapSpan[];
+};
+
+/** Full annotated recap for one tab, version-aware. */
+export type AnnotatedRecap = {
+  recapUpdatedAt: string;
+  lines: AnnotatedRecapLine[];
+};
+
+/** Annotated recaps keyed by tab. Null if no annotations exist yet. */
+export type SessionAnnotatedRecaps = {
+  concise: AnnotatedRecap | null;
+  balanced: AnnotatedRecap | null;
+  detailed: AnnotatedRecap | null;
+};

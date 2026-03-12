@@ -73,7 +73,7 @@ type ResolvedSessionOwnership = {
   session: ArchiveSessionRow;
 };
 
-async function resolveAuthorizedSessionOwnership(args: {
+export async function resolveAuthorizedSessionOwnership(args: {
   authorizedGuildIds: string[];
   sessionId: string;
   searchParams?: Record<string, string | string[] | undefined>;
@@ -355,6 +355,15 @@ export async function regenerateWebSessionRecap(args: {
       campaignSlug,
       sessionId: args.sessionId,
       reason: args.reason,
+    });
+
+    // Refresh entity annotations for the new recap version
+    const { refreshAnnotationsForSession } = await import("@/lib/server/recapAnnotationService");
+    await refreshAnnotationsForSession({
+      guildId,
+      campaignSlug,
+      sessionId: args.sessionId,
+      searchParams: args.searchParams,
     });
 
     return getWebSessionDetail({

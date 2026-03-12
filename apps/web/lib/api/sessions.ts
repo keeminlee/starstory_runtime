@@ -7,6 +7,17 @@ import type {
   SessionTranscriptResponse,
   UpdateSessionLabelRequest,
   UpdateSessionLabelResponse,
+  EntityCandidatesResponse,
+  ResolveEntityRequest,
+  CreateEntityFromCandidateRequest,
+  IgnoreEntityCandidateRequest,
+  EntityResolutionMutationResponse,
+  SaveEntityReviewBatchRequest,
+  SaveEntityReviewBatchResponse,
+  RevertEntityReviewBatchRequest,
+  RevertEntityReviewBatchResponse,
+  EntityReviewBatchesResponse,
+  SessionAnnotatedRecapsResponse,
 } from "@/lib/api/types";
 
 type QueryInput = Record<string, string | string[] | undefined> | undefined;
@@ -69,5 +80,95 @@ export async function updateSessionLabelApi(
     method: "PATCH",
     query: toQuery(searchParams),
     body: payload,
+  });
+}
+
+// ── Chronicle Entity Resolution ─────────────────────────────────────
+
+export async function getEntityCandidatesApi(
+  sessionId: string,
+  searchParams?: QueryInput
+): Promise<EntityCandidatesResponse> {
+  return fetchJson<EntityCandidatesResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/entity-candidates`, {
+    query: toQuery(searchParams),
+  });
+}
+
+export async function resolveEntityApi(
+  sessionId: string,
+  payload: ResolveEntityRequest,
+  searchParams?: QueryInput
+): Promise<EntityResolutionMutationResponse> {
+  return fetchJson<EntityResolutionMutationResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/resolve-entity`, {
+    method: "POST",
+    query: toQuery(searchParams),
+    body: payload,
+  });
+}
+
+export async function createEntityFromCandidateApi(
+  sessionId: string,
+  payload: CreateEntityFromCandidateRequest,
+  searchParams?: QueryInput
+): Promise<EntityResolutionMutationResponse> {
+  return fetchJson<EntityResolutionMutationResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/create-entity-from-candidate`, {
+    method: "POST",
+    query: toQuery(searchParams),
+    body: payload,
+  });
+}
+
+export async function ignoreEntityCandidateApi(
+  sessionId: string,
+  payload: IgnoreEntityCandidateRequest,
+  searchParams?: QueryInput
+): Promise<EntityResolutionMutationResponse> {
+  return fetchJson<EntityResolutionMutationResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/ignore-entity-candidate`, {
+    method: "POST",
+    query: toQuery(searchParams),
+    body: payload,
+  });
+}
+
+export async function saveEntityReviewBatchApi(
+  payload: SaveEntityReviewBatchRequest,
+  searchParams?: QueryInput
+): Promise<SaveEntityReviewBatchResponse> {
+  return fetchJson<SaveEntityReviewBatchResponse>("/api/entity-review/save", {
+    method: "POST",
+    query: toQuery(searchParams),
+    body: payload,
+  });
+}
+
+export async function revertEntityReviewBatchApi(
+  payload: RevertEntityReviewBatchRequest,
+  searchParams?: QueryInput
+): Promise<RevertEntityReviewBatchResponse> {
+  return fetchJson<RevertEntityReviewBatchResponse>("/api/entity-review/revert", {
+    method: "POST",
+    query: toQuery(searchParams),
+    body: payload,
+  });
+}
+
+export async function getEntityReviewBatchesApi(
+  sessionId: string,
+  searchParams?: QueryInput
+): Promise<EntityReviewBatchesResponse> {
+  return fetchJson<EntityReviewBatchesResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/entity-review/batches`,
+    {
+      query: toQuery(searchParams),
+    }
+  );
+}
+
+export async function getAnnotatedRecapsApi(
+  sessionId: string,
+  searchParams?: QueryInput
+): Promise<SessionAnnotatedRecapsResponse> {
+  return fetchJson<SessionAnnotatedRecapsResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/annotated-recaps`, {
+    query: toQuery(searchParams),
   });
 }
