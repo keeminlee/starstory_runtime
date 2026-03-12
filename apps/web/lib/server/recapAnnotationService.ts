@@ -169,95 +169,113 @@ export async function refreshAnnotationsForSession(args: AnnotationInput): Promi
 
   const recapUpdatedAtMs = recap.updatedAtMs;
 
-  // Load resolution decisions for this session
+  // Load active resolution decisions for this session
   const db = getDbForCampaignScope({ campaignSlug, guildId });
-  const resolutions = db
-    .prepare(`SELECT * FROM entity_resolutions WHERE session_id = ? AND resolution != 'ignored'`)
+  const activeResolutionRows = db
+    .prepare(
+      `SELECT er.candidate_name, er.entity_id, er.entity_category, er.updated_at_ms, er.id
+       FROM entity_resolutions er
+       LEFT JOIN entity_review_batches erb ON erb.id = er.batch_id
+       WHERE er.session_id = ?
+         AND er.resolution != 'ignored'
+         AND (er.batch_id IS NULL OR erb.status = 'applied')
+       ORDER BY er.updated_at_ms DESC, er.id DESC`
+    )
     .all(sessionId) as Array<{
       candidate_name: string;
       entity_id: string;
       entity_category: string;
+      updated_at_ms: number;
+      id: string;
     }>;
 
-    if (resolutions.length === 0) {
-      // No resolutions — clear any stale annotations + appearance history
-      db.prepare(`DELETE FROM recap_entity_annotations WHERE session_id = ?`).run(sessionId);
-      db.prepare(`DELETE FROM entity_appearance_history WHERE session_id = ?`).run(sessionId);
-      return;
+  const seenCandidates = new Set<string>();
+  const resolutions = activeResolutionRows.filter((row) => {
+    if (seenCandidates.has(row.candidate_name)) {
+      return false;
     }
+    seenCandidates.add(row.candidate_name);
+    return true;
+  });
 
-    // Build resolved entity map: candidateName → { entityId, entityCategory }
-    const resolvedEntities = new Map<string, { entityId: string; entityCategory: RegistryCategoryKey }>();
-    for (const r of resolutions) {
-      resolvedEntities.set(normKey(r.candidate_name), {
-        entityId: r.entity_id,
-        entityCategory: r.entity_category as RegistryCategoryKey,
-      });
-    }
+  if (resolutions.length === 0) {
+    // No active resolutions — clear any stale annotations + appearance history
+    db.prepare(`DELETE FROM recap_entity_annotations WHERE session_id = ?`).run(sessionId);
+    db.prepare(`DELETE FROM entity_appearance_history WHERE session_id = ?`).run(sessionId);
+    return;
+  }
 
-    // Load registry for entity name/alias lookup
-    const registrySnapshot = await getWebRegistrySnapshot({
-      campaignSlug,
-      searchParams: args.searchParams,
+  // Build resolved entity map: candidateName → { entityId, entityCategory }
+  const resolvedEntities = new Map<string, { entityId: string; entityCategory: RegistryCategoryKey }>();
+  for (const r of resolutions) {
+    resolvedEntities.set(normKey(r.candidate_name), {
+      entityId: r.entity_id,
+      entityCategory: r.entity_category as RegistryCategoryKey,
     });
+  }
 
-    const lookups = buildEntityLookup(registrySnapshot.categories, resolvedEntities);
+  // Load registry for entity name/alias lookup
+  const registrySnapshot = await getWebRegistrySnapshot({
+    campaignSlug,
+    searchParams: args.searchParams,
+  });
 
-    // Process all recap tabs
-    const recapTexts: Record<RecapTab, string> = {
-      concise: recap.views.concise,
-      balanced: recap.views.balanced,
-      detailed: recap.views.detailed,
-    };
+  const lookups = buildEntityLookup(registrySnapshot.categories, resolvedEntities);
 
-    // Entity mention tracking for appearance history
-    const entityMentions = new Map<string, { count: number; excerpts: string[] }>();
+  // Process all recap tabs
+  const recapTexts: Record<RecapTab, string> = {
+    concise: recap.views.concise,
+    balanced: recap.views.balanced,
+    detailed: recap.views.detailed,
+  };
 
-    // Start transaction for atomic replacement
-    const insertAnnotation = db.prepare(
-      `INSERT INTO recap_entity_annotations (id, session_id, recap_updated_at_ms, recap_tab, line_index, spans_json, created_at_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    );
+  // Entity mention tracking for appearance history
+  const entityMentions = new Map<string, { count: number; excerpts: string[] }>();
 
-    const transaction = db.transaction(() => {
-      // Clear all previous annotations for this session (full rewrite)
-      db.prepare(`DELETE FROM recap_entity_annotations WHERE session_id = ?`).run(sessionId);
+  // Start transaction for atomic replacement
+  const insertAnnotation = db.prepare(
+    `INSERT INTO recap_entity_annotations (id, session_id, recap_updated_at_ms, recap_tab, line_index, spans_json, created_at_ms)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  );
 
-      const now = Date.now();
+  const transaction = db.transaction(() => {
+    // Clear all previous annotations for this session (full rewrite)
+    db.prepare(`DELETE FROM recap_entity_annotations WHERE session_id = ?`).run(sessionId);
 
-      for (const tab of RECAP_TABS) {
-        const lines = normalizeRecapLines(recapTexts[tab]);
-        for (let i = 0; i < lines.length; i++) {
-          const spans = segmentLine(lines[i], lookups);
+    const now = Date.now();
 
-          // Track entity mentions
-          for (const span of spans) {
-            if (span.type === "entity") {
-              const existing = entityMentions.get(span.entityId) ?? { count: 0, excerpts: [] };
-              existing.count++;
-              if (existing.excerpts.length < 2) {
-                // Store short excerpt (first 120 chars of the line)
-                const excerpt = lines[i].length > 120 ? lines[i].slice(0, 117) + "..." : lines[i];
-                existing.excerpts.push(excerpt);
-              }
-              entityMentions.set(span.entityId, existing);
+    for (const tab of RECAP_TABS) {
+      const lines = normalizeRecapLines(recapTexts[tab]);
+      for (let i = 0; i < lines.length; i++) {
+        const spans = segmentLine(lines[i], lookups);
+
+        // Track entity mentions
+        for (const span of spans) {
+          if (span.type === "entity") {
+            const existing = entityMentions.get(span.entityId) ?? { count: 0, excerpts: [] };
+            existing.count++;
+            if (existing.excerpts.length < 2) {
+              const excerpt = lines[i].length > 120 ? lines[i].slice(0, 117) + "..." : lines[i];
+              existing.excerpts.push(excerpt);
             }
+            entityMentions.set(span.entityId, existing);
           }
-
-          insertAnnotation.run(
-            uuidv4(),
-            sessionId,
-            recapUpdatedAtMs,
-            tab,
-            i,
-            JSON.stringify(spans),
-            now
-          );
         }
-      }
-    });
 
-    transaction();
+        insertAnnotation.run(
+          uuidv4(),
+          sessionId,
+          recapUpdatedAtMs,
+          tab,
+          i,
+          JSON.stringify(spans),
+          now
+        );
+      }
+    }
+  });
+
+  transaction();
 
     // ── Concern C: Update appearance history (derived, replaceable) ──
 

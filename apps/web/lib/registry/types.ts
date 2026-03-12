@@ -68,6 +68,7 @@ export type RegistryPendingActionRequest =
 // ── Chronicle Entity Resolution ─────────────────────────────────────
 
 export type EntityResolutionStatus = "resolved" | "created" | "ignored";
+export type EntityReviewBatchStatus = "applied" | "reverted" | "failed";
 
 /** A candidate name detected in a session, with evidence and possible matches. */
 export type EntityCandidateDto = {
@@ -90,7 +91,42 @@ export type EntityResolutionDto = {
   resolution: EntityResolutionStatus;
   entityId: string | null;
   entityCategory: RegistryCategoryKey | null;
+  batchId?: string | null;
   resolvedAt: string;
+};
+
+export type EntityReviewDecision =
+  | {
+      type: "resolve_existing";
+      candidateName: string;
+      entityId: string;
+    }
+  | {
+      type: "create_entity";
+      candidateName: string;
+      canonicalName: string;
+      category: RegistryCategoryKey;
+      notes?: string;
+    }
+  | {
+      type: "add_alias";
+      candidateName: string;
+      entityId: string;
+    }
+  | {
+      type: "ignore_candidate";
+      candidateName: string;
+    };
+
+export type EntityReviewBatchDto = {
+  id: string;
+  sessionId: string;
+  guildId: string;
+  campaignSlug: string;
+  createdBy: string | null;
+  createdAt: string;
+  status: EntityReviewBatchStatus;
+  decisionCount: number;
 };
 
 /** One appearance of an entity in a session (derived from recap annotations). */

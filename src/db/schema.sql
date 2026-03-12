@@ -715,20 +715,70 @@ CREATE TABLE IF NOT EXISTS entity_resolutions (
   resolution TEXT NOT NULL,                -- 'resolved' | 'created' | 'ignored'
   entity_id TEXT,                          -- FK to registry entity id (NULL if ignored)
   entity_category TEXT,                    -- Registry category at time of resolution (NULL if ignored)
+  batch_id TEXT,                           -- Optional review batch provenance (NULL for legacy per-decision writes)
   resolved_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL,
-
-  UNIQUE(session_id, candidate_name)
+  updated_at_ms INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_entity_resolutions_session
 ON entity_resolutions(session_id);
 
+CREATE INDEX IF NOT EXISTS idx_entity_resolutions_session_candidate
+ON entity_resolutions(session_id, candidate_name, updated_at_ms DESC);
+
 CREATE INDEX IF NOT EXISTS idx_entity_resolutions_entity
 ON entity_resolutions(entity_id);
 
+CREATE INDEX IF NOT EXISTS idx_entity_resolutions_batch
+ON entity_resolutions(batch_id);
+
 CREATE INDEX IF NOT EXISTS idx_entity_resolutions_campaign
 ON entity_resolutions(guild_id, campaign_slug);
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- Chronicle Entity Resolution (Concern D): Review Batches
+-- Append-only review commits for one session.
+-- Batch status determines whether associated resolution rows are active.
+-- ═══════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS entity_review_batches (
+  id TEXT PRIMARY KEY,                     -- UUID
+  session_id TEXT NOT NULL,
+  guild_id TEXT NOT NULL,
+  campaign_slug TEXT NOT NULL,
+  created_by TEXT,
+  created_at_ms INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'applied', -- 'applied' | 'reverted' | 'failed'
+  decision_count INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_entity_review_batches_session
+ON entity_review_batches(session_id, created_at_ms DESC);
+
+CREATE INDEX IF NOT EXISTS idx_entity_review_batches_campaign
+ON entity_review_batches(guild_id, campaign_slug, created_at_ms DESC);
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- Chronicle Entity Resolution (Concern E): Registry Mutation Provenance
+-- Logs actual YAML mutations emitted by review batches so revert can be
+-- surgical and append-only auditability is preserved.
+-- ═══════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS registry_mutations (
+  id TEXT PRIMARY KEY,                     -- UUID
+  batch_id TEXT NOT NULL,
+  mutation_type TEXT NOT NULL,            -- 'entity_created' | 'alias_added' | 'ignore_added'
+  entity_id TEXT,
+  alias_text TEXT,
+  payload_json TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_registry_mutations_batch
+ON registry_mutations(batch_id, created_at_ms ASC);
+
+CREATE INDEX IF NOT EXISTS idx_registry_mutations_entity
+ON registry_mutations(entity_id, created_at_ms ASC);
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- Chronicle Entity Resolution (Concern B): Recap Annotation Artifact

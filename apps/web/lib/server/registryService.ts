@@ -454,6 +454,31 @@ export async function createWebRegistryEntry(args: {
   return loadRegistrySnapshot(scope);
 }
 
+export async function addRegistryIgnoreToken(args: {
+  campaignSlug: string;
+  searchParams?: QueryInput;
+  token: string;
+}): Promise<{ changed: boolean; registry: RegistrySnapshotDto }> {
+  const campaign = await assertCampaignEditable(args.campaignSlug, args.searchParams);
+  const scope = toRegistryScope(campaign);
+  ensureRegistryScopeScaffold(scope);
+
+  const ignorePath = getIgnorePath(scope);
+  const ignoreDoc = parseYamlFile<{ version?: number; tokens?: string[] }>(ignorePath, { version: 1, tokens: [] });
+  const currentTokens = Array.isArray(ignoreDoc.tokens) ? ignoreDoc.tokens : [];
+  const nextTokens = addIgnoreToken(currentTokens, args.token);
+
+  if (nextTokens.changed) {
+    ignoreDoc.tokens = nextTokens.tokens;
+    writeYamlFile(ignorePath, ignoreDoc);
+  }
+
+  return {
+    changed: nextTokens.changed,
+    registry: loadRegistrySnapshot(scope),
+  };
+}
+
 export async function updateWebRegistryEntry(args: {
   campaignSlug: string;
   entryId: string;
@@ -507,6 +532,95 @@ export async function updateWebRegistryEntry(args: {
   list[index] = updated;
   writeCategoryDoc(scope, category, doc);
   return loadRegistrySnapshot(scope);
+}
+
+export async function deleteWebRegistryEntry(args: {
+  campaignSlug: string;
+  entryId: string;
+  category: RegistryCategoryKey;
+  searchParams?: QueryInput;
+}): Promise<RegistrySnapshotDto> {
+  const campaign = await assertCampaignEditable(args.campaignSlug, args.searchParams);
+  const scope = toRegistryScope(campaign);
+  ensureRegistryScopeScaffold(scope);
+
+  const doc = readCategoryDoc(scope, args.category);
+  const list = getEntityList(doc, args.category) as Array<Record<string, unknown>>;
+  const index = list.findIndex((entry) => String(entry.id) === args.entryId);
+
+  if (index < 0) {
+    throw new WebDataError("not_found", 404, `Registry entry not found: ${args.entryId}`);
+  }
+
+  list.splice(index, 1);
+  writeCategoryDoc(scope, args.category, doc);
+  return loadRegistrySnapshot(scope);
+}
+
+export async function removeAliasFromWebRegistryEntry(args: {
+  campaignSlug: string;
+  entryId: string;
+  category: RegistryCategoryKey;
+  aliasText: string;
+  searchParams?: QueryInput;
+}): Promise<{ changed: boolean; registry: RegistrySnapshotDto }> {
+  const campaign = await assertCampaignEditable(args.campaignSlug, args.searchParams);
+  const scope = toRegistryScope(campaign);
+  ensureRegistryScopeScaffold(scope);
+
+  const doc = readCategoryDoc(scope, args.category);
+  const list = getEntityList(doc, args.category) as Array<Record<string, unknown>>;
+  const index = list.findIndex((entry) => String(entry.id) === args.entryId);
+
+  if (index < 0) {
+    throw new WebDataError("not_found", 404, `Registry entry not found: ${args.entryId}`);
+  }
+
+  const current = list[index];
+  const normalizedAlias = normKey(args.aliasText);
+  const currentAliases = Array.isArray(current.aliases) ? (current.aliases as string[]) : [];
+  const nextAliases = currentAliases.filter((alias) => normKey(alias) !== normalizedAlias);
+  const changed = nextAliases.length !== currentAliases.length;
+
+  if (changed) {
+    list[index] = {
+      ...current,
+      aliases: nextAliases,
+    };
+    writeCategoryDoc(scope, args.category, doc);
+  }
+
+  return {
+    changed,
+    registry: loadRegistrySnapshot(scope),
+  };
+}
+
+export async function removeRegistryIgnoreToken(args: {
+  campaignSlug: string;
+  searchParams?: QueryInput;
+  token: string;
+}): Promise<{ changed: boolean; registry: RegistrySnapshotDto }> {
+  const campaign = await assertCampaignEditable(args.campaignSlug, args.searchParams);
+  const scope = toRegistryScope(campaign);
+  ensureRegistryScopeScaffold(scope);
+
+  const ignorePath = getIgnorePath(scope);
+  const ignoreDoc = parseYamlFile<{ version?: number; tokens?: string[] }>(ignorePath, { version: 1, tokens: [] });
+  const currentTokens = Array.isArray(ignoreDoc.tokens) ? ignoreDoc.tokens : [];
+  const normalizedToken = normKey(args.token);
+  const nextTokens = currentTokens.filter((token) => normKey(token) !== normalizedToken);
+  const changed = nextTokens.length !== currentTokens.length;
+
+  if (changed) {
+    ignoreDoc.tokens = nextTokens;
+    writeYamlFile(ignorePath, ignoreDoc);
+  }
+
+  return {
+    changed,
+    registry: loadRegistrySnapshot(scope),
+  };
 }
 
 export async function applyWebRegistryPendingAction(args: {

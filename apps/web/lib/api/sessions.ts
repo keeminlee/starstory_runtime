@@ -12,6 +12,11 @@ import type {
   CreateEntityFromCandidateRequest,
   IgnoreEntityCandidateRequest,
   EntityResolutionMutationResponse,
+  SaveEntityReviewBatchRequest,
+  SaveEntityReviewBatchResponse,
+  RevertEntityReviewBatchRequest,
+  RevertEntityReviewBatchResponse,
+  EntityReviewBatchesResponse,
   SessionAnnotatedRecapsResponse,
 } from "@/lib/api/types";
 
@@ -123,6 +128,40 @@ export async function ignoreEntityCandidateApi(
     query: toQuery(searchParams),
     body: payload,
   });
+}
+
+export async function saveEntityReviewBatchApi(
+  payload: SaveEntityReviewBatchRequest,
+  searchParams?: QueryInput
+): Promise<SaveEntityReviewBatchResponse> {
+  return fetchJson<SaveEntityReviewBatchResponse>("/api/entity-review/save", {
+    method: "POST",
+    query: toQuery(searchParams),
+    body: payload,
+  });
+}
+
+export async function revertEntityReviewBatchApi(
+  payload: RevertEntityReviewBatchRequest,
+  searchParams?: QueryInput
+): Promise<RevertEntityReviewBatchResponse> {
+  return fetchJson<RevertEntityReviewBatchResponse>("/api/entity-review/revert", {
+    method: "POST",
+    query: toQuery(searchParams),
+    body: payload,
+  });
+}
+
+export async function getEntityReviewBatchesApi(
+  sessionId: string,
+  searchParams?: QueryInput
+): Promise<EntityReviewBatchesResponse> {
+  return fetchJson<EntityReviewBatchesResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/entity-review/batches`,
+    {
+      query: toQuery(searchParams),
+    }
+  );
 }
 
 export async function getAnnotatedRecapsApi(

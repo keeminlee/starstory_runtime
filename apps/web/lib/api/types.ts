@@ -76,6 +76,8 @@ import type {
   EntityCandidateDto,
   EntityResolutionDto,
   EntityAppearanceDto,
+  EntityReviewBatchDto,
+  EntityReviewDecision,
   RegistryCategoryKey,
 } from "@/lib/registry/types";
 import type { SessionAnnotatedRecaps } from "@/lib/types";
@@ -104,6 +106,33 @@ export type IgnoreEntityCandidateRequest = {
 
 export type EntityResolutionMutationResponse = {
   resolution: EntityResolutionDto;
+};
+
+export type SaveEntityReviewBatchRequest = {
+  sessionId: string;
+  guildId?: string;
+  campaignSlug?: string;
+  decisions: EntityReviewDecision[];
+};
+
+export type SaveEntityReviewBatchResponse = {
+  batch: EntityReviewBatchDto;
+  candidates: EntityCandidateDto[];
+};
+
+export type RevertEntityReviewBatchRequest = {
+  sessionId: string;
+  batchId: string;
+};
+
+export type RevertEntityReviewBatchResponse = {
+  batch: EntityReviewBatchDto;
+  candidates: EntityCandidateDto[];
+};
+
+export type EntityReviewBatchesResponse = {
+  sessionId: string;
+  batches: EntityReviewBatchDto[];
 };
 
 export type SessionAnnotatedRecapsResponse = {

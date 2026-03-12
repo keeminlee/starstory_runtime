@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import type { EntityAppearanceDto, RegistryCategoryKey } from "@/lib/registry/types";
 import { getEntityAppearancesApi } from "@/lib/api/registry";
@@ -49,9 +50,16 @@ export function EntityPreviewPanel({
 }: Props) {
   const [appearances, setAppearances] = useState<EntityAppearanceDto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isMounted, setIsMounted] = useState(false);
   const [viewport, setViewport] = useState({ width: 1440, height: 900 });
 
+  const panelWidth = 360;
+  const panelHeight = 340;
+  const viewportPadding = 16;
+
   useEffect(() => {
+    setIsMounted(true);
+
     function syncViewport() {
       setViewport({ width: window.innerWidth, height: window.innerHeight });
     }
@@ -90,34 +98,51 @@ export function EntityPreviewPanel({
     return () => { cancelled = true; };
   }, [entityId, campaignSlug, searchParams]);
 
-  const panelStyle = useMemo(() => {
-    const panelWidth = 360;
-    const panelHeight = 340;
-    const top = Math.min(
-      Math.max(anchorRect.bottom + 12, 16),
-      Math.max(16, viewport.height - panelHeight - 16)
+  const { panelStyle, arrowStyle } = useMemo(() => {
+    const width = Math.min(panelWidth, viewport.width - viewportPadding * 2);
+    const anchorCenter = anchorRect.left + anchorRect.width / 2;
+    const unclampedLeft = anchorCenter - width / 2;
+    const left = Math.min(
+      Math.max(unclampedLeft, viewportPadding),
+      Math.max(viewportPadding, viewport.width - width - viewportPadding)
     );
-    const preferredLeft = anchorRect.left;
-    const left = preferredLeft + panelWidth > viewport.width - 16
-      ? Math.max(16, anchorRect.right - panelWidth)
-      : preferredLeft;
+    const top = Math.min(
+      Math.max(anchorRect.bottom + 12, viewportPadding),
+      Math.max(viewportPadding, viewport.height - panelHeight - viewportPadding)
+    );
+    const arrowLeft = Math.min(
+      Math.max(anchorCenter - left, 20),
+      Math.max(20, width - 20)
+    );
 
     return {
-      top: `${top}px`,
-      left: `${Math.max(16, left)}px`,
-      width: `${Math.min(panelWidth, viewport.width - 32)}px`,
+      panelStyle: {
+        top: `${top}px`,
+        left: `${left}px`,
+        width: `${width}px`,
+      },
+      arrowStyle: {
+        left: `${arrowLeft}px`,
+      },
     };
   }, [anchorRect.bottom, anchorRect.left, anchorRect.right, viewport.height, viewport.width]);
 
-  return (
+  if (!isMounted) {
+    return null;
+  }
+
+  return createPortal(
     <div
-      className="fixed z-50"
+      className="fixed z-[9999]"
       style={panelStyle}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
       <div className="relative overflow-hidden rounded-2xl border border-amber-400/30 bg-background/95 shadow-2xl backdrop-blur-lg">
-        <div className="absolute left-6 top-0 h-3 w-3 -translate-y-1/2 rotate-45 border-l border-t border-amber-400/30 bg-background/95" />
+        <div
+          className="absolute top-0 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 border-l border-t border-amber-400/30 bg-background/95"
+          style={arrowStyle}
+        />
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -186,6 +211,7 @@ export function EntityPreviewPanel({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
