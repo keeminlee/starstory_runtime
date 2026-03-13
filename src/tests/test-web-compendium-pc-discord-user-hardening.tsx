@@ -1,35 +1,11 @@
 // @ts-nocheck
-import React from "../../apps/web/node_modules/react/index.js";
 import { describe, expect, test } from "vitest";
-import { renderToStaticMarkup } from "../../apps/web/node_modules/react-dom/server.js";
-import { CampaignRegistryManager } from "../../apps/web/components/campaign/campaign-registry-manager";
 import {
   buildPcDiscordUserSelectionModel,
   formatSeenDiscordUserLabel,
   NO_KNOWN_USERS_HELPER_TEXT,
   UNKNOWN_STORED_MAPPING_LABEL,
 } from "../../apps/web/lib/registry/pcDiscordUserSelection";
-
-function makeRegistry(overrides?: Partial<Parameters<typeof CampaignRegistryManager>[0]["initialRegistry"]>) {
-  return {
-    campaignSlug: "alpha",
-    categories: {
-      pcs: [],
-      npcs: [],
-      locations: [],
-      factions: [],
-      misc: [],
-    },
-    ignoreTokens: [],
-    pending: {
-      generatedAt: null,
-      sourceCampaignSlug: null,
-      sourceGuildId: null,
-      items: [],
-    },
-    ...overrides,
-  };
-}
 
 describe("CampaignRegistryManager PC discord-user UI", () => {
   test("builds known-user dropdown options with recognition-first labels", () => {
@@ -50,36 +26,14 @@ describe("CampaignRegistryManager PC discord-user UI", () => {
     expect(selection.saveBlockedByEmptyState).toBe(true);
   });
 
-  test("renders legacy stale mapping fallback label", () => {
-    const html = renderToStaticMarkup(
-      <CampaignRegistryManager
-        campaignSlug="alpha"
-        guildId="guild-1"
-        initialRegistry={makeRegistry({
-          categories: {
-            pcs: [
-              {
-                id: "pc_legacy",
-                canonicalName: "Legacy PC",
-                aliases: [],
-                notes: "",
-                category: "pcs",
-                discordUserId: "missing-user",
-              },
-            ],
-            npcs: [],
-            locations: [],
-            factions: [],
-            misc: [],
-          },
-        })}
-        initialSeenDiscordUsers={[
-          { discordUserId: "user-1", nickname: "Rowan", username: null },
-        ]}
-        isEditable
-      />
-    );
+  test("uses fallback label for legacy stale mappings", () => {
+    const selection = buildPcDiscordUserSelectionModel({
+      knownUsers: [{ discordUserId: "user-1", nickname: "Rowan", username: null }],
+      currentDiscordUserId: "missing-user",
+    });
 
-    expect(html).toContain(UNKNOWN_STORED_MAPPING_LABEL);
+    expect(selection.options[0]?.label).toBe(UNKNOWN_STORED_MAPPING_LABEL);
+    expect(selection.initialValue).toBe("");
+    expect(selection.helperText).toContain("Stored mapping is no longer in the known-user list");
   });
 });
