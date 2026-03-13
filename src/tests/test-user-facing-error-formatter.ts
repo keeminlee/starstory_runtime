@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { formatUserFacingError } from "../errors/formatUserFacingError.js";
 import { MeepoError } from "../errors/meepoError.js";
+import { MEEPO_WEB_DASHBOARD_URL } from "../web/dashboardUrl.js";
 
 describe("formatUserFacingError", () => {
   test("raw Error maps deterministically to ERR_UNKNOWN", () => {
@@ -77,7 +78,7 @@ describe("formatUserFacingError", () => {
     expect(payload.retryable).toBe(false);
     expect(payload.correctiveActionRequired).toBe(true);
     expect(payload.content).toContain("no transcript artifact");
-    expect(payload.content).toContain("/meepo sessions recap");
+    expect(payload.content).toContain(MEEPO_WEB_DASHBOARD_URL);
   });
 
   test("no active session provides corrective next action", () => {
@@ -87,6 +88,6 @@ describe("formatUserFacingError", () => {
     expect(payload.failureClass).toBe("corrective");
     expect(payload.retryable).toBe(false);
     expect(payload.correctiveActionRequired).toBe(true);
-    expect(payload.content).toContain("/meepo sessions list");
+    expect(payload.content).toContain(MEEPO_WEB_DASHBOARD_URL);
   });
 });

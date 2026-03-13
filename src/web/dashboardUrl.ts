@@ -1,0 +1,1 @@
+export const MEEPO_WEB_DASHBOARD_URL = "https://meepo.online/dashboard";

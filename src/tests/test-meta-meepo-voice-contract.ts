@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { META_VOICE_VERSION, metaMeepoVoice } from "../ui/metaMeepoVoice.js";
+import { MEEPO_WEB_DASHBOARD_URL } from "../web/dashboardUrl.js";
 
 function extractHeaders(text: string): string[] {
   return Array.from(text.matchAll(/\*\*([^*]+)\*\*/g)).map((match) => match[1]);
@@ -82,7 +83,7 @@ describe("metaMeepoVoice contract", () => {
       transcriptStatus: "available",
       dbRowMissingFileNotice: false,
       hasUnindexedFilesNotice: false,
-      nextActionLine: "Next: Regenerate via /meepo sessions recap ...",
+      nextActionLine: `Next: Use ${MEEPO_WEB_DASHBOARD_URL} to inspect or regenerate artifacts ...`,
       transcriptMissingNotice: false,
     });
 
