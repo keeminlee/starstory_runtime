@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   applyCampaignRegistryPendingActionApi,
   createCampaignRegistryEntryApi,
@@ -13,7 +13,14 @@ import type {
   RegistryCategoryKey,
   RegistryEntityDto,
   RegistrySnapshotDto,
+  SeenDiscordUserOption,
 } from "@/lib/registry/types";
+import {
+  buildPcDiscordUserSelectionModel,
+  formatSeenDiscordUserLabel,
+  NO_KNOWN_USERS_HELPER_TEXT,
+  UNKNOWN_STORED_MAPPING_LABEL,
+} from "@/lib/registry/pcDiscordUserSelection";
 
 const TABS: Array<{ key: RegistryCategoryKey | "pending" | "ignore"; label: string }> = [
   { key: "pcs", label: "PCs" },
@@ -29,6 +36,7 @@ type CampaignRegistryManagerProps = {
   campaignSlug: string;
   guildId?: string | null;
   initialRegistry: RegistrySnapshotDto;
+  initialSeenDiscordUsers: SeenDiscordUserOption[];
   searchParams?: Record<string, string | string[] | undefined>;
   isEditable?: boolean;
   readOnlyReason?: "not_campaign_dm" | "demo_mode";
@@ -62,6 +70,7 @@ export function CampaignRegistryManager({
   campaignSlug,
   guildId,
   initialRegistry,
+  initialSeenDiscordUsers,
   searchParams,
   isEditable = true,
   readOnlyReason,
@@ -79,6 +88,7 @@ export function CampaignRegistryManager({
   const [newNotes, setNewNotes] = useState("");
   const [newDiscordUserId, setNewDiscordUserId] = useState("");
   const [pendingPromoteCategory, setPendingPromoteCategory] = useState<RegistryCategoryKey>("npcs");
+  const [pendingPromoteDiscordUserId, setPendingPromoteDiscordUserId] = useState("");
 
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
 
@@ -128,6 +138,26 @@ export function CampaignRegistryManager({
     }),
     [registry]
   );
+
+  const hasKnownDiscordUsers = initialSeenDiscordUsers.length > 0;
+
+  const createPcSelection = useMemo(
+    () => buildPcDiscordUserSelectionModel({ knownUsers: initialSeenDiscordUsers }),
+    [initialSeenDiscordUsers]
+  );
+
+  const pendingPcSelection = useMemo(
+    () => buildPcDiscordUserSelectionModel({ knownUsers: initialSeenDiscordUsers }),
+    [initialSeenDiscordUsers]
+  );
+
+  const seenUserLabelById = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const user of initialSeenDiscordUsers) {
+      byId.set(user.discordUserId, formatSeenDiscordUserLabel(user));
+    }
+    return byId;
+  }, [initialSeenDiscordUsers]);
 
   const filteredEntities = useMemo(() => {
     if (!(activeTab in registry.categories)) {
@@ -184,19 +214,32 @@ export function CampaignRegistryManager({
       setError("Canonical name is required.");
       return;
     }
+    if (newCategory === "pcs" && !hasKnownDiscordUsers) {
+      setError(NO_KNOWN_USERS_HELPER_TEXT);
+      return;
+    }
+    if (newCategory === "pcs" && !newDiscordUserId.trim()) {
+      setError("Played by is required for PC entries.");
+      return;
+    }
 
     await withUpdate(async () => {
       const response = await createCampaignRegistryEntryApi(
         campaignSlug,
-        {
-          category: newCategory,
-          canonicalName,
-          aliases: normalizeCsvAliases(newAliases),
-          notes: newNotes.trim(),
-          ...(newCategory === "pcs" && newDiscordUserId.trim()
-            ? { discordUserId: newDiscordUserId.trim() }
-            : {}),
-        },
+        newCategory === "pcs"
+          ? {
+              category: "pcs",
+              canonicalName,
+              aliases: normalizeCsvAliases(newAliases),
+              notes: newNotes.trim(),
+              discordUserId: newDiscordUserId.trim(),
+            }
+          : {
+              category: newCategory,
+              canonicalName,
+              aliases: normalizeCsvAliases(newAliases),
+              notes: newNotes.trim(),
+            },
         scopedSearchParams
       );
       return response.registry;
@@ -218,17 +261,29 @@ export function CampaignRegistryManager({
     const notes = String(formData.get("notes") ?? "").trim();
     const discordUserId = String(formData.get("discordUserId") ?? "").trim();
 
+    if (entity.category === "pcs" && !discordUserId) {
+      setError("Played by is required for PC entries.");
+      return;
+    }
+
     await withUpdate(async () => {
       const response = await updateCampaignRegistryEntryApi(
         campaignSlug,
         entity.id,
-        {
-          category: entity.category,
-          canonicalName,
-          aliases,
-          notes,
-          ...(entity.category === "pcs" ? { discordUserId: discordUserId || null } : {}),
-        },
+        entity.category === "pcs"
+          ? {
+              category: "pcs",
+              canonicalName,
+              aliases,
+              notes,
+              discordUserId,
+            }
+          : {
+              category: entity.category,
+              canonicalName,
+              aliases,
+              notes,
+            },
         scopedSearchParams
       );
       return response.registry;
@@ -238,14 +293,30 @@ export function CampaignRegistryManager({
   }
 
   async function handlePendingAccept(key: string, category: RegistryCategoryKey) {
+    if (category === "pcs" && !hasKnownDiscordUsers) {
+      setError(NO_KNOWN_USERS_HELPER_TEXT);
+      return;
+    }
+    if (category === "pcs" && !pendingPromoteDiscordUserId.trim()) {
+      setError("Played by is required for PC entries.");
+      return;
+    }
+
     await withUpdate(async () => {
       const response = await applyCampaignRegistryPendingActionApi(
         campaignSlug,
-        {
-          action: "accept",
-          key,
-          category,
-        },
+        category === "pcs"
+          ? {
+              action: "accept",
+              key,
+              category: "pcs",
+              discordUserId: pendingPromoteDiscordUserId.trim(),
+            }
+          : {
+              action: "accept",
+              key,
+              category,
+            },
         scopedSearchParams
       );
       return response.registry;
@@ -355,20 +426,30 @@ export function CampaignRegistryManager({
           </label>
           {newCategory === "pcs" ? (
             <label className="space-y-1 text-sm md:col-span-2">
-              <span>Discord User ID (PC only)</span>
-              <input
+              <span>Played by</span>
+              <select
                 value={newDiscordUserId}
                 onChange={(event) => setNewDiscordUserId(event.currentTarget.value)}
-                className="control-input w-full rounded-md px-3 py-2"
-                placeholder="Optional"
-              />
+                className="control-select w-full rounded-md px-3 py-2"
+                disabled={!hasKnownDiscordUsers}
+                required
+              >
+                {createPcSelection.options.map((option) => (
+                  <option key={option.value || "__placeholder__"} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                {createPcSelection.helperText ?? "Choose the observed Discord user who plays this PC."}
+              </p>
             </label>
           ) : null}
         </div>
         <button
           type="button"
           onClick={handleCreateEntry}
-          disabled={isPending}
+          disabled={isPending || (newCategory === "pcs" && (!hasKnownDiscordUsers || !newDiscordUserId.trim()))}
           className="mt-4 rounded-full button-primary px-4 py-2 text-xs font-bold uppercase tracking-wider"
         >
           Add Entry
@@ -416,7 +497,7 @@ export function CampaignRegistryManager({
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" disabled={isPending || !isEditable} onClick={() => handlePendingAccept(item.key, pendingPromoteCategory)} className="control-button-ghost rounded-full px-3 py-1 text-xs uppercase tracking-wider">Accept</button>
+                    <button type="button" disabled={isPending || !isEditable || (pendingPromoteCategory === "pcs" && (!hasKnownDiscordUsers || !pendingPromoteDiscordUserId.trim()))} onClick={() => handlePendingAccept(item.key, pendingPromoteCategory)} className="control-button-ghost rounded-full px-3 py-1 text-xs uppercase tracking-wider">Accept</button>
                     <button type="button" disabled={isPending || !isEditable} onClick={() => handlePendingReject(item.key)} className="control-button-ghost rounded-full px-3 py-1 text-xs uppercase tracking-wider">Reject</button>
                     <button type="button" disabled={isPending || !isEditable} onClick={() => handlePendingDelete(item.key)} className="control-button-danger rounded-full px-3 py-1 text-xs uppercase tracking-wider">Delete</button>
                   </div>
@@ -425,7 +506,10 @@ export function CampaignRegistryManager({
                   Promote Category
                   <select
                     value={pendingPromoteCategory}
-                    onChange={(event) => setPendingPromoteCategory(event.currentTarget.value as RegistryCategoryKey)}
+                    onChange={(event) => {
+                      setPendingPromoteCategory(event.currentTarget.value as RegistryCategoryKey);
+                      setPendingPromoteDiscordUserId("");
+                    }}
                     className="control-select mt-1 w-full max-w-xs rounded-md px-2 py-1 text-xs normal-case tracking-normal"
                   >
                     <option value="pcs">PC</option>
@@ -435,6 +519,26 @@ export function CampaignRegistryManager({
                     <option value="misc">Misc</option>
                   </select>
                 </label>
+                {pendingPromoteCategory === "pcs" ? (
+                  <label className="mt-2 block text-xs uppercase tracking-wider text-muted-foreground">
+                    Played by
+                    <select
+                      value={pendingPromoteDiscordUserId}
+                      onChange={(event) => setPendingPromoteDiscordUserId(event.currentTarget.value)}
+                      className="control-select mt-1 w-full max-w-xs rounded-md px-2 py-1 text-xs normal-case tracking-normal"
+                      disabled={!hasKnownDiscordUsers}
+                    >
+                      {pendingPcSelection.options.map((option) => (
+                        <option key={`pending-${option.value || "__placeholder__"}`} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="mt-1 block normal-case tracking-normal text-muted-foreground">
+                      {pendingPcSelection.helperText ?? "Choose the observed Discord user who plays this PC."}
+                    </span>
+                  </label>
+                ) : null}
                 {item.examples.length > 0 ? (
                   <div className="mt-3 space-y-1 text-xs text-muted-foreground">
                     {item.examples.slice(0, 2).map((example, index) => (
@@ -491,16 +595,33 @@ export function CampaignRegistryManager({
                           className="control-input mt-1 w-full rounded-md px-3 py-2 text-sm"
                         />
                       </label>
-                      {entity.category === "pcs" ? (
-                        <label className="block text-xs uppercase tracking-wider text-muted-foreground">
-                          Discord User ID
-                          <input
-                            name="discordUserId"
-                            defaultValue={entity.discordUserId ?? ""}
-                            className="control-input mt-1 w-full rounded-md px-3 py-2 text-sm"
-                          />
-                        </label>
-                      ) : null}
+                      {entity.category === "pcs" ? (() => {
+                        const selection = buildPcDiscordUserSelectionModel({
+                          knownUsers: initialSeenDiscordUsers,
+                          currentDiscordUserId: entity.discordUserId,
+                        });
+                        return (
+                          <label className="block text-xs uppercase tracking-wider text-muted-foreground">
+                            Played by
+                            <select
+                              name="discordUserId"
+                              defaultValue={selection.initialValue}
+                              className="control-select mt-1 w-full rounded-md px-3 py-2 text-sm"
+                              disabled={selection.saveBlockedByEmptyState}
+                              required
+                            >
+                              {selection.options.map((option) => (
+                                <option key={`${entity.id}-${option.value || "__placeholder__"}`} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="mt-1 block normal-case tracking-normal text-muted-foreground">
+                              {selection.helperText ?? "Choose the observed Discord user who plays this PC."}
+                            </span>
+                          </label>
+                        );
+                      })() : null}
                       <div className="flex gap-2 pt-1">
                         <button type="button" disabled={isPending || !isEditable} onClick={() => handleSaveEntry(entity)} className="rounded-full button-primary px-3 py-1 text-xs uppercase tracking-wider">Save</button>
                           <button type="button" disabled={isPending || !isEditable} onClick={() => setEditingEntryId(null)} className="control-button-ghost rounded-full px-3 py-1 text-xs uppercase tracking-wider">Cancel</button>
@@ -514,7 +635,14 @@ export function CampaignRegistryManager({
                         <p className="text-xs text-muted-foreground">{entity.id}</p>
                         {entity.aliases.length > 0 ? <p className="mt-1 text-xs text-muted-foreground">Aliases: {entity.aliases.join(", ")}</p> : null}
                         {entity.notes ? <p className="mt-1 text-xs text-muted-foreground">Notes: {entity.notes}</p> : null}
-                        {entity.category === "pcs" && entity.discordUserId ? <p className="mt-1 text-xs text-muted-foreground">Discord: {entity.discordUserId}</p> : null}
+                        {entity.category === "pcs" ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Played by:{" "}
+                            {entity.discordUserId
+                              ? (seenUserLabelById.get(entity.discordUserId) ?? UNKNOWN_STORED_MAPPING_LABEL)
+                              : "Unassigned legacy mapping"}
+                          </p>
+                        ) : null}
                       </div>
                       <div className="flex gap-2">
                         <button type="button" onClick={() => toggleAppearances(entity.id)} className="control-button-ghost rounded-full px-3 py-1 text-xs uppercase tracking-wider">

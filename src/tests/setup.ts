@@ -20,3 +20,5 @@ for (const key of DEPRECATED_KEYS) {
 
 process.env.MIGRATIONS_SILENT = "1";
 process.env.NODE_ENV = "test";
+process.env.DISCORD_TOKEN ??= "test-token";
+process.env.OPENAI_API_KEY ??= "test-openai-key";

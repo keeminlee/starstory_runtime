@@ -8,10 +8,15 @@ import type {
   RegistryCreateEntryRequest,
   RegistryEntityDto,
   RegistryPendingActionRequest,
+  SeenDiscordUserOption,
   RegistryPendingCandidateDto,
   RegistrySnapshotDto,
   RegistryUpdateEntryRequest,
 } from "@/lib/registry/types";
+import {
+  getGuildSeenDiscordUser,
+  listGuildSeenDiscordUsers,
+} from "../../../../src/campaign/guildSeenDiscordUsers";
 import { normKey } from "../../../../src/registry/loadRegistry";
 import {
   addAliasIfMissing,
@@ -339,6 +344,49 @@ function loadRegistrySnapshot(scope: RegistryScope): RegistrySnapshotDto {
   };
 }
 
+function requireGuildScopedCampaign(scope: RegistryScope): string {
+  const guildId = scope.guildId?.trim();
+  if (!guildId) {
+    throw new WebDataError("invalid_request", 422, "This compendium requires an authorized guild scope.");
+  }
+  return guildId;
+}
+
+function toSeenDiscordUserOption(args: {
+  discordUserId: string;
+  nickname: string;
+  username: string | null;
+}): SeenDiscordUserOption {
+  return {
+    discordUserId: args.discordUserId,
+    nickname: args.nickname,
+    username: args.username,
+  };
+}
+
+function resolveValidatedPcDiscordUserId(args: {
+  guildId: string;
+  submittedDiscordUserId?: string | null;
+  existingDiscordUserId?: unknown;
+}): string {
+  const candidate = args.submittedDiscordUserId !== undefined
+    ? args.submittedDiscordUserId
+    : typeof args.existingDiscordUserId === "string"
+      ? args.existingDiscordUserId
+      : null;
+  const discordUserId = candidate?.trim();
+  if (!discordUserId) {
+    throw new WebDataError("invalid_request", 422, "Played by is required for PC entries.");
+  }
+
+  const seenUser = getGuildSeenDiscordUser({ guildId: args.guildId, discordUserId });
+  if (!seenUser) {
+    throw new WebDataError("invalid_request", 422, "Selected Discord user is not known for this guild.");
+  }
+
+  return discordUserId;
+}
+
 function assertNameCollision(
   scope: RegistryScope,
   input: {
@@ -391,6 +439,22 @@ export async function getWebRegistrySnapshot(args: {
   return loadRegistrySnapshot(toRegistryScope(campaign));
 }
 
+export async function listWebSeenDiscordUsers(args: {
+  campaignSlug: string;
+  searchParams?: QueryInput;
+}): Promise<SeenDiscordUserOption[]> {
+  const campaign = await assertAuthorizedCampaign(args.campaignSlug, args.searchParams);
+  const scope = toRegistryScope(campaign);
+  const guildId = requireGuildScopedCampaign(scope);
+  return listGuildSeenDiscordUsers({ guildId }).map((user) =>
+    toSeenDiscordUserOption({
+      discordUserId: user.discordUserId,
+      nickname: user.lastKnownNickname,
+      username: user.lastKnownUsername,
+    })
+  );
+}
+
 export async function createWebRegistryEntry(args: {
   campaignSlug: string;
   searchParams?: QueryInput;
@@ -398,6 +462,7 @@ export async function createWebRegistryEntry(args: {
 }): Promise<RegistrySnapshotDto> {
   const campaign = await assertCampaignEditable(args.campaignSlug, args.searchParams);
   const scope = toRegistryScope(campaign);
+  const guildId = requireGuildScopedCampaign(scope);
   ensureRegistryScopeScaffold(scope);
 
   const category = args.body.category;
@@ -416,12 +481,15 @@ export async function createWebRegistryEntry(args: {
   const existingIds = new Set(registry.ids.values());
 
   if (category === "pcs" || category === "npcs") {
+    const pcDiscordUserId = category === "pcs"
+      ? resolveValidatedPcDiscordUserId({ guildId, submittedDiscordUserId: args.body.discordUserId })
+      : undefined;
     const created = createRegistryEntry({
       prefix: category === "pcs" ? "pc" : "npc",
       canonicalName,
       candidateDisplay: canonicalName,
       existingIds,
-      discordUserId: category === "pcs" ? args.body.discordUserId : undefined,
+      discordUserId: pcDiscordUserId,
     });
 
     const entryAliases = normalizeAliases([...(created.aliases ?? []), ...aliases]);
@@ -430,8 +498,8 @@ export async function createWebRegistryEntry(args: {
       canonical_name: canonicalName,
       aliases: entryAliases,
       notes: args.body.notes?.trim() ?? "",
-      ...(category === "pcs" && args.body.discordUserId?.trim()
-        ? { discord_user_id: args.body.discordUserId.trim() }
+      ...(category === "pcs" && pcDiscordUserId
+        ? { discord_user_id: pcDiscordUserId }
         : {}),
     });
   } else {
@@ -487,6 +555,7 @@ export async function updateWebRegistryEntry(args: {
 }): Promise<RegistrySnapshotDto> {
   const campaign = await assertCampaignEditable(args.campaignSlug, args.searchParams);
   const scope = toRegistryScope(campaign);
+  const guildId = requireGuildScopedCampaign(scope);
   ensureRegistryScopeScaffold(scope);
 
   const category = args.body.category;
@@ -520,11 +589,11 @@ export async function updateWebRegistryEntry(args: {
   };
 
   if (category === "pcs") {
-    if (args.body.discordUserId === null || args.body.discordUserId === "") {
-      delete updated.discord_user_id;
-    } else if (typeof args.body.discordUserId === "string") {
-      updated.discord_user_id = args.body.discordUserId.trim();
-    }
+    updated.discord_user_id = resolveValidatedPcDiscordUserId({
+      guildId,
+      submittedDiscordUserId: args.body.discordUserId,
+      existingDiscordUserId: current.discord_user_id,
+    });
   } else {
     delete updated.discord_user_id;
   }
@@ -630,6 +699,7 @@ export async function applyWebRegistryPendingAction(args: {
 }): Promise<RegistrySnapshotDto> {
   const campaign = await assertCampaignEditable(args.campaignSlug, args.searchParams);
   const scope = toRegistryScope(campaign);
+  const guildId = requireGuildScopedCampaign(scope);
   ensureRegistryScopeScaffold(scope);
 
   const pendingPath = getPendingPath(scope);
@@ -706,12 +776,15 @@ export async function applyWebRegistryPendingAction(args: {
   } else {
     const existingIds = new Set(registry.ids.values());
     const prefix = category === "pcs" ? "pc" : category === "npcs" ? "npc" : category === "locations" ? "loc" : category === "factions" ? "faction" : "misc";
+    const pcDiscordUserId = category === "pcs"
+      ? resolveValidatedPcDiscordUserId({ guildId, submittedDiscordUserId: args.body.discordUserId })
+      : undefined;
     const created = createRegistryEntry({
       prefix,
       canonicalName,
       candidateDisplay: candidate.display,
       existingIds,
-      discordUserId: category === "pcs" ? args.body.discordUserId : undefined,
+      discordUserId: pcDiscordUserId,
     });
 
     list.push({
@@ -719,8 +792,8 @@ export async function applyWebRegistryPendingAction(args: {
       canonical_name: canonicalName,
       aliases: created.aliases ?? [],
       notes: args.body.notes?.trim() ?? "",
-      ...(category === "pcs" && args.body.discordUserId?.trim()
-        ? { discord_user_id: args.body.discordUserId.trim() }
+      ...(category === "pcs" && pcDiscordUserId
+        ? { discord_user_id: pcDiscordUserId }
         : {}),
     });
   }

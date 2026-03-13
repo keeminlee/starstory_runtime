@@ -1,6 +1,7 @@
 import { fetchJson } from "@/lib/api/http";
 import type {
   CampaignRegistryResponse,
+  CampaignSeenDiscordUsersResponse,
   EntityAppearancesResponse,
   RegistryCreateEntryApiRequest,
   RegistryPendingActionApiRequest,
@@ -43,6 +44,18 @@ export async function createCampaignRegistryEntryApi(
     {
       method: "POST",
       body,
+      query: toQuery(searchParams),
+    }
+  );
+}
+
+export async function getCampaignSeenDiscordUsersApi(
+  campaignSlug: string,
+  searchParams?: QueryInput
+): Promise<CampaignSeenDiscordUsersResponse> {
+  return fetchJson<CampaignSeenDiscordUsersResponse>(
+    `/api/campaigns/${encodeURIComponent(campaignSlug)}/registry/seen-discord-users`,
+    {
       query: toQuery(searchParams),
     }
   );

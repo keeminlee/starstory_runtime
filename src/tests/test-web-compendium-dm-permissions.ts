@@ -4,14 +4,6 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { resolveWebAuthContext } from "../../apps/web/lib/server/authContext";
-import {
-  applyWebRegistryPendingAction,
-  createWebRegistryEntry,
-  getWebRegistrySnapshot,
-  updateWebRegistryEntry,
-} from "../../apps/web/lib/server/registryService";
-import { getWebCampaignDetail } from "../../apps/web/lib/server/campaignReaders";
-import { getDemoCampaignSummary } from "../../apps/web/lib/server/demoCampaign";
 
 process.env.DISCORD_TOKEN ??= "test-token";
 process.env.OPENAI_API_KEY ??= "test-openai-key";
@@ -95,6 +87,28 @@ async function setupCampaign(args: { guildId: string; dmUserId: string; campaign
   return campaign.campaign_slug;
 }
 
+async function loadWebCompendiumModules() {
+  const [{
+    applyWebRegistryPendingAction,
+    createWebRegistryEntry,
+    getWebRegistrySnapshot,
+    updateWebRegistryEntry,
+  }, { getWebCampaignDetail }, { getDemoCampaignSummary }] = await Promise.all([
+    import("../../apps/web/lib/server/registryService"),
+    import("../../apps/web/lib/server/campaignReaders"),
+    import("../../apps/web/lib/server/demoCampaign"),
+  ]);
+
+  return {
+    applyWebRegistryPendingAction,
+    createWebRegistryEntry,
+    getWebRegistrySnapshot,
+    updateWebRegistryEntry,
+    getWebCampaignDetail,
+    getDemoCampaignSummary,
+  };
+}
+
 function makeUniqueCampaignName(base: string, tempDir: string): string {
   const suffix = path.basename(tempDir).replace(/[^a-z0-9-]/gi, "").toLowerCase();
   return `${base}-${suffix}`;
@@ -109,6 +123,7 @@ describe("compendium DM-only write enforcement", () => {
     const guildId = "guild-1";
     const dmUserId = "dm-1";
     const playerUserId = "player-1";
+    const { getWebCampaignDetail, getDemoCampaignSummary } = await loadWebCompendiumModules();
     const campaignSlug = await setupCampaign({
       guildId,
       dmUserId,
@@ -137,6 +152,7 @@ describe("compendium DM-only write enforcement", () => {
 
     const guildId = "guild-1";
     const dmUserId = "dm-1";
+    const { createWebRegistryEntry, updateWebRegistryEntry } = await loadWebCompendiumModules();
     const campaignSlug = await setupCampaign({
       guildId,
       dmUserId,
@@ -182,6 +198,7 @@ describe("compendium DM-only write enforcement", () => {
     const guildId = "guild-1";
     const dmUserId = "dm-1";
     const playerUserId = "player-1";
+    const { createWebRegistryEntry, updateWebRegistryEntry } = await loadWebCompendiumModules();
     const campaignSlug = await setupCampaign({
       guildId,
       dmUserId,
@@ -238,6 +255,7 @@ describe("compendium DM-only write enforcement", () => {
     const guildId = "guild-1";
     const dmUserId = "dm-1";
     const playerUserId = "player-1";
+    const { applyWebRegistryPendingAction, getWebRegistrySnapshot } = await loadWebCompendiumModules();
     const campaignSlug = await setupCampaign({
       guildId,
       dmUserId,

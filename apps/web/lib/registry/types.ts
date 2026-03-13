@@ -9,6 +9,12 @@ export type RegistryEntityDto = {
   discordUserId: string | null;
 };
 
+export type SeenDiscordUserOption = {
+  discordUserId: string;
+  nickname: string;
+  username: string | null;
+};
+
 export type RegistryPendingCandidateDto = {
   key: string;
   display: string;
@@ -31,29 +37,53 @@ export type RegistrySnapshotDto = {
   pending: RegistryPendingDto;
 };
 
-export type RegistryCreateEntryRequest = {
-  category: RegistryCategoryKey;
-  canonicalName: string;
-  aliases?: string[];
-  notes?: string;
-  discordUserId?: string;
-};
+export type RegistryCreateEntryRequest =
+  | {
+      category: "pcs";
+      canonicalName: string;
+      aliases?: string[];
+      notes?: string;
+      discordUserId: string;
+    }
+  | {
+      category: Exclude<RegistryCategoryKey, "pcs">;
+      canonicalName: string;
+      aliases?: string[];
+      notes?: string;
+      discordUserId?: never;
+    };
 
-export type RegistryUpdateEntryRequest = {
-  category: RegistryCategoryKey;
-  canonicalName?: string;
-  aliases?: string[];
-  notes?: string;
-  discordUserId?: string | null;
-};
+export type RegistryUpdateEntryRequest =
+  | {
+      category: "pcs";
+      canonicalName?: string;
+      aliases?: string[];
+      notes?: string;
+      discordUserId?: string | null;
+    }
+  | {
+      category: Exclude<RegistryCategoryKey, "pcs">;
+      canonicalName?: string;
+      aliases?: string[];
+      notes?: string;
+      discordUserId?: never;
+    };
 
 export type RegistryPendingActionRequest =
   | {
       action: "accept";
       key: string;
-      category: RegistryCategoryKey;
+      category: "pcs";
       canonicalName?: string;
-      discordUserId?: string;
+      discordUserId: string;
+      notes?: string;
+    }
+  | {
+      action: "accept";
+      key: string;
+      category: Exclude<RegistryCategoryKey, "pcs">;
+      canonicalName?: string;
+      discordUserId?: never;
       notes?: string;
     }
   | {

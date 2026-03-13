@@ -668,13 +668,20 @@ async function addAliasToEntityCore(args: {
       campaignSlug: args.campaignSlug,
       entryId: targetEntity.id,
       searchParams: args.searchParams,
-      body: {
-        category: targetEntity.category,
-        canonicalName: targetEntity.canonicalName,
-        aliases: aliasResult.entry.aliases ?? targetEntity.aliases,
-        notes: targetEntity.notes,
-        ...(targetEntity.category === "pcs" ? { discordUserId: targetEntity.discordUserId } : {}),
-      },
+      body: targetEntity.category === "pcs"
+        ? {
+            category: "pcs",
+            canonicalName: targetEntity.canonicalName,
+            aliases: aliasResult.entry.aliases ?? targetEntity.aliases,
+            notes: targetEntity.notes,
+            discordUserId: targetEntity.discordUserId ?? undefined,
+          }
+        : {
+            category: targetEntity.category,
+            canonicalName: targetEntity.canonicalName,
+            aliases: aliasResult.entry.aliases ?? targetEntity.aliases,
+            notes: targetEntity.notes,
+          },
     });
   }
 
@@ -759,6 +766,14 @@ async function createEntityFromCandidateCore(args: {
       searchParams: args.searchParams,
       batchId: args.batchId,
     });
+  }
+
+  if (args.category === "pcs") {
+    throw new WebDataError(
+      "invalid_request",
+      422,
+      "PC creation from entity review is disabled until a Discord user can be assigned in the compendium flow."
+    );
   }
 
   const updatedRegistry = await createWebRegistryEntry({
