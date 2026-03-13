@@ -3,7 +3,7 @@ import { ArchiveShell } from "@/components/layout/archive-shell";
 import { CampaignRegistryManager } from "@/components/campaign/campaign-registry-manager";
 import { EmptyState } from "@/components/shared/empty-state";
 import { WebApiError } from "@/lib/api/http";
-import { getCampaignRegistryApi } from "@/lib/api/registry";
+import { getCampaignRegistryApi, getCampaignSeenDiscordUsersApi } from "@/lib/api/registry";
 import { getCampaignSessionsApi } from "@/lib/api/campaigns";
 
 export const dynamic = "force-dynamic";
@@ -63,12 +63,15 @@ export default async function CampaignCompendiumPage({ params, searchParams }: P
     notFound();
   }
 
+  const seenDiscordUsers = (await getCampaignSeenDiscordUsersApi(campaignSlug, query)).users;
+
   return (
     <ArchiveShell section="Compendium" campaignName={campaign.name}>
       <CampaignRegistryManager
         campaignSlug={campaignSlug}
         guildId={campaign.guildId}
         initialRegistry={registry}
+        initialSeenDiscordUsers={seenDiscordUsers}
         searchParams={query}
         isEditable={campaign.editable !== false && Boolean(campaign.canWrite)}
         readOnlyReason={campaign.readOnlyReason}

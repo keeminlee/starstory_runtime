@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getDbForCampaign } from "../db.js";
 import { resolveCampaignSlug } from "../campaign/guildConfig.js";
+import { upsertGuildSeenDiscordUser } from "../campaign/guildSeenDiscordUsers.js";
 import { resolveCampaignDbPath } from "../dataPaths.js";
 import { enqueueActionIfMissing, REFRESH_STT_PROMPT_ACTION } from "../ledger/meepoContextRepo.js";
 import { markRuntimeSessionEnded, markRuntimeSessionStarted } from "./sessionRuntime.js";
@@ -100,6 +101,25 @@ export function startSession(
   db.prepare(
     "INSERT INTO sessions (session_id, guild_id, kind, mode_at_start, status, label, created_at_ms, started_at_ms, ended_at_ms, ended_reason, started_by_id, started_by_name, source) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)"
   ).run(sessionId, guildId, sessionKind, modeAtStart, sessionLabel, now, now, null, null, startedById, startedByName, sessionSource);
+
+  if (startedById) {
+    try {
+      upsertGuildSeenDiscordUser({
+        guildId,
+        discordUserId: startedById,
+        nickname: startedByName?.trim() || startedById,
+        username: startedByName?.trim() || null,
+        seenAtMs: now,
+      });
+    } catch (error) {
+      scopedSessionLog.warn("Failed to persist seen Discord user at session start", {
+        guildId,
+        sessionId,
+        userId: startedById,
+        error: String((error as any)?.message ?? error ?? "unknown_error"),
+      });
+    }
+  }
 
   try {
     const dedupeKey = [REFRESH_STT_PROMPT_ACTION, guildId, "canon", sessionId, "session_start"].join(":");

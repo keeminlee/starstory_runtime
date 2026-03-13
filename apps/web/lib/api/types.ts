@@ -2,6 +2,7 @@ import type { CampaignSummary, DashboardModel, SessionDetail, SessionRecap, Tran
 import type {
   RegistryCreateEntryRequest,
   RegistryPendingActionRequest,
+  SeenDiscordUserOption,
   RegistrySnapshotDto,
   RegistryUpdateEntryRequest,
 } from "@/lib/registry/types";
@@ -62,6 +63,10 @@ export type RegenerateSessionRecapResponse = SessionRecapResponse;
 
 export type CampaignRegistryResponse = {
   registry: RegistrySnapshotDto;
+};
+
+export type CampaignSeenDiscordUsersResponse = {
+  users: SeenDiscordUserOption[];
 };
 
 export type RegistryCreateEntryApiRequest = RegistryCreateEntryRequest;

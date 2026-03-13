@@ -19,6 +19,7 @@ import {
 import { getActiveSession } from "../sessions/sessions.js";
 import { getGuildMode } from "../sessions/sessionRuntime.js";
 import { getGuildDmUserId } from "../campaign/guildConfig.js";
+import { upsertGuildSeenDiscordUser } from "../campaign/guildSeenDiscordUsers.js";
 import { randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -692,9 +693,11 @@ export function startReceiver(guildId: string): void {
 
     // Fetch fresh member data for display name
     let displayName = `User_${userId.slice(0, 8)}`;
+    let username: string | null = null;
     try {
       if (state.guild) {
         const member = await state.guild.members.fetch(userId);
+        username = member.user?.username ?? null;
         displayName = member.displayName ?? member.user?.username ?? displayName;
       }
     } catch (err: any) {
@@ -724,6 +727,22 @@ export function startReceiver(guildId: string): void {
       peak: 0,
       hasTriggeredSpeechInterrupt: false,
     });
+
+    try {
+      upsertGuildSeenDiscordUser({
+        guildId,
+        discordUserId: userId,
+        nickname: displayName,
+        username,
+        seenAtMs: Date.now(),
+      });
+    } catch (error) {
+      voiceLog.warn("Failed to persist seen Discord user from voice observation", {
+        guildId,
+        userId,
+        error: String((error as any)?.message ?? error ?? "unknown_error"),
+      });
+    }
 
     const audioStream = connection.receiver.subscribe(userId, {
       end: { behavior: EndBehaviorType.AfterSilence, duration: END_SILENCE_MS },

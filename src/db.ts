@@ -1756,6 +1756,37 @@ function applyMigrations(db: Database.Database) {
     db.exec("ALTER TABLE guild_config ADD COLUMN meta_campaign_slug TEXT");
   }
 
+  const tablesForSeenDiscordUsers = db.pragma("table_list") as any[];
+  const hasSeenDiscordUsers = tablesForSeenDiscordUsers.some((t: any) => t.name === "guild_seen_discord_users");
+  if (!hasSeenDiscordUsers) {
+    console.log("Migrating: Creating guild_seen_discord_users table");
+    db.exec(`
+      CREATE TABLE guild_seen_discord_users (
+        guild_id TEXT NOT NULL,
+        discord_user_id TEXT NOT NULL,
+        last_known_nickname TEXT NOT NULL,
+        last_known_username TEXT,
+        last_seen_at_ms INTEGER NOT NULL,
+        PRIMARY KEY (guild_id, discord_user_id)
+      );
+
+      CREATE INDEX idx_guild_seen_discord_users_guild_nickname
+      ON guild_seen_discord_users(guild_id, last_known_nickname COLLATE NOCASE);
+    `);
+  } else {
+    const seenDiscordUserColumns = db.pragma("table_info(guild_seen_discord_users)") as any[];
+    const hasLastKnownUsername = seenDiscordUserColumns.some((c: any) => c.name === "last_known_username");
+    if (!hasLastKnownUsername) {
+      console.log("Migrating: Adding last_known_username to guild_seen_discord_users");
+      db.exec("ALTER TABLE guild_seen_discord_users ADD COLUMN last_known_username TEXT");
+    }
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_guild_seen_discord_users_guild_nickname
+      ON guild_seen_discord_users(guild_id, last_known_nickname COLLATE NOCASE);
+    `);
+  }
+
   db.exec(`
     UPDATE guild_config
     SET default_recap_style = 'balanced'

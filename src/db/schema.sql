@@ -417,6 +417,21 @@ CREATE TABLE IF NOT EXISTS speaker_masks (
 CREATE INDEX IF NOT EXISTS idx_speaker_masks_guild
 ON speaker_masks(guild_id);
 
+-- Seen Discord Users: guild-scoped observed Discord identities for PC mapping
+-- nickname is the primary display label; username is an optional fallback when cheaply available
+CREATE TABLE IF NOT EXISTS guild_seen_discord_users (
+  guild_id TEXT NOT NULL,
+  discord_user_id TEXT NOT NULL,
+  last_known_nickname TEXT NOT NULL,
+  last_known_username TEXT,
+  last_seen_at_ms INTEGER NOT NULL,
+
+  PRIMARY KEY (guild_id, discord_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_guild_seen_discord_users_guild_nickname
+ON guild_seen_discord_users(guild_id, last_known_nickname COLLATE NOCASE);
+
 -- Meep Transactions: Append-only ledger for meep balance tracking
 -- Guild-scoped; per-PC balance derived from SUM(delta)
 -- Issuer types: 'dm' (DM reward), 'player' (player spend), 'meepo' (future auto-reward)
