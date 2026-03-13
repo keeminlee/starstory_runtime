@@ -192,7 +192,9 @@ npx tsc --noEmit      # Type-check code
 /meepo status                            # Public status + fix hints
 /lab doctor                              # Dev diagnostics + next actions (DEV_USER_IDS only)
 /meepo settings view                     # Show persisted setup/persona/recap defaults
-https://meepo.online/dashboard           # Primary session history + recap management surface
+/meepo sessions list                      # List recent sessions with recap status
+/meepo sessions view session:<id>         # Session hub + artifact availability
+/meepo sessions recap session:<id> style:balanced  # Generate canon recap final pass (elevated)
 meepo: hello                             # Auto-latch responds
 <speak: "meepo, help me">               # STT → LLM → TTS closed loop
 ```
@@ -535,9 +537,21 @@ Recap      Emotion Beats         LLM Response
   - `oldest queued age`
   - `last completed timestamp`
 - `/meepo settings show|set|clear` — Persisted home channel config (`home_text_channel_id`, `home_voice_channel_id`)
-- `https://meepo.online/dashboard` — Primary session history + recap management surface
-  - Session browsing and recap inspection are web-first now.
-  - Legacy `/meepo sessions` handlers remain runtime-compatible for stale cached commands but are no longer published in the public slash manifest.
+- `/meepo sessions list|view|recap` — Session hub + canon-gated recap generation under one surface
+  - Recap styles: `detailed | balanced | concise`
+  - Base cache (`megameecap_base`) is file-canonical and valid only when files exist and `source_hash + base_version` match
+  - Final recap (`recap_final`) is DB-canonical with exactly one row per session (most recent style overwrites prior style)
+  - Session recap contract API (`src/sessions/sessionRecaps.ts`) now orchestrates all three styles and persists canonical row in `session_recaps`
+    - Contract retrieval shape: `views.concise|balanced|detailed` + `generatedAt` + `modelVersion`
+    - Regeneration path: `regenerateSessionRecap(sessionId, reason?)` with safe overwrite semantics
+    - Typed domain errors: `RECAP_SESSION_NOT_FOUND | RECAP_TRANSCRIPT_UNAVAILABLE | RECAP_GENERATION_FAILED | RECAP_INVALID_OUTPUT`
+  - Drift rules:
+    - final DB row + missing file => regenerate final (cheap)
+    - final file + missing DB row => shown as unindexed; regenerate to canonicalize
+  - Storage: `session_artifacts` metadata + file outputs under `data/campaigns/{slug}/exports/meecaps`
+  - Migration posture:
+    - `session_recaps` is canonical for the new multi-view recap contract
+    - `session_artifacts` remains compatibility lane for current `/meepo sessions recap` command surface (no cutover yet)
 - `/session new [--label C2E20]` — [DM-only] Start a new session (ends active session first)
 - `/session label [label] [--session_id]` — [DM-only] Set label for session
 - `/session view scope:all|unlabeled` — [DM-only] List sessions

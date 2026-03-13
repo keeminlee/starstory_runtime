@@ -1,6 +1,5 @@
 import { getObservabilityContext } from "../observability/context.js";
 import { MeepoError, type MeepoErrorCode, toMeepoError } from "./meepoError.js";
-import { MEEPO_WEB_DASHBOARD_URL } from "../web/dashboardUrl.js";
 
 const DEFAULT_USER_MESSAGE = "⚠️ Meepo stumbled while writing this memory.";
 
@@ -75,7 +74,7 @@ const CODE_FAILURE_CONTRACTS: Partial<Record<MeepoErrorCode, FailureContract>> =
     correctiveActionRequired: true,
   },
   ERR_NO_ACTIVE_SESSION: {
-    message: `⚠️ Meepo could not resolve that session. Pick a session from ${MEEPO_WEB_DASHBOARD_URL} and try again.`,
+    message: "⚠️ Meepo could not resolve that session. Pick a session from `/meepo sessions list` and try again.",
     failureClass: "corrective",
     retryable: false,
     correctiveActionRequired: true,
@@ -156,7 +155,7 @@ function withCorrectiveHints(message: string, err: MeepoError): string {
 
   const transcriptState = String(err.metadata?.transcript_state ?? "").trim();
   if (transcriptState === "missing_artifact") {
-    return `${message} This usually means the session exists but no transcript artifact has been generated yet. Try again shortly or inspect artifacts in ${MEEPO_WEB_DASHBOARD_URL}.`;
+    return `${message} This usually means the session exists but no transcript artifact has been generated yet. Try again shortly or regenerate artifacts via /meepo sessions recap.`;
   }
   if (transcriptState === "export_failed") {
     return `${message} Meepo could not build a transcript export for that session yet. Retry shortly, or regenerate session artifacts and then view again.`;
@@ -164,7 +163,7 @@ function withCorrectiveHints(message: string, err: MeepoError): string {
   if (transcriptState === "time_budget_exceeded") {
     return `${message} Transcript export exceeded the interaction time budget. Re-run the command from scratch.`;
   }
-  return `${message} Try another session from ${MEEPO_WEB_DASHBOARD_URL}, or retry after transcript export finishes.`;
+  return `${message} Try another session from /meepo sessions list, or retry after transcript export finishes.`;
 }
 
 export function formatUserFacingError(

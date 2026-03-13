@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { MEEPO_WEB_DASHBOARD_URL } from "../web/dashboardUrl.js";
 
 const baseSession = {
   session_id: "session-1",
@@ -227,7 +226,7 @@ afterEach(() => {
 });
 
 describe("/meepo sessions recap contract", () => {
-  test("/meepo sessions is hidden from the public command manifest", async () => {
+  test("no top-level meepo recap subcommand exists", async () => {
     const { meepo } = await import("../commands/meepo.js");
     const json = meepo.data.toJSON();
     const rootOptions = (json.options ?? []) as any[];
@@ -235,7 +234,8 @@ describe("/meepo sessions recap contract", () => {
     expect(topLevelRecap).toBeUndefined();
 
     const sessionsGroup = rootOptions.find((opt: any) => opt.type === 2 && opt.name === "sessions") as any;
-    expect(sessionsGroup).toBeUndefined();
+    const recapSub = (sessionsGroup?.options ?? []).find((opt: any) => opt.type === 1 && opt.name === "recap");
+    expect(recapSub).toBeDefined();
   });
 
   test("sessions recap refuses ambient sessions", async () => {
@@ -276,7 +276,7 @@ describe("/meepo sessions recap contract", () => {
     expect(reply).toHaveBeenCalledTimes(1);
     const payload = reply.mock.calls.at(0)?.[0];
     expect(payload?.content).toContain("canon");
-    expect(payload?.content).toContain(MEEPO_WEB_DASHBOARD_URL);
+    expect(payload?.content).toContain("/meepo sessions list");
   });
 
   test("sessions recap persists recap artifact for canon session", async () => {
@@ -732,7 +732,7 @@ describe("/meepo sessions recap contract", () => {
 
     const payload = reply.mock.calls.at(0)?.[0];
     expect(payload?.content).toContain("(ERR_NO_ACTIVE_SESSION)");
-    expect(payload?.content).toContain(MEEPO_WEB_DASHBOARD_URL);
+    expect(payload?.content).toContain("/meepo sessions list");
   });
 
   test("sessions view maps transcript export failure to transcript unavailable taxonomy", async () => {

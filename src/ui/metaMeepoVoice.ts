@@ -1,8 +1,6 @@
 // App-facing string boundary for /meepo command UX.
 // No side effects, no async, deterministic output, and no imports from command handlers.
 
-import { MEEPO_WEB_DASHBOARD_URL } from "../web/dashboardUrl.js";
-
 export type RecapStyle = "detailed" | "balanced" | "concise";
 export type CanonPersonaMode = "diegetic" | "meta";
 export const META_VOICE_VERSION = 1;
@@ -310,19 +308,19 @@ export const metaMeepoVoice = {
     },
 
     recapMissingCanon(): string {
-      return `I only generate recaps for **canon** sessions (and not in lab), meep. If you meant a real session, pick it from ${MEEPO_WEB_DASHBOARD_URL}.`;
+      return "I only generate recaps for **canon** sessions (and not in lab), meep. If you meant a real session, pick a canon session ID from `/meepo sessions list`.";
     },
 
     nextActionGenerateBase(sessionId: string, strategy: RecapStyle): string {
-      return `Next: Open ${MEEPO_WEB_DASHBOARD_URL} and inspect session ${sessionId} (preferred recap style: ${strategy}).`;
+      return `Next: Generate recap (builds base) via /meepo sessions recap session:${sessionId} style:${strategy}`;
     },
 
     nextActionGenerateFinal(sessionId: string, strategy: RecapStyle): string {
-      return `Next: Open ${MEEPO_WEB_DASHBOARD_URL} and review final recap status for session ${sessionId} (${strategy}).`;
+      return `Next: Generate final recap (cheap) via /meepo sessions recap session:${sessionId} style:${strategy}`;
     },
 
     nextActionRegenerate(sessionId: string, strategy: RecapStyle): string {
-      return `Next: Use ${MEEPO_WEB_DASHBOARD_URL} to inspect or regenerate artifacts for session ${sessionId} (${strategy}).`;
+      return `Next: Regenerate via /meepo sessions recap session:${sessionId} style:${strategy} force:true`;
     },
 
     recapResult(input: {
@@ -372,7 +370,7 @@ export const metaMeepoVoice = {
         lines.push(
           "",
           "⚠️ I have a DB record for the final recap, but the file is missing. That’s… not good meep.",
-          `Use ${MEEPO_WEB_DASHBOARD_URL} to inspect and repair the recap artifacts.`
+          "Run `/meepo sessions recap` to regenerate and repair it."
         );
       }
 
@@ -525,8 +523,8 @@ export const metaMeepoVoice = {
         "Start a session:",
         "`/meepo showtime start`",
         "",
-        "Manage sessions and recaps:",
-        `\`${MEEPO_WEB_DASHBOARD_URL}\``,
+        "View your sessions:",
+        "`https://meepo.online/dashboard`",
         "",
         "`/meepo awaken` — Awaken Meepo and run setup checks.",
         "`/meepo sleep` — Put Meepo to sleep and end the active session.",
@@ -534,6 +532,9 @@ export const metaMeepoVoice = {
         "`/meepo hush` — Disable voice replies (listen-only mode).",
         "`/meepo status` — Show state snapshot (mode, persona, voice, recap, hints).",
         "`/meepo doctor` — Run deterministic diagnostics and suggested fixes.",
+        "`/meepo sessions list [limit]` — List recent sessions.",
+        "`/meepo sessions view <session>` — View session details and cached artifacts.",
+        "`/meepo sessions recap <session> [style] [force]` — Generate/regenerate a canon recap.",
         "`/meepo settings show` — Show awakening settings.",
         "`/meepo settings home_text_channel channel:<channel>` — Set home text channel.",
         "`/meepo settings home_voice_channel channel:<channel>` — Set home voice channel.",

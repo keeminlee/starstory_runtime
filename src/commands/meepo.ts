@@ -82,7 +82,6 @@ import { voicePlaybackController } from "../voice/voicePlaybackController.js";
 import { getMeepoContextWorkerStatus } from "../ledger/meepoContextWorker.js";
 import { initState, loadState, saveProgress } from "../ledger/awakeningStateRepo.js";
 import { metaMeepoVoice, type DoctorCheck } from "../ui/metaMeepoVoice.js";
-import { MEEPO_WEB_DASHBOARD_URL } from "../web/dashboardUrl.js";
 import type { CommandCtx } from "./index.js";
 import { PermissionFlagsBits } from "discord.js";
 import { formatUserFacingError } from "../errors/formatUserFacingError.js";
@@ -1587,7 +1586,7 @@ async function runDoctorChecks(interaction: any, ctx: CommandCtx): Promise<Docto
     checks.push(
       baseStatus.exists
         ? { icon: "✅", label: "Base recap artifact present", action: "No action needed" }
-        : { icon: "⚠️", label: "Base recap artifact missing", action: `Review session processing in ${MEEPO_WEB_DASHBOARD_URL}` }
+        : { icon: "⚠️", label: "Base recap artifact missing", action: "Run /meepo sessions recap to generate base + final artifacts" }
     );
   }
 
@@ -3339,6 +3338,65 @@ export const meepo = {
       sub
         .setName("awaken")
         .setDescription("Begin Meepo's awakening ritual.")
+    )
+    .addSubcommandGroup((group) =>
+      group
+        .setName("sessions")
+        .setDescription("Browse sessions.")
+        .addSubcommand((sub) =>
+          sub
+            .setName("list")
+            .setDescription("List recent sessions.")
+            .addIntegerOption((opt) =>
+              opt
+                .setName("limit")
+                .setDescription("How many sessions to show (default 10, max 50).")
+                .setRequired(false)
+                .setMinValue(1)
+                .setMaxValue(50)
+            )
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("view")
+            .setDescription("View a session by id.")
+            .addStringOption((opt) =>
+              opt
+                .setName("session")
+                .setDescription("Session id")
+                .setAutocomplete(true)
+                .setRequired(true)
+            )
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("recap")
+            .setDescription("Generate or regenerate a recap for a canon session.")
+            .addStringOption((opt) =>
+              opt
+                .setName("session")
+                .setDescription("Session id")
+                .setAutocomplete(true)
+                .setRequired(true)
+            )
+            .addStringOption((opt) =>
+              opt
+                .setName("style")
+                .setDescription("Final recap style")
+                .setRequired(false)
+                .addChoices(
+                  { name: "detailed", value: "detailed" },
+                  { name: "balanced", value: "balanced" },
+                  { name: "concise", value: "concise" }
+                )
+            )
+            .addBooleanOption((opt) =>
+              opt
+                .setName("force")
+                .setDescription("Force regeneration even if a recap already exists.")
+                .setRequired(false)
+            )
+        )
     )
     .addSubcommand((sub) => sub.setName("talk").setDescription("Enable voice replies (requires awake)."))
     .addSubcommand((sub) => sub.setName("hush").setDescription("Disable voice replies (requires awake)."))
