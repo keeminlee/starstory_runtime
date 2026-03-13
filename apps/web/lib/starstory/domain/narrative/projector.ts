@@ -12,6 +12,7 @@ export function projectProtoStarState(engine: NarrativeEngineState): ProtoStarSt
   return {
     id: engine.id,
     phase: engine.phase,
+    clickCount: engine.clickCount,
     brightness,
     ringCount,
     symbolDensity,

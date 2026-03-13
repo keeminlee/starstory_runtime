@@ -42,13 +42,14 @@ export function SkyLayer() {
     const effectivePhase = phaseOverride ?? narrativePhaseToRendererPhase(engine.state.phase);
     map.set("s1", {
       phase: effectivePhase,
+      displayStage: engine.visualState.displayStage,
       brightness: engine.protoStar.brightness,
       ringCount: engine.protoStar.ringCount,
       symbolDensity: engine.protoStar.symbolDensity,
       reactionLevel: engine.protoStar.reactionLevel,
       clickCount: engine.state.clickCount,
       transcriptLineCount: engine.protoStar.transcriptLineCount,
-      campaignName: engine.protoStar.campaignName ?? "Proto-star",
+      campaignName: engine.visualState.label ?? "Proto-star",
     });
     return map;
   }, [engine.state.phase, engine.protoStar, phaseOverride]);

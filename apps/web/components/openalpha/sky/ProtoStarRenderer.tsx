@@ -1,7 +1,26 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import {
+  Layout,
+  Fit,
+  Alignment,
+  StateMachineInputType,
+  useRive,
+  useStateMachineInput,
+  useViewModel,
+  useViewModelInstance,
+  useViewModelInstanceNumber,
+} from "@rive-app/react-webgl2";
 import type { ProtoStarRendererState } from "@/lib/starstory/domain/sky/starData";
 import styles from "./sky.module.css";
+
+const RIVE_SRC = "/star-assets/starTest.riv";
+const FALLBACK_SRC = "/star-assets/proto_base.png";
+const RIVE_ARTBOARD = "starTest";
+const RIVE_STATE_MACHINE = "State Machine 1";
+const RIVE_VIEW_MODEL = "ViewModel1";
+const RIVE_STAGE_INPUT = "stage";
 
 type ProtoStarRendererProps = {
   state: ProtoStarRendererState;
@@ -18,17 +37,6 @@ type ProtoStarVisualTuning = {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
-}
-
-function resolveAssetSrc(phase: ProtoStarRendererState["phase"]): string {
-  switch (phase) {
-    case "proto_progress_mid":
-      return "/star-assets/proto_progress_mid.png";
-    case "supernova":
-      return "/star-assets/proto_supernova.png";
-    default:
-      return "/star-assets/proto_base.png";
-  }
 }
 
 function resolveVisualTuning(state: ProtoStarRendererState): ProtoStarVisualTuning {
@@ -87,9 +95,68 @@ function resolveVisualTuning(state: ProtoStarRendererState): ProtoStarVisualTuni
   }
 }
 
+function ProtoStarImageFallback({ state }: ProtoStarRendererProps) {
+  return (
+    <img
+      src={FALLBACK_SRC}
+      alt={state.campaignName || "Proto-star"}
+      className={styles.starCoreImg}
+      draggable={false}
+    />
+  );
+}
+
+function ProtoStarRiveAsset({ state, onLoadError }: ProtoStarRendererProps & { onLoadError: () => void }) {
+  const [isReady, setIsReady] = useState(false);
+  const { rive, RiveComponent } = useRive({
+    src: RIVE_SRC,
+    artboard: RIVE_ARTBOARD,
+    stateMachines: RIVE_STATE_MACHINE,
+    autoplay: true,
+    autoBind: false,
+    onLoadError: () => {
+      setIsReady(false);
+      onLoadError();
+    },
+    onRiveReady: () => {
+      setIsReady(true);
+    },
+    layout: new Layout({
+      fit: Fit.Contain,
+      alignment: Alignment.Center,
+    }),
+  });
+  const stageInput = useStateMachineInput(rive, RIVE_STATE_MACHINE, RIVE_STAGE_INPUT, state.displayStage);
+  const viewModel = useViewModel(rive, { name: RIVE_VIEW_MODEL });
+  const viewModelInstance = useViewModelInstance(viewModel, { useNew: true, rive });
+  const { setValue: setViewModelStage } = useViewModelInstanceNumber(RIVE_STAGE_INPUT, viewModelInstance);
+
+  useEffect(() => {
+    if (!stageInput || stageInput.type !== StateMachineInputType.Number) {
+      return;
+    }
+
+    stageInput.value = state.displayStage;
+  }, [stageInput, state.displayStage]);
+
+  useEffect(() => {
+    setViewModelStage(state.displayStage);
+  }, [setViewModelStage, state.displayStage]);
+
+  return (
+    <>
+      <RiveComponent
+        className={styles.starCoreRive}
+        aria-label={state.campaignName || "Proto-star"}
+      />
+      {!isReady ? <div className={styles.starCoreFallbackOverlay}><ProtoStarImageFallback state={state} /></div> : null}
+    </>
+  );
+}
+
 export function ProtoStarRenderer({ state }: ProtoStarRendererProps) {
-  const src = resolveAssetSrc(state.phase);
   const visual = resolveVisualTuning(state);
+  const [hasRiveError, setHasRiveError] = useState(false);
 
   return (
     <div
@@ -105,19 +172,11 @@ export function ProtoStarRenderer({ state }: ProtoStarRendererProps) {
       }}
     >
       <div className={styles.starBloom} />
-      <img
-        src={src}
-        alt={state.campaignName || "Proto-star"}
-        className={styles.starCoreImg}
-        draggable={false}
-        onError={(e) => {
-          const img = e.currentTarget;
-          const fallback = "/star-assets/proto_base.png";
-          if (!img.src.endsWith(fallback)) {
-            img.src = fallback;
-          }
-        }}
-      />
+      {hasRiveError ? (
+        <ProtoStarImageFallback state={state} />
+      ) : (
+        <ProtoStarRiveAsset state={state} onLoadError={() => setHasRiveError(true)} />
+      )}
       {state.campaignName ? (
         <div className={styles.protoStarLabel}>{state.campaignName}</div>
       ) : null}

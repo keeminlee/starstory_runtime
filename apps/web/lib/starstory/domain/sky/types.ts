@@ -1,5 +1,7 @@
 import type { NarrativePhase, ProtoStarState } from "../narrative";
 
+export type ProtoStarDisplayStage = 0 | 1;
+
 export interface ProtoStarVisualState {
   id: string;
   phase: NarrativePhase;
@@ -10,6 +12,7 @@ export interface ProtoStarVisualState {
   particleRate: number;
   scale: number;
   animationPhase: string;
+  displayStage: ProtoStarDisplayStage;
   isPermanent: boolean;
   label: string | null;
 }

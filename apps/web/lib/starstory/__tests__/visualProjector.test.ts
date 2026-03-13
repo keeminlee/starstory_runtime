@@ -6,6 +6,7 @@ function buildProtoStar(overrides: Partial<ProtoStarState> = {}): ProtoStarState
   return {
     id: "star-1",
     phase: "PROTO_STAR_FORMING",
+    clickCount: 0,
     brightness: 0,
     ringCount: 0,
     symbolDensity: 0,
@@ -36,6 +37,14 @@ describe("projectVisualState", () => {
     expect(born.animationPhase).toBe("permanent-pulse");
     expect(born.isPermanent).toBe(true);
     expect(collapsed.animationPhase).toBe("collapsed");
+  });
+
+  it("derives display stage from accepted click progression", () => {
+    const preThreshold = projectVisualState(buildProtoStar({ clickCount: 4 }));
+    const atThreshold = projectVisualState(buildProtoStar({ clickCount: 5 }));
+
+    expect(preThreshold.displayStage).toBe(0);
+    expect(atThreshold.displayStage).toBe(1);
   });
 
   it("scales glow and orbit speed based on narrative intensity", () => {

@@ -31,6 +31,7 @@ export interface NarrativeEngineState {
 export interface ProtoStarState {
   id: string;
   phase: NarrativePhase;
+  clickCount: number;
   brightness: number;
   ringCount: number;
   symbolDensity: number;

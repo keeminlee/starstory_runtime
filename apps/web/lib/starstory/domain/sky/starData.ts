@@ -18,6 +18,7 @@ export type ProtoStarRendererPhase =
 
 export type ProtoStarRendererState = {
   phase: ProtoStarRendererPhase;
+  displayStage: 0 | 1;
   brightness: number;
   ringCount: number;
   symbolDensity: number;

@@ -1,5 +1,5 @@
 import type { ProtoStarState } from "../narrative";
-import type { ProtoStarVisualState } from "./types";
+import type { ProtoStarDisplayStage, ProtoStarVisualState } from "./types";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -52,6 +52,10 @@ function getAnimationPhase(phase: ProtoStarState["phase"]): string {
   }
 }
 
+export function getProtoStarDisplayStage(clickCount: number): ProtoStarDisplayStage {
+  return clickCount >= 5 ? 1 : 0;
+}
+
 export function projectVisualState(protoStar: ProtoStarState): ProtoStarVisualState {
   const glowIntensity = 0.2 + easeOut(clamp(protoStar.brightness, 0, 1)) * 0.8;
   const ringCount = Math.max(1, protoStar.ringCount || 1);
@@ -68,6 +72,7 @@ export function projectVisualState(protoStar: ProtoStarState): ProtoStarVisualSt
     particleRate,
     scale,
     animationPhase: getAnimationPhase(protoStar.phase),
+    displayStage: getProtoStarDisplayStage(protoStar.clickCount),
     isPermanent: protoStar.isPermanent,
     label: protoStar.campaignName,
   };
