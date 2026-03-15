@@ -7,13 +7,13 @@ This note covers the remaining production-side work after the repo change that a
 ## Repo-Side Change Landed In This Branch
 
 - `.github/deploy.yml` now runs the normal EC2 deploy hook and then runs `npm run deploy:commands` on the host.
-- The command deploy step sources `/etc/meepo/meepo-bot.env` before running so it can use the same Discord credentials as the bot runtime.
+- The command deploy step sources `/etc/meepo/meepo-bot.env` and `/etc/meepo/meepo-web.env` before running so it can use the bot token and production Discord application id/client id.
 - Repo-side automation is complete; the remaining work is production rollout validation and fallback readiness.
 
 ## Remaining Prod-Side Steps
 
 1. Merge this branch to `main` so the updated workflow is eligible to run.
-2. Confirm `/etc/meepo/meepo-bot.env` on the EC2 host contains the command deploy inputs:
+2. Confirm the command deploy inputs exist across the production env files on the EC2 host:
    - `DISCORD_TOKEN`
    - `DISCORD_APPLICATION_ID` or `DISCORD_CLIENT_ID`
 3. Trigger the `Deploy Meepo` workflow on `main` or merge to `main` and let the normal push trigger run.

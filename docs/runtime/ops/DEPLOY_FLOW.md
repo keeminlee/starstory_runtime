@@ -52,8 +52,8 @@ Application restart path:
 - `meepo-web` reads `/etc/meepo/meepo-web.env` through systemd.
 
 Command deploy path:
-- the workflow sources `/etc/meepo/meepo-bot.env` before running `npm run deploy:commands`
-- this ensures command deployment uses the same Discord credentials as the runtime bot
+- the workflow sources `/etc/meepo/meepo-bot.env` and `/etc/meepo/meepo-web.env` before running `npm run deploy:commands`
+- this ensures command deployment sees the runtime bot token and the production Discord application id/client id
 
 ## Operator Checks
 
