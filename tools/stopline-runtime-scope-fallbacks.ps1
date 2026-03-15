@@ -1,6 +1,6 @@
 $runtimeFiles = Get-ChildItem -Recurse -File src |
   Where-Object {
-    $_.FullName -match "\\src\\commands\\(missions|meeps|session)\.ts$" -or
+    $_.FullName -match "\\src\\commands\\.*\.ts$" -or
     $_.FullName -match "\\src\\overlay\\.*\.ts$" -or
     $_.FullName -match "\\src\\bot\.ts$" -or
     $_.FullName -match "\\src\\voice\\.*\.ts$"
