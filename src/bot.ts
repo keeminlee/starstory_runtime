@@ -37,6 +37,7 @@ import { buildMeepoPromptBundle } from "./llm/buildMeepoPromptBundle.js";
 import { setBotNicknameForPersona } from "./meepo/nickname.js";
 import { acquireLock } from "./pidlock.js";
 import { getDbForCampaign, seedMeepoMemories } from "./db.js";
+import { getEnv } from "./config/rawEnv.js";
 import { loadRegistryForScope } from "./registry/loadRegistry.js";
 import { extractRegistryMatches } from "./registry/extractRegistryMatches.js";
 import { searchEventsByTitleScoped, type EventRow } from "./ledger/eventSearch.js";
@@ -175,7 +176,7 @@ bootLog.info("Process startup diagnostics", {
   ppid: process.ppid,
   node_version: process.version,
   meepo_mode: cfg.mode,
-  build_marker: process.env.MEEPO_BUILD_ID ?? process.env.npm_package_version ?? "dev-local",
+  build_marker: getEnv("MEEPO_BUILD_ID") ?? getEnv("npm_package_version") ?? "dev-local",
   started_at_ms: Date.now(),
 });
 
@@ -339,7 +340,7 @@ client.on("messageCreate", async (message: any) => {
     const activeForPolicy = getActiveMeepo(message.guildId);
     const defaultPersonaId = getGuildDefaultPersonaId(message.guildId) ?? "meta_meepo";
     const textReplyPolicy = shouldAllowConversationalTextOutput({
-      nodeEnv: process.env.NODE_ENV,
+      nodeEnv: getEnv("NODE_ENV"),
       isDevUser: isDevUser(message.author?.id),
     });
 
