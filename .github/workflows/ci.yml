@@ -1,4 +1,4 @@
-name: ci
+name: CI
 
 on:
   push:
@@ -22,48 +22,3 @@ jobs:
 
       - name: Verify
         run: npm run ci:verify
-
-  deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: verify
-    runs-on: ubuntu-latest
-    env:
-      EC2_SSH_HOST: ${{ secrets.EC2_SSH_HOST }}
-      EC2_SSH_USER: ${{ secrets.EC2_SSH_USER }}
-      EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-      EC2_SSH_PORT: ${{ secrets.EC2_SSH_PORT }}
-    steps:
-      - name: Validate deploy secrets
-        run: |
-          if [ -z "$EC2_SSH_HOST" ]; then
-            echo "::error::Missing required secret: EC2_SSH_HOST"
-            exit 1
-          fi
-          if [ -z "$EC2_SSH_USER" ]; then
-            echo "::error::Missing required secret: EC2_SSH_USER"
-            exit 1
-          fi
-          if [ -z "$EC2_SSH_KEY" ]; then
-            echo "::error::Missing required secret: EC2_SSH_KEY"
-            exit 1
-          fi
-
-      - name: Prepare SSH key
-        run: |
-          install -m 0700 -d ~/.ssh
-          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-
-      - name: Add EC2 host key (best effort)
-        run: |
-          PORT="$EC2_SSH_PORT"
-          if [ -z "$PORT" ]; then PORT="22"; fi
-          ssh-keyscan -T 10 -p "$PORT" -H "$EC2_SSH_HOST" >> ~/.ssh/known_hosts || true
-
-      - name: Deploy on EC2
-        run: |
-          PORT="$EC2_SSH_PORT"
-          if [ -z "$PORT" ]; then PORT="22"; fi
-          TARGET="$EC2_SSH_USER@$EC2_SSH_HOST"
-          REMOTE_CMD='set -euo pipefail; if command -v sudo >/dev/null 2>&1; then sudo -n -u meepo bash -lc "cd /home/meepo/meepo-bot && ./deploy-meepo.sh main"; else cd /home/meepo/meepo-bot && ./deploy-meepo.sh main; fi'
-          ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -p "$PORT" "$TARGET" "$REMOTE_CMD"

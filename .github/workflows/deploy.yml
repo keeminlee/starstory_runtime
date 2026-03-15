@@ -1,5 +1,4 @@
 name: Deploy Meepo
-# Force-sync note: keep the separate Discord command deploy step visible in Actions.
 
 on:
   push:
