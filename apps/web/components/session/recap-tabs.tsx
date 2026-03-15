@@ -6,9 +6,17 @@ import { Download, RefreshCw } from "lucide-react";
 import { EmptyState } from "@/components/shared/empty-state";
 import { EntityResolutionPanel } from "@/components/session/entity-resolution-panel";
 import { EntityPreviewPanel } from "@/components/session/entity-preview-panel";
+import { SpeakerAttributionPanel } from "@/components/session/speaker-attribution-panel";
 import { regenerateSessionRecapApi, getAnnotatedRecapsApi } from "@/lib/api/sessions";
 import { WebApiError } from "@/lib/api/http";
-import type { RecapTab, SessionArtifactStatus, SessionRecap, SessionAnnotatedRecaps, AnnotatedRecapLine } from "@/lib/types";
+import type {
+  RecapTab,
+  SessionArtifactStatus,
+  SessionRecap,
+  SessionAnnotatedRecaps,
+  AnnotatedRecapLine,
+  SessionSpeakerAttributionState,
+} from "@/lib/types";
 import type { RegistryCategoryKey } from "@/lib/registry/types";
 
 const HOVER_OPEN_DELAY_MS = 180;
@@ -39,6 +47,7 @@ type RecapTabsProps = {
   sessionId: string;
   sessionTitle: string;
   campaignSlug: string;
+  speakerAttribution: SessionSpeakerAttributionState | null;
   searchParams?: Record<string, string | string[] | undefined>;
   canRegenerate: boolean;
   canWrite?: boolean;
@@ -55,6 +64,9 @@ type BannerState =
 
 function mapRegenerateError(error: unknown): string {
   if (error instanceof WebApiError) {
+    if (error.code === "RECAP_SPEAKER_ATTRIBUTION_REQUIRED") {
+      return "Recap generation is blocked until every session speaker has been classified.";
+    }
     if (error.code === "unauthorized") {
       return "Only the configured DM can regenerate recaps for this guild archive.";
     }
@@ -171,6 +183,7 @@ export function RecapTabs({
   sessionId,
   sessionTitle,
   campaignSlug,
+  speakerAttribution,
   searchParams,
   canRegenerate,
   canWrite = false,
@@ -247,7 +260,7 @@ export function RecapTabs({
     } as const;
   }, [recap]);
 
-  async function handleRegenerateRecap() {
+  async function performRegenerateRecap(): Promise<void> {
     setIsPending(true);
     setBanner(null);
     try {
@@ -263,13 +276,21 @@ export function RecapTabs({
       await loadAnnotations();
       router.refresh();
     } catch (error) {
+      const message = mapRegenerateError(error);
       setBanner({
         tone: "danger",
-        message: mapRegenerateError(error),
+        message,
       });
+      throw error instanceof Error ? error : new Error(message);
     } finally {
       setIsPending(false);
     }
+  }
+
+  function handleRegenerateRecap(): void {
+    void performRegenerateRecap().catch(() => {
+      // Banner state is already updated inside performRegenerateRecap.
+    });
   }
 
   const recapBaseName = `${campaignSlug}-${sessionId}-recap`;
@@ -523,6 +544,15 @@ export function RecapTabs({
               </div>
             ) : null}
           </>
+        ) : speakerAttribution?.required ? (
+          <SpeakerAttributionPanel
+            sessionId={sessionId}
+            campaignSlug={campaignSlug}
+            searchParams={searchParams}
+            canWrite={canWrite}
+            initialState={speakerAttribution}
+            onBeginRecapGeneration={performRegenerateRecap}
+          />
         ) : (
           <EmptyState
             title={status === "missing" ? "No recap yet" : "Recap unavailable"}

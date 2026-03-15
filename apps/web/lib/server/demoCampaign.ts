@@ -74,6 +74,7 @@ const DEMO_SESSION_DETAILS: Record<string, SessionDetail> = {
       modelVersion: "demo-seeded-v1",
     },
     recapReadiness: "ready",
+    speakerAttribution: null,
     artifacts: {
       transcript: "available",
       recap: "available",
@@ -121,6 +122,7 @@ const DEMO_SESSION_DETAILS: Record<string, SessionDetail> = {
       modelVersion: "demo-seeded-v1",
     },
     recapReadiness: "ready",
+    speakerAttribution: null,
     artifacts: {
       transcript: "available",
       recap: "available",

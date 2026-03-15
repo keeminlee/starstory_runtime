@@ -9,6 +9,33 @@ export type SessionArtifactStatus =
 
 export type SessionRecapReadiness = "pending" | "ready" | "failed";
 
+export type SessionSpeakerClassificationType = "pc" | "dm" | "ignore";
+
+export type SessionSpeakerClassification = {
+  discordUserId: string;
+  classificationType: SessionSpeakerClassificationType;
+  pcEntityId: string | null;
+  classifiedAt: string | null;
+  locked: boolean;
+  source: "stored" | "auto_dm";
+};
+
+export type SessionSpeakerAttributionSpeaker = {
+  discordUserId: string;
+  displayName: string;
+  firstSeenAt: string;
+  classification: SessionSpeakerClassification | null;
+};
+
+export type SessionSpeakerAttributionState = {
+  required: boolean;
+  ready: boolean;
+  pendingCount: number;
+  dmDiscordUserId: string | null;
+  speakers: SessionSpeakerAttributionSpeaker[];
+  availablePcs: RegistryEntityDto[];
+};
+
 export type SessionSummary = {
   id: string;
   label: string | null;
@@ -75,6 +102,7 @@ export type SessionDetail = {
   transcript: TranscriptEntry[];
   recap: SessionRecap | null;
   recapReadiness: SessionRecapReadiness;
+  speakerAttribution: SessionSpeakerAttributionState | null;
   artifacts: {
     transcript: SessionArtifactStatus;
     recap: SessionArtifactStatus;
@@ -99,6 +127,7 @@ export type DashboardModel = {
 // ── Annotated Recap Segments ────────────────────────────────────────
 
 import type { RegistryCategoryKey } from "@/lib/registry/types";
+import type { RegistryEntityDto } from "@/lib/registry/types";
 
 export type RecapTextSpan = { type: "text"; text: string };
 export type RecapEntitySpan = {

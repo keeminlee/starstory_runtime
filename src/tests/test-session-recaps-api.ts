@@ -107,6 +107,23 @@ async function seedSessionAndLedger(guildId: string, sessionId: string): Promise
   );
 }
 
+async function markSpeakerAttributionReady(guildId: string, sessionId: string): Promise<void> {
+  const { setGuildDmUserId } = await import("../campaign/guildConfig.js");
+  const { setSessionSpeakerClassifications } = await import("../sessions/sessionSpeakerAttribution.js");
+
+  setGuildDmUserId(guildId, "user-2");
+  setSessionSpeakerClassifications({
+    guildId,
+    sessionId,
+    entries: [
+      {
+        discordUserId: "user-1",
+        classificationType: "ignore",
+      },
+    ],
+  });
+}
+
 test("sessionRecaps upsert/get round-trip preserves canonical three-view shape", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-session-recaps-api-"));
   tempDirs.push(tempDir);
@@ -286,6 +303,7 @@ test("generateSessionRecap orchestrates all three styles and persists session_re
   const guildId = "guild-recaps-generate";
   const sessionId = "session-recaps-generate";
   await seedSessionAndLedger(guildId, sessionId);
+  await markSpeakerAttributionReady(guildId, sessionId);
 
   const {
     generateSessionRecap,
@@ -348,6 +366,7 @@ test("regenerateSessionRecap overwrites safely and records regeneration reason",
   const guildId = "guild-recaps-regenerate";
   const sessionId = "session-recaps-regenerate";
   await seedSessionAndLedger(guildId, sessionId);
+  await markSpeakerAttributionReady(guildId, sessionId);
 
   const {
     generateSessionRecap,
@@ -413,6 +432,7 @@ test("repeated generateSessionRecap preserves createdAt and overwrites stored vi
   const guildId = "guild-recaps-repeat";
   const sessionId = "session-recaps-repeat";
   await seedSessionAndLedger(guildId, sessionId);
+  await markSpeakerAttributionReady(guildId, sessionId);
 
   const {
     generateSessionRecap,
@@ -482,6 +502,7 @@ test("generateSessionRecap maps missing transcript and invalid output to typed r
   const guildId = "guild-recaps-errors";
   const sessionId = "session-recaps-errors";
   await seedSessionAndLedger(guildId, sessionId);
+  await markSpeakerAttributionReady(guildId, sessionId);
 
   const {
     generateSessionRecap,
@@ -530,4 +551,43 @@ test("generateSessionRecap maps missing transcript and invalid output to typed r
   const error = new RecapDomainError("RECAP_GENERATION_FAILED", "boom");
   expect(isRecapDomainError(error)).toBe(true);
   expect(isRecapDomainError(new Error("plain"))).toBe(false);
+});
+
+test("generateSessionRecap returns explicit attribution-required domain error when speaker classification is incomplete", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-session-recaps-attribution-gate-"));
+  tempDirs.push(tempDir);
+  configureHermeticEnv(tempDir);
+
+  const guildId = "guild-recaps-attribution-gate";
+  const sessionId = "session-recaps-attribution-gate";
+  await seedSessionAndLedger(guildId, sessionId);
+
+  const { setGuildDmUserId } = await import("../campaign/guildConfig.js");
+  const { generateSessionRecap } = await import("../sessions/sessionRecaps.js");
+  setGuildDmUserId(guildId, "user-2");
+
+  await expect(
+    generateSessionRecap(
+      { guildId, sessionId },
+      {
+        generateStyleRecap: async ({ strategy }) => ({
+          text: `${strategy}-ok`,
+          createdAtMs: Date.now(),
+          strategy,
+          engine: "megameecap",
+          strategyVersion: "megameecap-final-v1",
+          baseVersion: "megameecap-base-v1",
+          finalVersion: "megameecap-final-v1",
+          sourceTranscriptHash: "hash-attribution",
+          cacheHit: false,
+          artifactPaths: {
+            recapPath: `${strategy}.md`,
+            metaPath: `${strategy}.json`,
+          },
+        }),
+      }
+    )
+  ).rejects.toMatchObject({
+    code: "RECAP_SPEAKER_ATTRIBUTION_REQUIRED",
+  });
 });

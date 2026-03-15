@@ -53,6 +53,7 @@ const SESSIONS: SessionDetail[] = [
       modelVersion: "megameecap-final-v1",
     },
     recapReadiness: "ready",
+    speakerAttribution: null,
     artifacts: {
       transcript: "available",
       recap: "available",
@@ -99,6 +100,7 @@ const SESSIONS: SessionDetail[] = [
       modelVersion: "megameecap-final-v1",
     },
     recapReadiness: "ready",
+    speakerAttribution: null,
     artifacts: {
       transcript: "available",
       recap: "available",

@@ -236,6 +236,29 @@ CREATE TABLE IF NOT EXISTS session_recaps (
 CREATE INDEX IF NOT EXISTS idx_session_recaps_updated
 ON session_recaps(updated_at_ms DESC);
 
+-- Session speaker attribution gate: explicit per-session speaker classification
+-- Supplemental metadata only; does not modify transcript authority tables.
+CREATE TABLE IF NOT EXISTS session_speaker_classifications (
+  guild_id TEXT NOT NULL,
+  campaign_slug TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  discord_user_id TEXT NOT NULL,
+  classification_type TEXT NOT NULL CHECK(classification_type IN ('pc', 'dm', 'ignore')),
+  pc_entity_id TEXT,
+  classified_at_ms INTEGER NOT NULL,
+
+  PRIMARY KEY (session_id, discord_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_speaker_classifications_session
+ON session_speaker_classifications(session_id, classified_at_ms DESC);
+
+CREATE INDEX IF NOT EXISTS idx_session_speaker_classifications_scope
+ON session_speaker_classifications(guild_id, campaign_slug, session_id);
+
+CREATE INDEX IF NOT EXISTS idx_session_speaker_classifications_type
+ON session_speaker_classifications(classification_type, session_id);
+
 -- Meecaps: structured session summaries (Phase 1+)
 -- Supports two modes:
 --   - V1 JSON: schema-validated scenes/beats (legacy)

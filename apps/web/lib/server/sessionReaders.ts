@@ -17,6 +17,7 @@ import {
   type ArchiveTranscript,
 } from "@/lib/server/readData/archiveReadStore";
 import { assertSessionGuildInAuthorizedScope, ScopeGuardError } from "@/lib/server/scopeGuards";
+import { readSessionSpeakerAttributionSnapshot } from "@/lib/server/sessionSpeakerAttributionService";
 import type { SessionArtifactStatus, SessionDetail } from "@/lib/types";
 import { assertUserCanWriteCampaignArchive, canUserWriteCampaignArchive } from "@/lib/server/writeAuthority";
 
@@ -27,6 +28,7 @@ export type CanonicalSessionDetail = {
   transcript: ArchiveTranscript | null;
   recap: ArchiveRecap | null;
   recapReadiness: "pending" | "ready" | "failed";
+  speakerAttribution: SessionDetail["speakerAttribution"];
   transcriptStatus: SessionArtifactStatus;
   recapStatus: SessionArtifactStatus;
   warnings: string[];
@@ -210,6 +212,7 @@ export async function getCanonicalSessionDetail(args: {
   let transcript = null as ArchiveTranscript | null;
   let recap: ArchiveRecap | null = null;
   let recapReadiness: "pending" | "ready" | "failed" = "pending";
+  let speakerAttribution: SessionDetail["speakerAttribution"] = null;
   let transcriptStatus: SessionArtifactStatus = "missing";
   let recapStatus: SessionArtifactStatus = "missing";
 
@@ -248,6 +251,12 @@ export async function getCanonicalSessionDetail(args: {
     sessionStatus: session.status,
   });
 
+  speakerAttribution = readSessionSpeakerAttributionSnapshot({
+    guildId,
+    campaignSlug,
+    sessionId: args.sessionId,
+  });
+
   return {
     guildId,
     campaignSlug,
@@ -255,6 +264,7 @@ export async function getCanonicalSessionDetail(args: {
     transcript,
     recap,
     recapReadiness,
+    speakerAttribution,
     transcriptStatus,
     recapStatus,
     warnings,
@@ -309,6 +319,7 @@ export async function getWebSessionDetail(args: {
       transcript: canonical.transcript,
       recap: canonical.recap,
       recapReadiness: canonical.recapReadiness,
+      speakerAttribution: canonical.speakerAttribution,
       transcriptStatus: canonical.transcriptStatus,
       recapStatus: canonical.recapStatus,
       warnings: canonical.warnings,

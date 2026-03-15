@@ -5,12 +5,6 @@ import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { resolveWebAuthContext } from "../../apps/web/lib/server/authContext";
 import { WebDataError } from "../../apps/web/lib/mappers/errorMappers";
-import {
-  getWebSessionDetail,
-  regenerateWebSessionRecap,
-  updateWebSessionLabel,
-} from "../../apps/web/lib/server/sessionReaders";
-import { updateWebCampaignName } from "../../apps/web/lib/server/campaignReaders";
 
 process.env.DISCORD_TOKEN ??= "test-token";
 process.env.OPENAI_API_KEY ??= "test-openai-key";
@@ -50,6 +44,14 @@ async function setAuth(args: {
     primaryGuildId: guildIds[0] ?? null,
     devBypass: false,
   } as any);
+}
+
+async function getSessionReaders() {
+  return await import("../../apps/web/lib/server/sessionReaders");
+}
+
+async function getCampaignReaders() {
+  return await import("../../apps/web/lib/server/campaignReaders");
 }
 
 afterEach(() => {
@@ -108,12 +110,67 @@ async function setupGuildCampaignAndSession(args: {
 
   const session = getMostRecentSession(args.guildId);
   expect(session?.session_id).toBeTruthy();
-  db.close();
 
   return {
     campaignSlug: campaign.campaign_slug,
     sessionId: session!.session_id,
   };
+}
+
+async function seedSessionTranscript(args: {
+  guildId: string;
+  campaignSlug: string;
+  sessionId: string;
+  playerUserId: string;
+  dmUserId: string;
+}): Promise<void> {
+  const { getDbForCampaign } = await import("../db.js");
+  const db = getDbForCampaign(args.campaignSlug);
+  const now = Date.now();
+
+  db.prepare(
+    `INSERT INTO ledger_entries (
+      id, guild_id, channel_id, message_id, author_id, author_name,
+      timestamp_ms, content, content_norm, session_id, tags, source, narrative_weight, speaker_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    `${args.sessionId}-speaker-player`,
+    args.guildId,
+    "channel-1",
+    `${args.sessionId}-speaker-player-msg`,
+    args.playerUserId,
+    "Jamison",
+    now - 2_000,
+    "I scout ahead.",
+    "I scout ahead.",
+    args.sessionId,
+    "human",
+    "text",
+    "primary",
+    null,
+  );
+
+  db.prepare(
+    `INSERT INTO ledger_entries (
+      id, guild_id, channel_id, message_id, author_id, author_name,
+      timestamp_ms, content, content_norm, session_id, tags, source, narrative_weight, speaker_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    `${args.sessionId}-speaker-dm`,
+    args.guildId,
+    "channel-1",
+    `${args.sessionId}-speaker-dm-msg`,
+    "stt-bot",
+    "Caterson",
+    now - 1_000,
+    "The corridor opens into a chapel.",
+    "The corridor opens into a chapel.",
+    args.sessionId,
+    "human",
+    "voice",
+    "primary",
+    args.dmUserId,
+  );
 }
 
 describe("Phase 5.5 write authority enforcement", () => {
@@ -128,12 +185,14 @@ describe("Phase 5.5 write authority enforcement", () => {
     const { campaignSlug } = await setupGuildCampaignAndSession({ guildId, dmUserId, playerUserId });
 
     await setAuth({ userId: playerUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+    const { updateWebCampaignName } = await getCampaignReaders();
     await expect(
       updateWebCampaignName({ campaignSlug, campaignName: "Player Rename" })
     ).rejects.toMatchObject({ code: "unauthorized", status: 403 });
 
     await setAuth({ userId: dmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
-    const renamed = await updateWebCampaignName({ campaignSlug, campaignName: "DM Rename" });
+  const { updateWebCampaignName: updateWebCampaignNameAsDm } = await getCampaignReaders();
+  const renamed = await updateWebCampaignNameAsDm({ campaignSlug, campaignName: "DM Rename" });
     expect(renamed.name).toBe("DM Rename");
   });
 
@@ -154,12 +213,14 @@ describe("Phase 5.5 write authority enforcement", () => {
     });
 
     await setAuth({ userId: guildDmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+    const { updateWebCampaignName } = await getCampaignReaders();
     await expect(
       updateWebCampaignName({ campaignSlug, campaignName: "Guild DM Rename Attempt" })
     ).rejects.toMatchObject({ code: "unauthorized", status: 403 });
 
     await setAuth({ userId: campaignOwnerUserId, guilds: [{ id: guildId, name: "Guild One" }] });
-    const renamed = await updateWebCampaignName({ campaignSlug, campaignName: "Campaign Owner Rename" });
+    const { updateWebCampaignName: updateWebCampaignNameAsOwner } = await getCampaignReaders();
+    const renamed = await updateWebCampaignNameAsOwner({ campaignSlug, campaignName: "Campaign Owner Rename" });
     expect(renamed.name).toBe("Campaign Owner Rename");
   });
 
@@ -174,13 +235,15 @@ describe("Phase 5.5 write authority enforcement", () => {
     const { sessionId } = await setupGuildCampaignAndSession({ guildId, dmUserId, playerUserId });
 
     await setAuth({ userId: playerUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+    const { updateWebSessionLabel } = await getSessionReaders();
     await expect(updateWebSessionLabel({ sessionId, label: "Player Label" })).rejects.toMatchObject({
       code: "unauthorized",
       status: 403,
     });
 
     await setAuth({ userId: dmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
-    const updated = await updateWebSessionLabel({ sessionId, label: "DM Label" });
+    const { updateWebSessionLabel: updateWebSessionLabelAsDm } = await getSessionReaders();
+    const updated = await updateWebSessionLabelAsDm({ sessionId, label: "DM Label" });
     expect(updated.label).toBe("DM Label");
   });
 
@@ -201,13 +264,15 @@ describe("Phase 5.5 write authority enforcement", () => {
     });
 
     await setAuth({ userId: guildDmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+    const { updateWebSessionLabel } = await getSessionReaders();
     await expect(updateWebSessionLabel({ sessionId, label: "Guild DM Label Attempt" })).rejects.toMatchObject({
       code: "unauthorized",
       status: 403,
     });
 
     await setAuth({ userId: campaignOwnerUserId, guilds: [{ id: guildId, name: "Guild One" }] });
-    const updated = await updateWebSessionLabel({ sessionId, label: "Campaign Owner Label" });
+    const { updateWebSessionLabel: updateWebSessionLabelAsOwner } = await getSessionReaders();
+    const updated = await updateWebSessionLabelAsOwner({ sessionId, label: "Campaign Owner Label" });
     expect(updated.label).toBe("Campaign Owner Label");
   });
 
@@ -222,6 +287,7 @@ describe("Phase 5.5 write authority enforcement", () => {
     const { sessionId } = await setupGuildCampaignAndSession({ guildId, dmUserId, playerUserId });
 
     await setAuth({ userId: playerUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+    const { regenerateWebSessionRecap } = await getSessionReaders();
     await expect(regenerateWebSessionRecap({ sessionId, reason: "test" })).rejects.toMatchObject({
       code: "unauthorized",
       status: 403,
@@ -231,7 +297,8 @@ describe("Phase 5.5 write authority enforcement", () => {
     vi.stubEnv("OPENAI_API_KEY", "");
 
     await setAuth({ userId: dmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
-    await expect(regenerateWebSessionRecap({ sessionId, reason: "test" })).rejects.toMatchObject({
+    const { regenerateWebSessionRecap: regenerateWebSessionRecapAsDm } = await getSessionReaders();
+    await expect(regenerateWebSessionRecapAsDm({ sessionId, reason: "test" })).rejects.toMatchObject({
       code: "openai_unconfigured",
       status: 503,
     });
@@ -239,6 +306,118 @@ describe("Phase 5.5 write authority enforcement", () => {
 });
 
 describe("Phase 5.5 recap source visibility", () => {
+  test("session detail exposes speaker attribution gate state with locked DM row", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-phase55-speaker-detail-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const guildId = "guild-1";
+    const dmUserId = "dm-1";
+    const playerUserId = "player-1";
+    const { campaignSlug, sessionId } = await setupGuildCampaignAndSession({ guildId, dmUserId, playerUserId });
+    await seedSessionTranscript({ guildId, campaignSlug, sessionId, playerUserId, dmUserId });
+
+    await setAuth({ userId: playerUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+    const { getWebSessionDetail } = await getSessionReaders();
+    const detail = await getWebSessionDetail({ sessionId, searchParams: { campaign_slug: campaignSlug } });
+
+    expect(detail.speakerAttribution?.required).toBe(true);
+    expect(detail.speakerAttribution?.ready).toBe(false);
+    expect(detail.speakerAttribution?.pendingCount).toBe(1);
+    expect(detail.speakerAttribution?.speakers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          discordUserId: dmUserId,
+          classification: expect.objectContaining({
+            classificationType: "dm",
+            locked: true,
+          }),
+        }),
+      ])
+    );
+  });
+
+  test("web recap regeneration returns explicit attribution-required error until speakers are classified", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-phase55-speaker-gate-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const guildId = "guild-1";
+    const dmUserId = "dm-1";
+    const playerUserId = "player-1";
+    const { campaignSlug, sessionId } = await setupGuildCampaignAndSession({ guildId, dmUserId, playerUserId });
+    await seedSessionTranscript({ guildId, campaignSlug, sessionId, playerUserId, dmUserId });
+
+    await setAuth({ userId: dmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+    const { regenerateWebSessionRecap } = await getSessionReaders();
+    await expect(
+      regenerateWebSessionRecap({
+        sessionId,
+        reason: "manual-web-regenerate",
+        searchParams: { campaign_slug: campaignSlug },
+      } as any)
+    ).rejects.toMatchObject({
+      code: "RECAP_SPEAKER_ATTRIBUTION_REQUIRED",
+      status: 409,
+    });
+  });
+
+  test("speaker attribution batch can create a PC inline and unlock recap readiness", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-phase55-speaker-inline-pc-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const guildId = "guild-1";
+    const dmUserId = "dm-1";
+    const playerUserId = "player-1";
+    const { campaignSlug, sessionId } = await setupGuildCampaignAndSession({ guildId, dmUserId, playerUserId });
+    await seedSessionTranscript({ guildId, campaignSlug, sessionId, playerUserId, dmUserId });
+
+    const { upsertGuildSeenDiscordUser } = await import("../campaign/guildSeenDiscordUsers.js");
+    upsertGuildSeenDiscordUser({
+      guildId,
+      discordUserId: playerUserId,
+      nickname: "Jamison",
+      username: "jamison",
+      seenAtMs: Date.now(),
+    });
+
+    await setAuth({ userId: dmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+    const { saveSessionSpeakerAttributionBatch } = await import("../../apps/web/lib/server/sessionSpeakerAttributionService");
+    const saved = await saveSessionSpeakerAttributionBatch({
+      guildId,
+      campaignSlug,
+      sessionId,
+      payload: {
+        entries: [
+          {
+            discordUserId: playerUserId,
+            classificationType: "pc",
+            createPc: {
+              canonicalName: "Jamison",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(saved.ready).toBe(true);
+    expect(saved.availablePcs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ canonicalName: "Jamison", discordUserId: playerUserId }),
+      ])
+    );
+
+    const { getWebSessionDetail } = await getSessionReaders();
+    const detail = await getWebSessionDetail({ sessionId, searchParams: { campaign_slug: campaignSlug } });
+    expect(detail.speakerAttribution?.ready).toBe(true);
+    expect(detail.speakerAttribution?.availablePcs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ canonicalName: "Jamison" }),
+      ])
+    );
+  });
+
   test("session detail exposes canonical recap source", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-phase55-recap-"));
     tempDirs.push(tempDir);
@@ -264,7 +443,8 @@ describe("Phase 5.5 recap source visibility", () => {
     });
 
     await setAuth({ userId: playerUserId, guilds: [{ id: guildId, name: "Guild One" }] });
-    const detail = await getWebSessionDetail({ sessionId });
+  const { getWebSessionDetail } = await getSessionReaders();
+  const detail = await getWebSessionDetail({ sessionId });
     expect(detail.recap?.source).toBe("canonical");
     expect(detail.recap?.balanced).toContain("Canonical balanced");
     expect(detail.recapReadiness).toBe("ready");
@@ -307,10 +487,9 @@ describe("Phase 5.5 recap source visibility", () => {
         "system",
         "secondary"
       );
-    campaignDb.close();
-
     await setAuth({ userId: playerUserId, guilds: [{ id: guildId, name: "Guild One" }] });
-    const detail = await getWebSessionDetail({ sessionId });
+  const { getWebSessionDetail } = await getSessionReaders();
+  const detail = await getWebSessionDetail({ sessionId });
     expect(detail.recap).toBeNull();
     expect(detail.recapReadiness).toBe("failed");
   });
@@ -334,10 +513,9 @@ describe("Phase 5.5 recap source visibility", () => {
          VALUES (?, 'recap_final', ?, ?, ?, NULL, ?, NULL)`
       )
       .run(sessionId, "Legacy artifact recap", Date.now(), "legacy-engine", "legacy-v1");
-    campaignDb.close();
-
     await setAuth({ userId: playerUserId, guilds: [{ id: guildId, name: "Guild One" }] });
-    const detail = await getWebSessionDetail({ sessionId });
+  const { getWebSessionDetail } = await getSessionReaders();
+  const detail = await getWebSessionDetail({ sessionId });
     expect(detail.recap?.source).toBe("legacy_artifact");
     expect(detail.recap?.balanced).toContain("Legacy artifact recap");
     expect(detail.recap?.concise).toBe("");
@@ -364,10 +542,9 @@ describe("Phase 5.5 recap source visibility", () => {
          VALUES (?, ?, ?, ?, ?)`
       )
       .run(sessionId, "Legacy meecap narrative", "legacy-meecap-model", Date.now() - 1000, Date.now());
-    campaignDb.close();
-
     await setAuth({ userId: playerUserId, guilds: [{ id: guildId, name: "Guild One" }] });
-    const detail = await getWebSessionDetail({ sessionId });
+  const { getWebSessionDetail } = await getSessionReaders();
+  const detail = await getWebSessionDetail({ sessionId });
     expect(detail.recap?.source).toBe("legacy_meecap");
     expect(detail.recap?.balanced).toContain("Legacy meecap narrative");
     expect(detail.recap?.concise).toBe("");

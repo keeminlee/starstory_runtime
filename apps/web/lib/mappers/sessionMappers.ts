@@ -5,7 +5,14 @@ import type {
   ArchiveTranscript as SessionTranscript,
 } from "@/lib/server/readData/archiveReadStore";
 import { formatSessionDisplayTitle, prettifyCampaignSlug } from "@/lib/campaigns/display";
-import type { SessionArtifactStatus, SessionDetail, SessionRecap, SessionStatus, TranscriptEntry } from "@/lib/types";
+import type {
+  SessionArtifactStatus,
+  SessionDetail,
+  SessionRecap,
+  SessionSpeakerAttributionState,
+  SessionStatus,
+  TranscriptEntry,
+} from "@/lib/types";
 
 function toIsoDate(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
@@ -57,6 +64,7 @@ export function buildSessionDetail(args: {
   transcript: SessionTranscript | null;
   recap: CanonicalSessionRecap | null;
   recapReadiness: ArchiveRecapReadiness;
+  speakerAttribution: SessionSpeakerAttributionState | null;
   transcriptStatus: SessionArtifactStatus;
   recapStatus: SessionArtifactStatus;
   warnings?: string[];
@@ -80,6 +88,7 @@ export function buildSessionDetail(args: {
     transcript: mapCanonicalTranscriptToWebTranscript(args.transcript),
     recap: mapCanonicalRecapToWebRecap(args.recap),
     recapReadiness: args.recapReadiness,
+    speakerAttribution: args.speakerAttribution,
     artifacts: {
       transcript: args.transcriptStatus,
       recap: args.recapStatus,
