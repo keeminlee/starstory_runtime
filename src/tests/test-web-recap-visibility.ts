@@ -3,7 +3,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { getWebSessionDetail } from "../../apps/web/lib/server/sessionReaders";
 import { resolveWebAuthContext } from "../../apps/web/lib/server/authContext";
 
 process.env.DISCORD_TOKEN ??= "test-token";
@@ -50,6 +49,10 @@ async function setAuthGuilds(guildIds: string[]): Promise<void> {
     devBypass: false,
   };
   mocked.mockResolvedValue(context as any);
+}
+
+async function loadSessionReaders() {
+  return import("../../apps/web/lib/server/sessionReaders");
 }
 
 afterEach(() => {
@@ -113,6 +116,8 @@ describe("web recap visibility reflection", () => {
       strategyVersion: "session-recaps-v2",
       engine: "test-engine",
     });
+
+    const { getWebSessionDetail } = await loadSessionReaders();
 
     const detail = await getWebSessionDetail({ sessionId: session!.session_id });
     expect(detail.id).toBe(session!.session_id);

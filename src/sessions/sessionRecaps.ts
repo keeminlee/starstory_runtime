@@ -1,6 +1,7 @@
 import { getDbForCampaign } from "../db.js";
 import { resolveCampaignSlug } from "../campaign/guildConfig.js";
 import { getSessionById } from "./sessions.js";
+import { getSessionSpeakerAttributionState } from "./sessionSpeakerAttribution.js";
 import {
   generateSessionRecap as generateRecapForStyle,
   type RecapResult,
@@ -44,6 +45,7 @@ export type UpsertSessionRecapArgs = {
 export const RECAP_DOMAIN_ERROR_CODES = [
   "RECAP_SESSION_NOT_FOUND",
   "RECAP_TRANSCRIPT_UNAVAILABLE",
+  "RECAP_SPEAKER_ATTRIBUTION_REQUIRED",
   "RECAP_GENERATION_FAILED",
   "RECAP_INVALID_OUTPUT",
 ] as const;
@@ -282,6 +284,18 @@ export async function generateSessionRecap(
   const session = getSessionById(args.guildId, args.sessionId, campaignSlug);
   if (!session) {
     throw new RecapDomainError("RECAP_SESSION_NOT_FOUND", `Session not found: ${args.sessionId}`);
+  }
+
+  const attributionState = getSessionSpeakerAttributionState({
+    guildId: args.guildId,
+    campaignSlug,
+    sessionId: args.sessionId,
+  });
+  if (attributionState.required && !attributionState.ready) {
+    throw new RecapDomainError(
+      "RECAP_SPEAKER_ATTRIBUTION_REQUIRED",
+      `Recap generation requires speaker attribution for session ${args.sessionId}. ${attributionState.pendingCount} speaker(s) remain unclassified.`
+    );
   }
 
   const generateStyleRecap = deps?.generateStyleRecap ?? generateRecapForStyle;

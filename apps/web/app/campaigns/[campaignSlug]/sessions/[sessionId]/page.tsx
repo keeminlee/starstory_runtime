@@ -66,6 +66,7 @@ export default async function CampaignSessionPage({ params, searchParams }: Page
               sessionId={session.id}
               sessionTitle={session.title}
               campaignSlug={session.campaignSlug}
+              speakerAttribution={session.speakerAttribution}
               searchParams={query}
               canRegenerate={
                 session.campaignSlug !== "demo"

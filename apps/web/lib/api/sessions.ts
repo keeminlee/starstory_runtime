@@ -4,7 +4,9 @@ import type {
   RegenerateSessionRecapResponse,
   SessionDetailResponse,
   SessionRecapResponse,
+  SessionSpeakerAttributionResponse,
   SessionTranscriptResponse,
+  SpeakerAttributionBatchRequest,
   UpdateSessionLabelRequest,
   UpdateSessionLabelResponse,
   EntityCandidatesResponse,
@@ -57,6 +59,33 @@ export async function getSessionRecapApi(
   return fetchJson<SessionRecapResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/recap`, {
     query: toQuery(searchParams),
   });
+}
+
+export async function getSessionSpeakerAttributionApi(
+  sessionId: string,
+  searchParams?: QueryInput
+): Promise<SessionSpeakerAttributionResponse> {
+  return fetchJson<SessionSpeakerAttributionResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/speaker-attribution`,
+    {
+      query: toQuery(searchParams),
+    }
+  );
+}
+
+export async function saveSessionSpeakerAttributionApi(
+  sessionId: string,
+  payload: SpeakerAttributionBatchRequest,
+  searchParams?: QueryInput
+): Promise<SessionSpeakerAttributionResponse> {
+  return fetchJson<SessionSpeakerAttributionResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/speaker-attribution`,
+    {
+      method: "POST",
+      query: toQuery(searchParams),
+      body: payload,
+    }
+  );
 }
 
 export async function regenerateSessionRecapApi(

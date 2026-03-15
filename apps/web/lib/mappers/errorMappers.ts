@@ -11,6 +11,7 @@ export type WebDataErrorCode =
   | "transcript_unavailable"
   | "recap_unavailable"
   | "generation_failed"
+  | "RECAP_SPEAKER_ATTRIBUTION_REQUIRED"
   | "openai_unconfigured"
   | "discord_refresh_unconfigured"
   | "internal";
@@ -65,6 +66,9 @@ export function mapToWebDataError(error: unknown): WebDataError {
     }
     if (recapCode === "RECAP_GENERATION_FAILED") {
       return new WebDataError("generation_failed", 502, message, { cause: error });
+    }
+    if (recapCode === "RECAP_SPEAKER_ATTRIBUTION_REQUIRED") {
+      return new WebDataError("RECAP_SPEAKER_ATTRIBUTION_REQUIRED", 409, message, { cause: error });
     }
     return new WebDataError("recap_unavailable", 424, message, { cause: error });
   }

@@ -47,6 +47,14 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
               ? "danger"
               : "warning",
       },
+      ...(session.speakerAttribution?.required
+        ? [
+            {
+              label: session.speakerAttribution.ready ? "Speaker attribution ready" : "Speaker attribution required",
+              tone: session.speakerAttribution.ready ? ("success" as const) : ("warning" as const),
+            },
+          ]
+        : []),
       {
         label:
           session.artifacts.recap === "available"
@@ -82,7 +90,7 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
       seen.add(key);
       return true;
     });
-  }, [session.artifacts.recap, session.artifacts.transcript, session.recapReadiness, session.source, session.status, statusTone]);
+  }, [session.artifacts.recap, session.artifacts.transcript, session.recapReadiness, session.source, session.speakerAttribution, session.status, statusTone]);
 
   return (
     <header className="space-y-4">

@@ -1,4 +1,12 @@
-import type { CampaignSummary, DashboardModel, SessionDetail, SessionRecap, TranscriptEntry } from "@/lib/types";
+import type {
+  CampaignSummary,
+  DashboardModel,
+  SessionDetail,
+  SessionRecap,
+  SessionSpeakerAttributionState,
+  SessionSpeakerClassificationType,
+  TranscriptEntry,
+} from "@/lib/types";
 import type {
   RegistryCreateEntryRequest,
   RegistryPendingActionRequest,
@@ -143,6 +151,36 @@ export type EntityReviewBatchesResponse = {
 export type SessionAnnotatedRecapsResponse = {
   sessionId: string;
   annotations: SessionAnnotatedRecaps | null;
+};
+
+export type SpeakerAttributionCreatePcRequest = {
+  canonicalName: string;
+  aliases?: string[];
+  notes?: string;
+};
+
+export type SpeakerAttributionBatchEntryRequest =
+  | {
+      discordUserId: string;
+      classificationType: "pc";
+      pcEntityId?: string | null;
+      createPc?: SpeakerAttributionCreatePcRequest;
+    }
+  | {
+      discordUserId: string;
+      classificationType: Exclude<SessionSpeakerClassificationType, "pc">;
+      pcEntityId?: never;
+      createPc?: never;
+    };
+
+export type SpeakerAttributionBatchRequest = {
+  entries: SpeakerAttributionBatchEntryRequest[];
+};
+
+export type SessionSpeakerAttributionResponse = {
+  sessionId: string;
+  campaignSlug: string;
+  speakerAttribution: SessionSpeakerAttributionState;
 };
 
 export type EntityAppearancesResponse = {

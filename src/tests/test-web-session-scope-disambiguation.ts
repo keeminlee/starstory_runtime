@@ -6,8 +6,6 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { resolveWebAuthContext } from "../../apps/web/lib/server/authContext";
 import { WebDataError } from "../../apps/web/lib/mappers/errorMappers";
-import { getWebSessionDetail } from "../../apps/web/lib/server/sessionReaders";
-import { findSessionByGuildAndId, listSessionsForGuildCampaign } from "../../apps/web/lib/server/readData/archiveReadStore";
 
 process.env.DISCORD_TOKEN ??= "test-token";
 process.env.OPENAI_API_KEY ??= "test-openai-key";
@@ -45,6 +43,14 @@ async function setAuthGuilds(guildIds: string[]): Promise<void> {
   } as any);
 }
 
+async function loadSessionReaders() {
+  return import("../../apps/web/lib/server/sessionReaders");
+}
+
+async function loadArchiveReadStore() {
+  return import("../../apps/web/lib/server/readData/archiveReadStore");
+}
+
 async function upsertSessionInCampaignDb(args: {
   guildId: string;
   campaignSlug: string;
@@ -66,7 +72,6 @@ async function upsertSessionInCampaignDb(args: {
     `dm-${args.guildId}`,
     args.startedAtMs
   );
-  db.close();
 }
 
 function buildScopedCampaignDir(root: string, guildId: string, campaignSlug: string): string {
@@ -150,8 +155,7 @@ describe("web session scope disambiguation", () => {
     const { getDbForCampaign } = await import("../db.js");
 
     // Ensure control DB/migrations are initialized.
-    const bootstrapDb = getDbForCampaign("default");
-    bootstrapDb.close();
+    getDbForCampaign("default");
 
     ensureGuildConfig("guild-1", "Guild One");
     ensureGuildConfig("guild-2", "Guild Two");
@@ -179,6 +183,7 @@ describe("web session scope disambiguation", () => {
     });
 
     await setAuthGuilds(["guild-1", "guild-2"]);
+    const { getWebSessionDetail } = await loadSessionReaders();
 
     await expect(getWebSessionDetail({ sessionId: sharedSessionId })).rejects.toMatchObject({
       code: "ambiguous_session_scope",
@@ -195,8 +200,7 @@ describe("web session scope disambiguation", () => {
     const { createShowtimeCampaign } = await import("../campaign/showtimeCampaigns.js");
     const { getDbForCampaign } = await import("../db.js");
 
-    const bootstrapDb = getDbForCampaign("default");
-    bootstrapDb.close();
+    getDbForCampaign("default");
 
     ensureGuildConfig("guild-1", "Guild One");
     ensureGuildConfig("guild-2", "Guild Two");
@@ -224,6 +228,7 @@ describe("web session scope disambiguation", () => {
     });
 
     await setAuthGuilds(["guild-1", "guild-2"]);
+    const { getWebSessionDetail } = await loadSessionReaders();
 
     const detail = await getWebSessionDetail({
       sessionId: sharedSessionId,
@@ -244,8 +249,7 @@ describe("web session scope disambiguation", () => {
     const { createShowtimeCampaign } = await import("../campaign/showtimeCampaigns.js");
     const { getDbForCampaign } = await import("../db.js");
 
-    const bootstrapDb = getDbForCampaign("default");
-    bootstrapDb.close();
+    getDbForCampaign("default");
 
     ensureGuildConfig("guild-1", "Guild One");
 
@@ -263,6 +267,7 @@ describe("web session scope disambiguation", () => {
     });
 
     await setAuthGuilds(["guild-1"]);
+    const { getWebSessionDetail } = await loadSessionReaders();
 
     await expect(
       getWebSessionDetail({
@@ -274,7 +279,7 @@ describe("web session scope disambiguation", () => {
 });
 
 describe("archive read-store fallback policy", () => {
-  test("uses same-campaign legacy DB when scoped DB is empty", () => {
+  test("uses same-campaign legacy DB when scoped DB is empty", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-web-read-fallback-"));
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
@@ -292,12 +297,14 @@ describe("archive read-store fallback policy", () => {
     insertSessionWithGuild(legacy, { sessionId: "legacy-s1", guildId: "guild-1", startedAtMs: Date.now() });
     legacy.close();
 
+    const { listSessionsForGuildCampaign } = await loadArchiveReadStore();
+
     const rows = listSessionsForGuildCampaign({ guildId: "guild-1", campaignSlug: "alpha", limit: 20 });
     expect(rows.length).toBe(1);
     expect(rows[0]?.session_id).toBe("legacy-s1");
   });
 
-  test("uses schema-compat query when sessions table has no guild_id column", () => {
+  test("uses schema-compat query when sessions table has no guild_id column", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-web-read-fallback-"));
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
@@ -309,6 +316,8 @@ describe("archive read-store fallback policy", () => {
     insertSessionLegacy(legacy, { sessionId: "legacy-no-guild", startedAtMs: Date.now() });
     legacy.close();
 
+    const { findSessionByGuildAndId, listSessionsForGuildCampaign } = await loadArchiveReadStore();
+
     const rows = listSessionsForGuildCampaign({ guildId: "guild-1", campaignSlug: "alpha", limit: 20 });
     expect(rows.length).toBe(1);
     expect(rows[0]?.session_id).toBe("legacy-no-guild");
@@ -319,7 +328,7 @@ describe("archive read-store fallback policy", () => {
     expect(found?.guild_id).toBe("guild-1");
   });
 
-  test("matches whitespace-polluted guild_id rows via trim-safe comparison", () => {
+  test("matches whitespace-polluted guild_id rows via trim-safe comparison", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-web-read-fallback-"));
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
@@ -331,6 +340,8 @@ describe("archive read-store fallback policy", () => {
     insertSessionWithGuild(scoped, { sessionId: "trimmed-s1", guildId: " guild-1 ", startedAtMs: Date.now() });
     scoped.close();
 
+    const { findSessionByGuildAndId, listSessionsForGuildCampaign } = await loadArchiveReadStore();
+
     const rows = listSessionsForGuildCampaign({ guildId: "guild-1", campaignSlug: "alpha", limit: 20 });
     expect(rows.length).toBe(1);
     expect(rows[0]?.session_id).toBe("trimmed-s1");
@@ -339,7 +350,7 @@ describe("archive read-store fallback policy", () => {
     expect(found?.session_id).toBe("trimmed-s1");
   });
 
-  test("does not bleed scoped wrong-guild rows and still recovers same-campaign legacy rows", () => {
+  test("does not bleed scoped wrong-guild rows and still recovers same-campaign legacy rows", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-web-read-fallback-"));
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
@@ -357,6 +368,8 @@ describe("archive read-store fallback policy", () => {
     });
     insertSessionWithGuild(legacy, { sessionId: "legacy-correct-guild", guildId: "guild-1", startedAtMs: Date.now() });
     legacy.close();
+
+    const { findSessionByGuildAndId, listSessionsForGuildCampaign } = await loadArchiveReadStore();
 
     const rows = listSessionsForGuildCampaign({ guildId: "guild-1", campaignSlug: "alpha", limit: 20 });
     expect(rows.length).toBe(1);
