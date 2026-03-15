@@ -46,21 +46,19 @@ jobs:
 
       - name: Trust host
         run: |
-          ssh-keyscan -p "${{ secrets.EC2_PORT }}" -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -p "${{ secrets.EC2_PORT }}" -H "${{ secrets.EC2_SSH_HOST }}" >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
       - name: Run remote deploy
         run: |
-          APP_DIR="${{ secrets.EC2_APP_DIR }}"
-          if [ -z "$APP_DIR" ]; then APP_DIR="/home/meepo/meepo-bot"; fi
+          APP_DIR="/home/meepo/meepo-bot"
           ssh -p "${{ secrets.EC2_PORT }}" \
-            "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+            "${{ secrets.EC2_SSH_USER }}@${{ secrets.EC2_SSH_HOST }}" \
             "APP_DIR=$APP_DIR /bin/bash $APP_DIR/deploy/ec2/deploy-meepo.sh"
 
       - name: Deploy Discord commands
         run: |
-          APP_DIR="${{ secrets.EC2_APP_DIR }}"
-          if [ -z "$APP_DIR" ]; then APP_DIR="/home/meepo/meepo-bot"; fi
+          APP_DIR="/home/meepo/meepo-bot"
           ssh -p "${{ secrets.EC2_PORT }}" \
-            "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+            "${{ secrets.EC2_SSH_USER }}@${{ secrets.EC2_SSH_HOST }}" \
             "set -a; . /etc/meepo/meepo-bot.env; set +a; cd $APP_DIR && npm run deploy:commands"

@@ -8,7 +8,7 @@
     "lint": "eslint .",
     "test:smoke": "vitest run src/tests/smoke/test-megameecap-fixture.ts src/tests/smoke/test-silver-seq-fixture.ts src/tests/voice/test-voice-interrupt.ts",
     "test": "vitest run",
-    "ci:verify": "npm run typecheck && npm run lint && npm run test:smoke && npm run test && npm run stopline:no-getdb-runtime && npm run stopline:active-session-boundary && npm run stopline:recap-service-boundary && npm run stopline:runtime-scope-fallbacks && npm run stopline:observability-runtime && npm run stopline:no-raw-env && npm run stopline:repo-hygiene",
+    "ci:verify": "npm run typecheck && npm run lint && npm run test:smoke && npm run test && node tools/verify-required-secrets.ts && npm run stopline:no-getdb-runtime && npm run stopline:active-session-boundary && npm run stopline:recap-service-boundary && npm run stopline:runtime-scope-fallbacks && npm run stopline:observability-runtime && npm run stopline:no-raw-env && npm run stopline:repo-hygiene",
     "deploy:commands": "tsx src/commands/deploy-commands.ts",
     "deploy:commands:guild": "npm run deploy:commands",
     "dev:deploy": "npm run deploy:commands",
