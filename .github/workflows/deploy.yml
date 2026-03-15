@@ -56,7 +56,7 @@ jobs:
           APP_DIR="/home/meepo/meepo-bot"
           ssh -p "${{ secrets.EC2_PORT }}" \
             "${{ secrets.EC2_SSH_USER }}@${{ secrets.EC2_SSH_HOST }}" \
-            "APP_DIR=$APP_DIR /bin/bash $APP_DIR/deploy/ec2/deploy-meepo.sh"
+            "sudo APP_DIR=$APP_DIR /usr/local/bin/deploy-meepo"
 
       - name: Deploy Discord commands
         run: |
