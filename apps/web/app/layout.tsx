@@ -17,8 +17,8 @@ const playfairDisplay = Playfair_Display({
 });
 
 export const metadata: Metadata = {
-  title: "StarStory Archive",
-  description: "The StarStory archive for campaign sessions, chronicles, and recaps.",
+  title: "Starstory Archive",
+  description: "The Starstory archive for campaign sessions, chronicles, and recaps.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

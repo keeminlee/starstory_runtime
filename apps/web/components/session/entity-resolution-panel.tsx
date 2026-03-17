@@ -10,6 +10,7 @@ import {
 } from "@/lib/api/sessions";
 import type {
   EntityCandidateDto,
+  EntityResolutionAction,
   EntityResolutionDto,
   EntityReviewBatchDto,
   EntityReviewDecision,
@@ -39,6 +40,104 @@ const CATEGORY_OPTIONS: Array<{ value: RegistryCategoryKey; label: string }> = [
   { value: "misc", label: "Misc" },
 ];
 
+const ACTION_LABELS: Record<EntityResolutionAction, string> = {
+  resolve_existing: "Linked",
+  create_entity: "Created",
+  add_alias: "Aliased",
+  ignore_candidate: "Ignored",
+};
+
+const CATEGORY_LABELS: Record<RegistryCategoryKey, string> = {
+  pcs: "PC",
+  npcs: "NPC",
+  locations: "Location",
+  factions: "Faction",
+  misc: "Misc",
+};
+
+function buildResolutionSummary(args: {
+  action: EntityResolutionAction;
+  candidateName: string;
+  category?: RegistryCategoryKey | null;
+  targetName?: string | null;
+}): string {
+  const categoryLabel = args.category ? CATEGORY_LABELS[args.category] : null;
+
+  switch (args.action) {
+    case "resolve_existing":
+      return `Linked ${args.candidateName} to ${categoryLabel ? `${categoryLabel} ` : ""}${args.targetName ?? "entity"}.`;
+    case "add_alias":
+      return `Aliased ${args.candidateName} into ${categoryLabel ? `${categoryLabel} ` : ""}${args.targetName ?? "entity"}.`;
+    case "create_entity":
+      if (!args.targetName || args.targetName === args.candidateName) {
+        return `Created ${categoryLabel ? `${categoryLabel} ` : ""}${args.candidateName}.`;
+      }
+      return `Created ${categoryLabel ? `${categoryLabel} ` : ""}${args.targetName} from ${args.candidateName}.`;
+    case "ignore_candidate":
+      return `Ignored ${args.candidateName}.`;
+  }
+}
+
+function resolveSummaryText(
+  resolution: EntityResolutionDto,
+  registryEntities: RegistryEntityDto[]
+): string {
+  const targetName = resolution.entityId
+    ? registryEntities.find((entity) => entity.id === resolution.entityId)?.canonicalName ?? null
+    : null;
+
+  if (targetName || resolution.action === "ignore_candidate") {
+    return buildResolutionSummary({
+      action: resolution.action,
+      candidateName: resolution.candidateName,
+      category: resolution.entityCategory,
+      targetName,
+    });
+  }
+
+  if (resolution.summary.trim().length > 0) {
+    return resolution.summary;
+  }
+
+  return buildResolutionSummary({
+    action: resolution.action,
+    candidateName: resolution.candidateName,
+    category: resolution.entityCategory,
+  });
+}
+
+function buildMentionPreview(example: string, candidateName: string): {
+  prefix: string;
+  match: string;
+  suffix: string;
+} {
+  const lowerExample = example.toLowerCase();
+  const lowerCandidate = candidateName.toLowerCase();
+  const matchIndex = lowerExample.indexOf(lowerCandidate);
+  if (matchIndex === -1) {
+    const clipped = example.length > 120 ? `${example.slice(0, 117)}...` : example;
+    return { prefix: clipped, match: "", suffix: "" };
+  }
+
+  const matchEnd = matchIndex + candidateName.length;
+  const start = Math.max(0, matchIndex - 48);
+  const end = Math.min(example.length, matchEnd + 48);
+
+  return {
+    prefix: `${start > 0 ? "..." : ""}${example.slice(start, matchIndex)}`,
+    match: example.slice(matchIndex, matchEnd),
+    suffix: `${example.slice(matchEnd, end)}${end < example.length ? "..." : ""}`,
+  };
+}
+
+function resolutionTone(action: EntityResolutionAction): "success" | "warning" | "neutral" {
+  if (action === "ignore_candidate") {
+    return "neutral";
+  }
+
+  return action === "create_entity" ? "warning" : "success";
+}
+
 function normalizeName(value: string): string {
   return value
     .toLowerCase()
@@ -50,6 +149,8 @@ function normalizeName(value: string): string {
 function makeDraftResolution(args: {
   candidateName: string;
   resolution: EntityResolutionDto["resolution"];
+  action: EntityResolutionAction;
+  summary: string;
   entityId: string | null;
   entityCategory: RegistryCategoryKey | null;
 }): EntityResolutionDto {
@@ -57,6 +158,8 @@ function makeDraftResolution(args: {
     id: `draft:${args.candidateName}`,
     candidateName: args.candidateName,
     resolution: args.resolution,
+    action: args.action,
+    summary: args.summary,
     entityId: args.entityId,
     entityCategory: args.entityCategory,
     batchId: null,
@@ -174,6 +277,14 @@ export function EntityResolutionPanel({
   const unresolvedCount = candidates.filter((candidate) => !candidate.resolution).length;
   const resolvedCount = candidates.length - unresolvedCount;
   const unsavedCount = draftDecisions.length;
+  const recentResolutions = [...candidates]
+    .filter((candidate) => candidate.resolution)
+    .sort((left, right) => {
+      const leftAt = left.resolution ? Date.parse(left.resolution.resolvedAt) : 0;
+      const rightAt = right.resolution ? Date.parse(right.resolution.resolvedAt) : 0;
+      return rightAt - leftAt;
+    })
+    .slice(0, 3);
 
   const filteredRegistryMatches = useMemo(() => {
     const query = createName.trim().toLowerCase();
@@ -196,7 +307,12 @@ export function EntityResolutionPanel({
     setCreateName("");
   }
 
-  function handleResolve(candidateName: string, entityId: string, category: RegistryCategoryKey) {
+  function handleResolve(
+    candidateName: string,
+    entityId: string,
+    category: RegistryCategoryKey,
+    targetName: string
+  ) {
     recordDraftDecision(
       {
         type: "resolve_existing",
@@ -206,6 +322,41 @@ export function EntityResolutionPanel({
       makeDraftResolution({
         candidateName,
         resolution: "resolved",
+        action: "resolve_existing",
+        summary: buildResolutionSummary({
+          action: "resolve_existing",
+          candidateName,
+          category,
+          targetName,
+        }),
+        entityId,
+        entityCategory: category,
+      })
+    );
+  }
+
+  function handleAddAlias(
+    candidateName: string,
+    entityId: string,
+    category: RegistryCategoryKey,
+    targetName: string
+  ) {
+    recordDraftDecision(
+      {
+        type: "add_alias",
+        candidateName,
+        entityId,
+      },
+      makeDraftResolution({
+        candidateName,
+        resolution: "resolved",
+        action: "add_alias",
+        summary: buildResolutionSummary({
+          action: "add_alias",
+          candidateName,
+          category,
+          targetName,
+        }),
         entityId,
         entityCategory: category,
       })
@@ -229,6 +380,13 @@ export function EntityResolutionPanel({
         makeDraftResolution({
           candidateName,
           resolution: "resolved",
+          action: "add_alias",
+          summary: buildResolutionSummary({
+            action: "add_alias",
+            candidateName,
+            category: aliasTarget.category,
+            targetName: aliasTarget.canonicalName,
+          }),
           entityId: aliasTarget.id,
           entityCategory: aliasTarget.category,
         })
@@ -244,6 +402,13 @@ export function EntityResolutionPanel({
         makeDraftResolution({
           candidateName,
           resolution: "created",
+          action: "create_entity",
+          summary: buildResolutionSummary({
+            action: "create_entity",
+            candidateName,
+            category: createCategory,
+            targetName: submittedName,
+          }),
           entityId: null,
           entityCategory: createCategory,
         })
@@ -263,6 +428,11 @@ export function EntityResolutionPanel({
       makeDraftResolution({
         candidateName,
         resolution: "ignored",
+        action: "ignore_candidate",
+        summary: buildResolutionSummary({
+          action: "ignore_candidate",
+          candidateName,
+        }),
         entityId: null,
         entityCategory: null,
       })
@@ -394,6 +564,24 @@ export function EntityResolutionPanel({
                 ) : null}
               </div>
             </div>
+
+            {recentResolutions.length > 0 ? (
+              <div className="space-y-2 rounded-lg border border-border/50 bg-background/20 px-3 py-2">
+                {recentResolutions.map((candidate) => {
+                  const resolution = candidate.resolution;
+                  if (!resolution) {
+                    return null;
+                  }
+
+                  return (
+                    <div key={`recent-${candidate.candidateName}`} className="flex items-start gap-2 text-[11px] text-muted-foreground">
+                      <StatusChip label={ACTION_LABELS[resolution.action]} tone={resolutionTone(resolution.action)} />
+                      <p className="pt-0.5">{resolveSummaryText(resolution, registryEntities)}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="rounded-xl border border-amber-400/30 bg-amber-400/5 p-4 space-y-3">
@@ -473,8 +661,8 @@ export function EntityResolutionPanel({
                         <span className="text-muted-foreground shrink-0">×{candidate.mentions}</span>
                         {candidate.resolution && (
                           <StatusChip
-                            label={candidate.resolution.resolution}
-                            tone={candidate.resolution.resolution === "ignored" ? "neutral" : "success"}
+                            label={ACTION_LABELS[candidate.resolution.action]}
+                            tone={resolutionTone(candidate.resolution.action)}
                           />
                         )}
                       </div>
@@ -482,20 +670,38 @@ export function EntityResolutionPanel({
                       {canWrite && !isResolved ? (
                         <div className="flex items-center gap-1 shrink-0">
                           {candidate.possibleMatches.length > 0 ? (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleResolve(
-                                  candidate.candidateName,
-                                  candidate.possibleMatches[0].entityId,
-                                  candidate.possibleMatches[0].category
-                                )
-                              }
-                              className="rounded-md bg-emerald-600/80 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white hover:bg-emerald-600"
-                              title={`Link to ${candidate.possibleMatches[0].canonicalName}`}
-                            >
-                              Link → {candidate.possibleMatches[0].canonicalName}
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleResolve(
+                                    candidate.candidateName,
+                                    candidate.possibleMatches[0].entityId,
+                                    candidate.possibleMatches[0].category,
+                                    candidate.possibleMatches[0].canonicalName
+                                  )
+                                }
+                                className="rounded-md bg-emerald-600/80 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white hover:bg-emerald-600"
+                                title={`Link to ${candidate.possibleMatches[0].canonicalName}`}
+                              >
+                                Link → {candidate.possibleMatches[0].canonicalName}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleAddAlias(
+                                    candidate.candidateName,
+                                    candidate.possibleMatches[0].entityId,
+                                    candidate.possibleMatches[0].category,
+                                    candidate.possibleMatches[0].canonicalName
+                                  )
+                                }
+                                className="rounded-md bg-sky-600/80 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white hover:bg-sky-600"
+                                title={`Add ${candidate.candidateName} as an alias for ${candidate.possibleMatches[0].canonicalName}`}
+                              >
+                                Add Alias
+                              </button>
+                            </>
                           ) : null}
                           <button
                             type="button"
@@ -507,7 +713,7 @@ export function EntityResolutionPanel({
                             }}
                             className="rounded-md bg-amber-600/80 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white hover:bg-amber-600"
                           >
-                            New / Alias
+                            Create Entity
                           </button>
                           <button
                             type="button"
@@ -529,13 +735,26 @@ export function EntityResolutionPanel({
                     </div>
 
                     {!isResolved && candidate.examples.length > 0 ? (
-                      <div className="mt-1 space-y-0.5">
-                        {candidate.examples.map((example, index) => (
-                          <p key={index} className="text-[10px] text-muted-foreground truncate italic">
-                            &ldquo;{example}&rdquo;
-                          </p>
-                        ))}
+                      <div className="mt-1 space-y-1">
+                        {candidate.examples.map((example, index) => {
+                          const preview = buildMentionPreview(example, candidate.candidateName);
+                          return (
+                            <p key={index} className="text-[10px] italic leading-relaxed text-muted-foreground break-words">
+                              <span>&ldquo;{preview.prefix}</span>
+                              {preview.match ? (
+                                <span className="font-semibold not-italic text-amber-200">{preview.match}</span>
+                              ) : null}
+                              <span>{preview.suffix}&rdquo;</span>
+                            </p>
+                          );
+                        })}
                       </div>
+                    ) : null}
+
+                    {candidate.resolution ? (
+                      <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                        {resolveSummaryText(candidate.resolution, registryEntities)}
+                      </p>
                     ) : null}
 
                     {isCreating ? (
@@ -564,7 +783,7 @@ export function EntityResolutionPanel({
                             onClick={() => handleCreate(candidate.candidateName, aliasTarget)}
                             className="rounded-md bg-amber-600 px-2 py-1 text-[10px] font-bold uppercase text-white hover:bg-amber-500"
                           >
-                            {aliasTarget ? `Add Alias -> ${aliasTarget.canonicalName}` : "Stage Create"}
+                            {aliasTarget ? `Stage Add Alias -> ${aliasTarget.canonicalName}` : "Stage Create Entity"}
                           </button>
                           <button
                             type="button"

@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, BookOpen, History, Sparkles, SlidersHorizontal } from "lucide-react";
+import { BookOpen, Bug, History, LayoutDashboard, SlidersHorizontal, Sparkles } from "lucide-react";
 import type { ComponentType } from "react";
 import { resolveCampaignTargetPath, useCampaignContext } from "@/components/providers/campaign-context-provider";
+import { buildBugReportHref } from "@/lib/bug-report";
+import { APP_VERSION } from "@/lib/version";
 
 type SidebarItem = {
-  key: "dashboard" | "sessions" | "compendium" | "settings";
+  key: "dashboard" | "sessions" | "compendium" | "report-bug" | "settings";
   href: string;
   label: string;
   icon: ComponentType<{ className?: string }>;
@@ -30,6 +32,7 @@ export function AppSidebar() {
     { key: "dashboard", href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { key: "sessions", href: sessionsHref, label: "Sessions", icon: History, disabled: !hasActiveCampaign },
     { key: "compendium", href: compendiumHref, label: "Compendium", icon: BookOpen, disabled: !hasActiveCampaign },
+    { key: "report-bug", href: buildBugReportHref({ path: pathname }), label: "Report bug", icon: Bug },
     { key: "settings", href: "/settings", label: "Settings", icon: SlidersHorizontal },
   ];
 
@@ -42,7 +45,7 @@ export function AppSidebar() {
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_15px_var(--color-primary)]">
           <Sparkles className="h-5 w-5" />
         </div>
-        <span className="truncate text-xl font-bold italic tracking-tight">StarStory</span>
+        <span className="truncate text-xl font-bold italic tracking-tight">Starstory</span>
       </Link>
       <nav className="mt-2 flex-1 space-y-1 px-3">
         {items.map((item) => {
@@ -53,7 +56,9 @@ export function AppSidebar() {
                 ? pathname.includes("/sessions") && pathname.startsWith("/campaigns/")
                 : item.key === "compendium"
                   ? pathname.includes("/compendium") && pathname.startsWith("/campaigns/")
-                  : pathname.startsWith("/settings");
+                  : item.key === "report-bug"
+                    ? pathname.startsWith("/report-bug")
+                    : pathname.startsWith("/settings");
           const itemClassName = `group flex w-full items-center rounded-lg px-3 py-2.5 text-sm transition-all ${
             isActive
               ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-[inset_0_0_0_1px_hsla(42,70%,65%,0.1)]"
@@ -82,7 +87,8 @@ export function AppSidebar() {
         })}
       </nav>
       <div className="border-t border-sidebar-border p-4 text-xs text-muted-foreground">
-        Local dev shell
+        <div>Local dev shell</div>
+        <div className="mt-1">App {APP_VERSION}</div>
       </div>
     </aside>
   );

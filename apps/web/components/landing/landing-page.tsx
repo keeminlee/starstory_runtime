@@ -136,7 +136,7 @@ export function LandingPage(props: LandingPageProps) {
           <Sparkles className="h-6 w-6 animate-pulse text-primary" />
           <span className="text-sm uppercase tracking-widest text-primary/80">The Celestial Archive</span>
         </div>
-        <h1 className="mt-6 text-7xl font-serif italic tracking-tight md:text-9xl">StarStory</h1>
+        <h1 className="mt-6 text-7xl font-serif italic tracking-tight md:text-9xl">Starstory</h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground md:text-2xl">
           The platform for living D&D chronicles. Every session leaves a star behind.
         </p>
@@ -173,7 +173,7 @@ export function LandingPage(props: LandingPageProps) {
       </section>
 
       <footer className="relative z-10 border-t border-border py-10 text-center text-sm text-muted-foreground">
-        StarStory Archive Viewer - Track B Shell
+        Starstory Archive Viewer - Track B Shell
       </footer>
     </div>
   );
