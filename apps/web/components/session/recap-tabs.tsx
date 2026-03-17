@@ -99,7 +99,12 @@ function mapRegenerateError(error: unknown): string {
     if (error.code === "generation_failed") {
       return "Recap generation failed this time. Please try again in a moment.";
     }
-    if (error.code === "llm_unconfigured") {
+    if (
+      error.code === "llm_unconfigured" ||
+      error.code === "openai_unconfigured" ||
+      error.code === "anthropic_unconfigured" ||
+      error.code === "google_unconfigured"
+    ) {
       return "Recap regeneration is unavailable until the selected LLM provider is configured on the server.";
     }
     if (error.code === "discord_refresh_unconfigured") {

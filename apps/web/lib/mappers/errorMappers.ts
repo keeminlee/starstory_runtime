@@ -17,6 +17,9 @@ export type WebDataErrorCode =
   | "recap_capacity_reached"
   | "generation_failed"
   | "RECAP_SPEAKER_ATTRIBUTION_REQUIRED"
+  | "openai_unconfigured"
+  | "anthropic_unconfigured"
+  | "google_unconfigured"
   | "llm_unconfigured"
   | "discord_refresh_unconfigured"
   | "internal";
@@ -102,6 +105,30 @@ export function mapToWebDataError(error: unknown): WebDataError {
   }
 
   if (/OPENAI_API_KEY|ANTHROPIC_API_KEY|GOOGLE_API_KEY|llm provider/i.test(message)) {
+    if (/OPENAI_API_KEY|openai api key/i.test(message)) {
+      return new WebDataError(
+        "openai_unconfigured",
+        503,
+        "This action is unavailable until OPENAI_API_KEY is configured.",
+        { cause: error }
+      );
+    }
+    if (/ANTHROPIC_API_KEY|anthropic api key/i.test(message)) {
+      return new WebDataError(
+        "anthropic_unconfigured",
+        503,
+        "This action is unavailable until ANTHROPIC_API_KEY is configured.",
+        { cause: error }
+      );
+    }
+    if (/GOOGLE_API_KEY|google api key/i.test(message)) {
+      return new WebDataError(
+        "google_unconfigured",
+        503,
+        "This action is unavailable until GOOGLE_API_KEY is configured.",
+        { cause: error }
+      );
+    }
     return new WebDataError(
       "llm_unconfigured",
       503,

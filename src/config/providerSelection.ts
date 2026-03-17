@@ -1,5 +1,6 @@
 import { getGuildLlmProvider, getGuildSttProvider } from "../campaign/guildConfig.js";
 import { cfg } from "./env.js";
+import { hasEnv } from "./rawEnv.js";
 import type { LlmProvider, SttProvider } from "./types.js";
 
 export function resolveRuntimeSttProvider(guildId?: string | null): SttProvider {
@@ -35,9 +36,9 @@ export function getRequiredCredentialEnvKeyForSttProvider(provider: SttProvider)
 export function isSttProviderConfigured(provider: SttProvider): boolean {
   switch (provider) {
     case "whisper":
-      return Boolean(cfg.openai.apiKey?.trim());
+      return hasEnv("OPENAI_API_KEY");
     case "deepgram":
-      return Boolean(cfg.deepgram.apiKey?.trim());
+      return hasEnv("DEEPGRAM_API_KEY");
     case "noop":
     case "debug":
       return true;
@@ -62,11 +63,11 @@ export function getRequiredCredentialEnvKeyForLlmProvider(provider: LlmProvider)
 export function isLlmProviderConfigured(provider: LlmProvider): boolean {
   switch (provider) {
     case "openai":
-      return Boolean(cfg.openai.apiKey?.trim());
+      return hasEnv("OPENAI_API_KEY");
     case "anthropic":
-      return Boolean(cfg.anthropic.apiKey?.trim());
+      return hasEnv("ANTHROPIC_API_KEY");
     case "google":
-      return Boolean(cfg.google.apiKey?.trim());
+      return hasEnv("GOOGLE_API_KEY");
     default:
       return false;
   }

@@ -499,6 +499,10 @@ export async function regenerateWebSessionRecap(args: {
       userId: auth.user?.id ?? null,
     });
 
+    // Capability gating is independent of transcript/readiness checks and should
+    // fail fast for the selected runtime provider.
+    assertLlmConfigured(guildId);
+
     const canonical = await getCanonicalSessionDetail({
       authorizedGuildIds: auth.authorizedGuildIds,
       sessionId: args.sessionId,
@@ -521,9 +525,6 @@ export async function regenerateWebSessionRecap(args: {
     if (canonical.recapPhase === "generating") {
       throw new WebDataError("recap_in_progress", 409, "A recap job is already running for this session.");
     }
-
-    // Recap generation requires the selected LLM provider at execution time; read paths remain independent.
-    assertLlmConfigured(guildId);
 
     const { regenerateSessionRecapContract } = await import("../../../../src/sessions/recapService");
     await regenerateSessionRecapContract({
