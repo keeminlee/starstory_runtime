@@ -1,6 +1,6 @@
 import { buildSessionDetail } from "@/lib/mappers/sessionMappers";
 import { mapToWebDataError, WebDataError } from "@/lib/mappers/errorMappers";
-import { assertOpenAiConfigured } from "@/lib/server/capabilityErrors";
+import { assertLlmConfigured } from "@/lib/server/capabilityErrors";
 import { resolveWebAuthContext, WebAuthError } from "@/lib/server/authContext";
 import { listWebCampaignsForGuilds } from "@/lib/server/campaignReaders";
 import { getDemoSessionDetail, isDemoSessionId } from "@/lib/server/demoCampaign";
@@ -499,6 +499,10 @@ export async function regenerateWebSessionRecap(args: {
       userId: auth.user?.id ?? null,
     });
 
+    // Capability gating is independent of transcript/readiness checks and should
+    // fail fast for the selected runtime provider.
+    assertLlmConfigured(guildId);
+
     const canonical = await getCanonicalSessionDetail({
       authorizedGuildIds: auth.authorizedGuildIds,
       sessionId: args.sessionId,
@@ -521,9 +525,6 @@ export async function regenerateWebSessionRecap(args: {
     if (canonical.recapPhase === "generating") {
       throw new WebDataError("recap_in_progress", 409, "A recap job is already running for this session.");
     }
-
-    // Recap generation requires OpenAI at execution time; read paths remain independent.
-    assertOpenAiConfigured();
 
     const { regenerateSessionRecapContract } = await import("../../../../src/sessions/recapService");
     await regenerateSessionRecapContract({

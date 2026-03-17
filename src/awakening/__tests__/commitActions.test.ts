@@ -148,7 +148,7 @@ describe("awakening commit actions", () => {
     const { getDbForCampaign } = await import("../../db.js");
     const { initState, markComplete } = await import("../../ledger/awakeningStateRepo.js");
     const { buildCommitContext, executeCommitAction } = await import("../commitActions/commitActionRegistry.js");
-    const { setGuildAwakened, setGuildCampaignSlug } = await import("../../campaign/guildConfig.js");
+    const { resolveCampaignSlug, setGuildAwakened, setGuildCampaignSlug } = await import("../../campaign/guildConfig.js");
     const { getRegistryDirForScope } = await import("../../registry/scaffold.js");
     const yaml = (await import("yaml")).default;
 
@@ -246,7 +246,7 @@ describe("awakening commit actions", () => {
       mode: "append_only",
     });
 
-    const registryDir = getRegistryDirForScope({ guildId: "guild-2", campaignSlug: "default" });
+    const registryDir = getRegistryDirForScope({ guildId: "guild-2", campaignSlug: resolveCampaignSlug({ guildId: "guild-2" }) });
     const pcsPath = path.join(registryDir, "pcs.yml");
     expect(fs.existsSync(pcsPath)).toBe(true);
 

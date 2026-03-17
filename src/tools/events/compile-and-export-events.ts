@@ -33,7 +33,7 @@ import { chat } from "../../llm/client.js";
 import { parseJsonArrayFromLlm } from "../../llm/parseJsonFromLlm.js";
 import { getEnv } from "../../config/rawEnv.js";
 
-const defaultLlmModel = getEnv("LLM_MODEL", "gpt-4o-mini") ?? "gpt-4o-mini";
+const defaultLlmModel = getEnv("OPENAI_MODEL", getEnv("LLM_MODEL", "gpt-4o-mini")) ?? "gpt-4o-mini";
 
 // Scaffold pipeline imports (Task 4.2)
 import { batchScaffold } from "../../ledger/scaffoldBatcher.js";

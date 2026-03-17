@@ -81,7 +81,7 @@ describe("web recap visibility reflection", () => {
     await setAuthGuilds(["guild-1"]);
 
     const { getDbForCampaign } = await import("../db.js");
-    const { ensureGuildConfig, setGuildAwakened, setGuildMetaCampaignSlug, setGuildCampaignSlug } = await import("../campaign/guildConfig.js");
+    const { ensureGuildConfig, setGuildAwakened, setGuildMetaCampaignSlug, setGuildCampaignSlug, setGuildLlmProvider } = await import("../campaign/guildConfig.js");
     const { createShowtimeCampaign } = await import("../campaign/showtimeCampaigns.js");
     const { startSession, endSession, getMostRecentSession } = await import("../sessions/sessions.js");
     const { upsertSessionRecap } = await import("../sessions/sessionRecaps.js");
@@ -115,7 +115,13 @@ describe("web recap visibility reflection", () => {
       },
       strategyVersion: "session-recaps-v2",
       engine: "test-engine",
+      metaJson: JSON.stringify({
+        llm_provider: "anthropic",
+        llm_model: "claude-haiku-4-5",
+      }),
     });
+
+    setGuildLlmProvider("guild-1", "openai");
 
     const { getWebSessionDetail } = await loadSessionReaders();
 
@@ -124,6 +130,8 @@ describe("web recap visibility reflection", () => {
     expect(detail.campaignSlug).toBe(alpha.campaign_slug);
     expect(detail.artifacts.recap).toBe("available");
     expect(detail.recap?.balanced).toContain("Balanced recap");
+    expect(detail.recap?.llmProvider).toBe("anthropic");
+    expect(detail.recap?.llmModel).toBe("claude-haiku-4-5");
     expect(detail.recapPhase).toBe("complete");
 
     db.close();

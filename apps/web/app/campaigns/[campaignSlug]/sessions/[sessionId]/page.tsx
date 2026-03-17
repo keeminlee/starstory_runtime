@@ -73,7 +73,6 @@ export default async function CampaignSessionPage({ params, searchParams }: Page
                 searchParams={query}
                 canRegenerate={
                   session.campaignSlug !== "demo"
-                  && Boolean(process.env.OPENAI_API_KEY?.trim())
                   && Boolean(session.canWrite)
                 }
                 canWrite={Boolean(session.canWrite)}

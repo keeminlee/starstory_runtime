@@ -30,7 +30,8 @@ afterEach(() => {
 
 async function seedSession(guildId: string, sessionId: string): Promise<void> {
   const { getDbForCampaign } = await import("../db.js");
-  const db = getDbForCampaign("default");
+  const { resolveCampaignSlug } = await import("../campaign/guildConfig.js");
+  const db = getDbForCampaign(resolveCampaignSlug({ guildId }));
   const now = Date.now();
 
   db.prepare(
@@ -101,7 +102,8 @@ test("getSessionRecapContract classifies legacy artifact source when canonical r
   await seedSession(guildId, sessionId);
 
   const { getDbForCampaign } = await import("../db.js");
-  const db = getDbForCampaign("default");
+  const { resolveCampaignSlug } = await import("../campaign/guildConfig.js");
+  const db = getDbForCampaign(resolveCampaignSlug({ guildId }));
 
   db.prepare(
     `
@@ -142,7 +144,8 @@ test("getSessionRecapContract classifies legacy meecap source with balanced-only
   await seedSession(guildId, sessionId);
 
   const { getDbForCampaign } = await import("../db.js");
-  const db = getDbForCampaign("default");
+  const { resolveCampaignSlug } = await import("../campaign/guildConfig.js");
+  const db = getDbForCampaign(resolveCampaignSlug({ guildId }));
   const now = Date.now();
 
   db.prepare(

@@ -1,4 +1,10 @@
-const SECRET_KEYS = ["DISCORD_TOKEN", "OPENAI_API_KEY"] as const;
+const SECRET_KEYS = [
+  "DISCORD_TOKEN",
+  "OPENAI_API_KEY",
+  "DEEPGRAM_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "GOOGLE_API_KEY",
+] as const;
 
 export function redactConfigSnapshot(obj: unknown): unknown {
   // shallow-ish safe redaction: replaces known secret values anywhere in the tree

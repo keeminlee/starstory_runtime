@@ -1740,6 +1740,8 @@ function applyMigrations(db: Database.Database) {
         setup_version INTEGER,
         home_text_channel_id TEXT,
         home_voice_channel_id TEXT,
+        stt_provider TEXT,
+        llm_provider TEXT,
         canon_persona_mode TEXT,
         canon_persona_id TEXT,
         default_recap_style TEXT
@@ -1782,6 +1784,18 @@ function applyMigrations(db: Database.Database) {
   if (!hasHomeVoiceChannel) {
     console.log("Migrating: Adding home_voice_channel_id to guild_config");
     db.exec("ALTER TABLE guild_config ADD COLUMN home_voice_channel_id TEXT");
+  }
+
+  const hasSttProvider = guildConfigColumns.some((c: any) => c.name === "stt_provider");
+  if (!hasSttProvider) {
+    console.log("Migrating: Adding stt_provider to guild_config");
+    db.exec("ALTER TABLE guild_config ADD COLUMN stt_provider TEXT");
+  }
+
+  const hasLlmProvider = guildConfigColumns.some((c: any) => c.name === "llm_provider");
+  if (!hasLlmProvider) {
+    console.log("Migrating: Adding llm_provider to guild_config");
+    db.exec("ALTER TABLE guild_config ADD COLUMN llm_provider TEXT");
   }
 
   const hasCanonPersonaMode = guildConfigColumns.some((c: any) => c.name === "canon_persona_mode");

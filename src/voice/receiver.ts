@@ -109,9 +109,6 @@ function isExplicitStopPhrase(text: string): boolean {
   return false;
 }
 
-// Singleton STT provider (lazy-initialized)
-let sttProvider: Awaited<ReturnType<typeof getSttProvider>> | null = null;
-
 // Per-guild STT queue using promise chaining (Task 3.4)
 // Maintains Promise<void> chain per guild to serialize transcriptions
 // Guarantees: no overlapping STT calls, FIFO order, no skipped utterances
@@ -390,10 +387,7 @@ async function handleTranscription(
   cap: PcmCapture
 ): Promise<void> {
   try {
-    // Lazy-initialize STT provider on first use
-    if (!sttProvider) {
-      sttProvider = await getSttProvider();
-    }
+    const sttProvider = await getSttProvider(guildId);
 
     // Merge PCM chunks
     const pcmBuffer = Buffer.concat(cap.pcmChunks);

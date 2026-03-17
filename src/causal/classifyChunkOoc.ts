@@ -15,10 +15,10 @@
  */
 
 import { chat } from "../llm/client.js";
+import { resolveDefaultLlmModel, resolveRuntimeLlmProvider } from "../config/providerSelection.js";
 import type { TranscriptEntry } from "../ledger/transcripts.js";
 import { getDbForCampaign } from "../db.js";
 import { getDefaultCampaignSlug } from "../campaign/defaultCampaign.js";
-import { getEnv } from "../config/rawEnv.js";
 
 export interface ChunkEventClassification {
   /** Absolute start index in full transcript array */
@@ -38,12 +38,12 @@ export interface ChunkEventClassification {
  *
  * @param span    The span as it appears in RegimeMasks (absolute array indices)
  * @param transcript  Full session transcript
- * @param model   OpenAI model to use (defaults to LLM_MODEL env or gpt-4o-mini)
+ * @param model   LLM model to use (defaults to centralized provider-specific config)
  */
 export async function classifyChunkOoc(
   span: { start_index: number; end_index: number },
   transcript: TranscriptEntry[],
-  model: string = getEnv("LLM_MODEL", "gpt-4o-mini") ?? "gpt-4o-mini",
+  model: string = resolveDefaultLlmModel(resolveRuntimeLlmProvider()),
 ): Promise<ChunkEventClassification[]> {
   const lines = transcript.slice(span.start_index, span.end_index + 1);
   if (lines.length === 0) return [];
@@ -147,14 +147,14 @@ Indices are relative to this segment: 0 = first line shown, ${totalMessages - 1}
  * @param sessionId       Session UUID (cache key component)
  * @param span            OOC-flagged span (absolute indices)
  * @param transcript      Full transcript
- * @param model           OpenAI model
+ * @param model           LLM model
  * @param forceReclassify Delete cached row and re-run LLM
  */
 export async function classifyChunkOocCached(
   sessionId: string,
   span: { start_index: number; end_index: number },
   transcript: TranscriptEntry[],
-  model: string = getEnv("LLM_MODEL", "gpt-4o-mini") ?? "gpt-4o-mini",
+  model: string = resolveDefaultLlmModel(resolveRuntimeLlmProvider()),
   forceReclassify: boolean = false,
 ): Promise<ChunkEventClassification[]> {
   const db = getDbForCampaign(getDefaultCampaignSlug());

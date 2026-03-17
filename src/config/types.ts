@@ -1,7 +1,9 @@
 export type LogLevel = "error" | "warn" | "info" | "debug" | "trace";
 export type LogFormat = "pretty" | "json";
 
-export type SttProvider = "openai" | "noop" | "debug";
+export type GuildSttProvider = "whisper" | "deepgram";
+export type SttProvider = GuildSttProvider | "noop" | "debug";
+export type LlmProvider = "openai" | "anthropic" | "google";
 export type TtsProvider = "openai" | "noop";
 export type BargeInMode = "immediate" | "micro_confirm";
 
@@ -19,7 +21,19 @@ export interface Config {
   };
 
   openai: {
-    apiKey: string;
+    apiKey?: string;
+  };
+
+  deepgram: {
+    apiKey?: string;
+  };
+
+  anthropic: {
+    apiKey?: string;
+  };
+
+  google: {
+    apiKey?: string;
   };
 
   db: {
@@ -40,7 +54,10 @@ export interface Config {
 
   llm: {
     enabled: boolean;
-    model: string;
+    provider: LlmProvider;
+    openaiModel: string;
+    anthropicModel: string;
+    googleModel: string;
     temperature: number;
     maxTokens: number;
     voiceContextMs: number;
@@ -69,6 +86,7 @@ export interface Config {
     provider: SttProvider;
     saveAudio: boolean;
     model: string;
+    deepgramModel: string;
     language: string;
     prompt?: string;
     minAudioMs: number;

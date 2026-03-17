@@ -6,6 +6,10 @@ export function getEnv(name: string, fallback?: string): string | undefined {
   return value.trim();
 }
 
+export function hasEnv(name: string): boolean {
+  return getEnv(name) !== undefined;
+}
+
 export function getEnvBool(name: string, fallback: boolean): boolean {
   const value = getEnv(name);
   if (!value) return fallback;

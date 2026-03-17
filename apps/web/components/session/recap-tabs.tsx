@@ -99,11 +99,16 @@ function mapRegenerateError(error: unknown): string {
     if (error.code === "generation_failed") {
       return "Recap generation failed this time. Please try again in a moment.";
     }
-    if (error.code === "openai_unconfigured") {
-      return "Recap regeneration is unavailable until OPENAI_API_KEY is configured.";
+    if (
+      error.code === "llm_unconfigured" ||
+      error.code === "openai_unconfigured" ||
+      error.code === "anthropic_unconfigured" ||
+      error.code === "google_unconfigured"
+    ) {
+      return "Recap regeneration is unavailable until the selected LLM provider is configured on the server.";
     }
     if (error.code === "discord_refresh_unconfigured") {
-      return "This environment is missing Discord refresh configuration required by generation dependencies.";
+        return "This environment is missing Discord refresh configuration required by generation dependencies.";
     }
 
     if (error.code === "invalid_request") {
@@ -145,12 +150,15 @@ function toRecapTxt(args: {
     return `Session: ${title}\nSession ID: ${args.sessionId}\nCampaign: ${args.campaignSlug}\n\nNo recap available.`;
   }
 
+  const displayModel = args.recap.llmModel?.trim() || "Unknown";
+
   return [
     `Session: ${title}`,
     `Session ID: ${args.sessionId}`,
     `Campaign: ${args.campaignSlug}`,
     `Generated At: ${args.recap.generatedAt}`,
-    `Model: ${args.recap.modelVersion}`,
+    `Model: ${displayModel}`,
+    `Strategy: ${args.recap.strategyVersion ?? args.recap.modelVersion}`,
     "",
     "[Concise]",
     args.recap.concise,
@@ -209,6 +217,7 @@ export function RecapTabs({
   annotationVersion = 0,
 }: RecapTabsProps) {
   const router = useRouter();
+  const recapDisplayModel = recap ? (recap.llmModel?.trim() || "Unknown") : null;
   const [activeTab, setActiveTab] = useState<RecapTab>(resolveDefaultTab(recap));
   const [isPending, setIsPending] = useState(false);
   const [banner, setBanner] = useState<BannerState>(
@@ -216,7 +225,9 @@ export function RecapTabs({
       ? null
       : {
           tone: "danger",
-          message: "Recap regeneration is unavailable until OPENAI_API_KEY is configured.",
+          message: canWrite
+            ? "Recap regeneration is currently unavailable for this session."
+            : "Only the configured DM can regenerate recaps for this guild archive.",
         }
   );
 
@@ -439,7 +450,7 @@ export function RecapTabs({
         <div className="space-y-1">
           <h3 className="font-serif text-lg">Recap</h3>
           <p className="text-xs uppercase tracking-widest text-muted-foreground">
-            {recap ? `Model ${recap.modelVersion}` : recapPhaseSubtitle}
+            {recapDisplayModel ? `Model ${recapDisplayModel}` : recapPhaseSubtitle}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

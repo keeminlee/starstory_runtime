@@ -48,7 +48,10 @@ export function mapCanonicalTranscriptToWebTranscript(transcript: SessionTranscr
   }));
 }
 
-export function mapCanonicalRecapToWebRecap(recap: CanonicalSessionRecap | null): SessionRecap | null {
+export function mapCanonicalRecapToWebRecap(args: {
+  recap: CanonicalSessionRecap | null;
+}): SessionRecap | null {
+  const { recap } = args;
   if (!recap) return null;
 
   return {
@@ -57,6 +60,8 @@ export function mapCanonicalRecapToWebRecap(recap: CanonicalSessionRecap | null)
     detailed: recap.views.detailed,
     generatedAt: new Date(recap.generatedAt).toISOString(),
     modelVersion: recap.modelVersion,
+    llmProvider: recap.llmProvider,
+    llmModel: recap.llmModel,
     source: recap.source,
     engine: recap.engine,
     sourceHash: recap.sourceHash,
@@ -97,7 +102,7 @@ export function buildSessionDetail(args: {
     source,
     sessionOrigin: mapCanonicalSessionOrigin(args.session),
     transcript: mapCanonicalTranscriptToWebTranscript(args.transcript),
-    recap: mapCanonicalRecapToWebRecap(args.recap),
+    recap: mapCanonicalRecapToWebRecap({ recap: args.recap }),
     recapReadiness: args.recapReadiness,
     recapPhase: args.recapPhase,
     speakerAttribution: args.speakerAttribution,

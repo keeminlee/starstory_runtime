@@ -89,7 +89,7 @@ export function buildEligibilityMask(
  * @param transcript  Full session transcript (needs TranscriptEntry content for LLM)
  * @param masks       RegimeMasks from generateRegimeMasks()
  * @param sessionId   Session UUID (stored on the mask and used as DB cache key)
- * @param model       OpenAI model for OOC classification (default: LLM_MODEL env or gpt-4o-mini)
+ * @param model       OpenAI model for OOC classification (default: OPENAI_MODEL env or gpt-4o-mini)
  * @param forceReclassify  Delete cached classifications and re-run LLM for all spans
  */
 export async function buildRefinedEligibilityMask(

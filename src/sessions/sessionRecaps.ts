@@ -20,6 +20,8 @@ export type SessionRecap = {
   campaignSlug: string;
   generatedAt: number;
   modelVersion: string;
+  llmProvider: "openai" | "anthropic" | "google" | null;
+  llmModel: string | null;
   createdAtMs: number;
   updatedAtMs: number;
   engine: string | null;
@@ -109,6 +111,16 @@ type SessionRecapRow = {
   balanced_text: string;
   detailed_text: string;
 };
+
+function parseRecapMetaJson(metaJson: string | null): Record<string, unknown> {
+  if (!metaJson) return {};
+  try {
+    const parsed = JSON.parse(metaJson) as Record<string, unknown>;
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 function getLegacyRecapRow(db: ReturnType<typeof getRecapDbForGuild>["db"], sessionId: string): SessionRecapRow | null {
   // Legacy contract v1: recap_final artifacts stored a single balanced body.
@@ -207,12 +219,21 @@ function getRecapDbForGuild(guildId: string, campaignSlugOverride?: string) {
 
 function mapRowToSessionRecap(row: SessionRecapRow, guildId: string, campaignSlug: string): SessionRecap {
   const modelVersion = row.strategy_version ?? SESSION_RECAP_MODEL_VERSION;
+  const meta = parseRecapMetaJson(row.meta_json);
   return {
     sessionId: row.session_id,
     guildId,
     campaignSlug,
     generatedAt: row.updated_at_ms,
     modelVersion,
+    llmProvider: typeof meta.llm_provider === "string"
+      ? meta.llm_provider as "openai" | "anthropic" | "google"
+      : null,
+    llmModel: typeof meta.llm_model === "string"
+      ? meta.llm_model
+      : modelVersion === "session-recaps-legacy-meecap-v1"
+        ? row.engine
+        : null,
     createdAtMs: row.created_at_ms,
     updatedAtMs: row.updated_at_ms,
     engine: row.engine,
@@ -360,10 +381,15 @@ export async function generateSessionRecap(
     .prepare("SELECT created_at_ms FROM session_recaps WHERE session_id = ? LIMIT 1")
     .get(args.sessionId) as { created_at_ms: number } | undefined;
   const createdAtMs = Number(existing?.created_at_ms ?? now);
-  const modelVersion = balanced.strategyVersion || SESSION_RECAP_MODEL_VERSION;
+  const strategyVersion = balanced.strategyVersion || SESSION_RECAP_MODEL_VERSION;
+  const llmProvider = balanced.llmProvider ?? concise.llmProvider ?? detailed.llmProvider ?? null;
+  const llmModel = balanced.llmModel ?? concise.llmModel ?? detailed.llmModel ?? null;
   const metaJson = JSON.stringify({
     generated_at_ms: generatedAt,
-    model_version: modelVersion,
+    model_version: strategyVersion,
+    strategy_version: strategyVersion,
+    llm_provider: llmProvider,
+    llm_model: llmModel,
     engine: balanced.engine,
     force: args.force ?? false,
     styles: {
@@ -390,7 +416,7 @@ export async function generateSessionRecap(
     updatedAtMs: generatedAt,
     engine: balanced.engine,
     sourceHash: balanced.sourceTranscriptHash,
-    strategyVersion: modelVersion,
+    strategyVersion,
     metaJson,
     views: {
       concise: concise.text,

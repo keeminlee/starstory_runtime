@@ -3,7 +3,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { getWebCampaignDetail, getWebDashboardModel } from "../../apps/web/lib/server/campaignReaders";
 import { resolveWebAuthContext } from "../../apps/web/lib/server/authContext";
 
 process.env.DISCORD_TOKEN ??= "test-token";
@@ -35,6 +34,20 @@ function configureHermeticEnv(tempDir: string): void {
   vi.stubEnv("DATA_DB_FILENAME", "db.sqlite");
   vi.stubEnv("MIGRATIONS_SILENT", "1");
   vi.stubEnv("DEFAULT_CAMPAIGN_SLUG", "default");
+}
+
+async function loadCampaignReaders() {
+  return import("../../apps/web/lib/server/campaignReaders");
+}
+
+async function getWebDashboardModel(...args: Parameters<(typeof import("../../apps/web/lib/server/campaignReaders"))["getWebDashboardModel"]>) {
+  const readers = await loadCampaignReaders();
+  return readers.getWebDashboardModel(...args);
+}
+
+async function getWebCampaignDetail(...args: Parameters<(typeof import("../../apps/web/lib/server/campaignReaders"))["getWebCampaignDetail"]>) {
+  const readers = await loadCampaignReaders();
+  return readers.getWebCampaignDetail(...args);
 }
 
 async function setAuthGuilds(guildIds: string[]): Promise<void> {
