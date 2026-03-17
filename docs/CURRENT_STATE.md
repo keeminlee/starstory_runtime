@@ -1,9 +1,9 @@
-# StarStory Platform - Current State (March 14, 2026)
+# StarStory Platform - Current State (March 17, 2026)
 
 For documentation navigation, start at [INDEX.md](INDEX.md).
 
 **Status:** V0 complete, MeepoMind (V0.1) Phase 2-3 in progress + Sprint 3 hardening closure complete + Track B web archive viewer complete + StarStory namespace presentation pass complete  
-**Last Updated:** March 14, 2026
+**Last Updated:** March 17, 2026
 
 ## Namespace Doctrine
 
@@ -202,6 +202,16 @@ Storage/materialization hardening (Phase 4):
   - campaign rename upsert is allowed only after proving slug ownership in authorized guild scope
   - session label mutation updates canonical session row only (no shadow label store)
   - UI edit flows use optimistic updates with rollback + user-safe error + canonical refetch
+- Session archive and lifecycle controls are live in web:
+  - archive completed/interrupted sessions from campaign list and session detail surfaces
+  - end in-progress sessions from web using the same runtime `showtime_end` closure semantics as Discord showtime end
+  - hide archived sessions from default dashboard/campaign lists while preserving direct detail readability
+  - `show_archived=1` restores archived rows in dashboard/campaign views
+- Archive web doctrine:
+  - archive state is canonical `sessions.archived_at_ms`
+  - active sessions cannot be archived
+  - owned campaigns with only archived sessions disappear from default views, but truly empty owned campaigns still render
+- Campaign sessions action controls now use the shared web ghost-button template so hover, cursor, active, and focus-visible behavior matches the rest of the archive UI.
 - Recap regenerate action and transcript/recap downloads (`.txt` and `.json`) are live on session detail.
 - Artifact-aware states are implemented for missing/unavailable recap/transcript conditions.
 - Dev bypass for local web scope overrides is available only behind explicit env gate (`DEV_WEB_BYPASS=1`) and non-production mode.
