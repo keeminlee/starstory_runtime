@@ -29,6 +29,12 @@ export async function joinVoice(opts: {
   channelId: string;
   adapterCreator: any;
 }): Promise<VoiceConnection> {
+  voiceLog.info("Joining voice channel", {
+    event_type: "VOICE_JOIN",
+    guild_id: opts.guildId,
+    channel_id: opts.channelId,
+  });
+
   const connection = joinVoiceChannel({
     channelId: opts.channelId,
     guildId: opts.guildId,
@@ -41,9 +47,21 @@ export async function joinVoice(opts: {
   try {
     await entersState(connection, VoiceConnectionStatus.Ready, 10_000);
   } catch (err) {
+    voiceLog.warn("Voice connection readiness failed", {
+      event_type: "VOICE_JOIN",
+      guild_id: opts.guildId,
+      channel_id: opts.channelId,
+      error: String((err as any)?.message ?? err ?? "unknown_error"),
+    });
     connection.destroy();
     throw new Error("Failed to establish voice connection within 10 seconds");
   }
+
+  voiceLog.info("Voice connection ready", {
+    event_type: "VOICE_JOIN",
+    guild_id: opts.guildId,
+    channel_id: opts.channelId,
+  });
 
   // Set up disconnect handlers to keep state clean
   setupDisconnectHandlers(connection, opts.guildId);
@@ -59,6 +77,14 @@ export function leaveVoice(guildId: string): void {
   if (!state) {
     return; // Already disconnected
   }
+
+  voiceLog.info("Leaving voice channel", {
+    event_type: "VOICE_LEAVE",
+    guild_id: guildId,
+    channel_id: state.channelId,
+    cleanup_only: true,
+    session_authority_preserved: true,
+  });
 
   stopReceiver(guildId);
   cleanupSpeaker(guildId);
@@ -82,7 +108,14 @@ function setupDisconnectHandlers(connection: VoiceConnection, guildId: string): 
   const autoReconnectEnabled = getEnvBool("VOICE_AUTO_RECONNECT", getEnv("NODE_ENV") === "production");
 
   connection.on("stateChange", (oldState, newState) => {
-    voiceLog.debug(`Voice state: ${oldState.status} → ${newState.status}`);
+    voiceLog.debug(`Voice state: ${oldState.status} → ${newState.status}`, {
+      event_type: "VOICE_STATE_CHANGE",
+      guild_id: guildId,
+      old_status: oldState.status,
+      new_status: newState.status,
+      cleanup_only: true,
+      session_authority_preserved: true,
+    });
 
     // Clean up state when connection is destroyed
     if (newState.status === VoiceConnectionStatus.Destroyed) {
@@ -92,6 +125,15 @@ function setupDisconnectHandlers(connection: VoiceConnection, guildId: string): 
       
       // Clear Meepo's overlay presence
       overlayEmitPresence("meepo", false);
+
+      voiceLog.info("Voice connection destroyed; runtime voice state cleared without ending session", {
+        event_type: "VOICE_RUNTIME_DETACHED",
+        guild_id: guildId,
+        old_status: oldState.status,
+        new_status: newState.status,
+        cleanup_only: true,
+        session_authority_preserved: true,
+      });
       
       voiceLog.debug(`Voice state cleared (destroyed)`);
     }

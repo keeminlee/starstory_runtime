@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Calendar, ChevronRight } from "lucide-react";
@@ -8,7 +8,7 @@ import { StatusChip } from "@/components/shared/status-chip";
 import type { CampaignSummary } from "@/lib/types";
 import { formatSessionDisplayTitle } from "@/lib/campaigns/display";
 import { updateCampaignNameApi } from "@/lib/api/campaigns";
-import { updateSessionLabelApi } from "@/lib/api/sessions";
+import { archiveSessionApi, endSessionApi, updateSessionLabelApi } from "@/lib/api/sessions";
 import { WebApiError } from "@/lib/api/http";
 
 type CampaignOverviewProps = {
@@ -22,6 +22,8 @@ export function CampaignOverview({ campaign, searchParams }: CampaignOverviewPro
   const [campaignNameDraft, setCampaignNameDraft] = useState(campaign.name);
   const [isEditingCampaignName, setIsEditingCampaignName] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [archivingSessionId, setArchivingSessionId] = useState<string | null>(null);
+  const [endingSessionId, setEndingSessionId] = useState<string | null>(null);
   const [sessionLabelDraft, setSessionLabelDraft] = useState("");
   const [localSessions, setLocalSessions] = useState(campaign.sessions);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -38,6 +40,26 @@ export function CampaignOverview({ campaign, searchParams }: CampaignOverviewPro
     }),
     [campaign.guildId, searchParams]
   );
+
+  const showArchived = useMemo(() => {
+    const raw = searchParams?.show_archived;
+    const value = Array.isArray(raw) ? raw[0] : raw;
+    if (typeof value !== "string") {
+      return false;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    return normalized === "1" || normalized === "true" || normalized === "yes";
+  }, [searchParams]);
+
+  useEffect(() => {
+    setCampaignName(campaign.name);
+    setCampaignNameDraft(campaign.name);
+  }, [campaign.name]);
+
+  useEffect(() => {
+    setLocalSessions(campaign.sessions);
+  }, [campaign.sessions]);
 
   const artifactTone = (status: "available" | "missing" | "unavailable") => {
     if (status === "available") return "success" as const;
@@ -221,22 +243,133 @@ export function CampaignOverview({ campaign, searchParams }: CampaignOverviewPro
                         <button type="button" className="rounded-full border border-border px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground" onClick={() => setEditingSessionId(null)}>Cancel</button>
                       </form>
                     ) : campaign.canWrite ? (
-                      <button
-                        type="button"
-                        className="rounded-full border border-border px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
-                        onClick={() => {
-                          setSessionLabelDraft(session.label ?? "");
-                          setEditingSessionId(session.id);
-                          setErrorMessage(null);
-                        }}
-                      >
-                        Edit label
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="rounded-full border border-border px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+                          onClick={() => {
+                            setSessionLabelDraft(session.label ?? "");
+                            setEditingSessionId(session.id);
+                            setErrorMessage(null);
+                          }}
+                        >
+                          Edit label
+                        </button>
+                        {session.status === "in_progress" ? (
+                          <button
+                            type="button"
+                            disabled={endingSessionId === session.id}
+                            title="End session"
+                            className="rounded-full border border-border px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-rose-400/40 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-50"
+                            onClick={async () => {
+                              if (!window.confirm("End this session now? This uses the same closure path as showtime end.")) {
+                                return;
+                              }
+
+                              setEndingSessionId(session.id);
+                              setErrorMessage(null);
+                              try {
+                                const result = await endSessionApi(session.id, scopedSearchParams);
+                                setLocalSessions((current) =>
+                                  current.map((entry) =>
+                                    entry.id === session.id
+                                      ? {
+                                          ...entry,
+                                          status: result.session.status,
+                                        }
+                                      : entry
+                                  )
+                                );
+                                router.refresh();
+                              } catch (error) {
+                                if (error instanceof WebApiError) {
+                                  setErrorMessage(error.message);
+                                } else {
+                                  setErrorMessage("Unable to end this session right now.");
+                                }
+                              } finally {
+                                setEndingSessionId(null);
+                              }
+                            }}
+                          >
+                            {endingSessionId === session.id ? "Ending" : "End session"}
+                          </button>
+                        ) : null}
+                        {!session.isArchived ? (
+                          <button
+                            type="button"
+                            disabled={archivingSessionId === session.id || session.status === "in_progress"}
+                            title={session.status === "in_progress" ? "Active sessions cannot be archived." : "Archive session"}
+                            className="rounded-full border border-border px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-amber-400/40 hover:text-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
+                            onClick={async () => {
+                              if (!window.confirm("Archive this session? It will be hidden from default lists but remain readable by direct link.")) {
+                                return;
+                              }
+
+                              setArchivingSessionId(session.id);
+                              setErrorMessage(null);
+                              try {
+                                await archiveSessionApi(session.id, scopedSearchParams);
+                                setLocalSessions((current) => {
+                                  if (showArchived) {
+                                    return current.map((entry) =>
+                                      entry.id === session.id
+                                        ? {
+                                            ...entry,
+                                            isArchived: true,
+                                          }
+                                        : entry
+                                    );
+                                  }
+
+                                  return current.filter((entry) => entry.id !== session.id);
+                                });
+                                router.refresh();
+                              } catch (error) {
+                                if (error instanceof WebApiError) {
+                                  setErrorMessage(error.message);
+                                } else {
+                                  setErrorMessage("Unable to archive this session right now.");
+                                }
+                              } finally {
+                                setArchivingSessionId(null);
+                              }
+                            }}
+                          >
+                            {archivingSessionId === session.id
+                              ? "Archiving"
+                              : session.status === "in_progress"
+                                ? "Archive blocked"
+                                : "Archive session"}
+                          </button>
+                        ) : null}
+                      </>
                     ) : null}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-4 text-xs uppercase tracking-wider text-muted-foreground">
                     <span className="inline-flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />{session.date}</span>
-                    <StatusChip label={session.status === "in_progress" ? "In progress" : "Completed"} tone={session.status === "in_progress" ? "warning" : "neutral"} />
+                    <StatusChip
+                      label={
+                        session.status === "in_progress"
+                          ? "In progress"
+                          : session.status === "interrupted"
+                            ? "Interrupted"
+                            : "Completed"
+                      }
+                      tone={
+                        session.status === "in_progress"
+                          ? "warning"
+                          : session.status === "interrupted"
+                            ? "danger"
+                            : "neutral"
+                      }
+                    />
+                      {session.isArchived ? (
+                        <StatusChip label="Archived" tone="neutral" />
+                      ) : null}
+                    {session.sessionOrigin === "lab_legacy" ? (
+                      <StatusChip label="Lab legacy" tone="warning" />
+                    ) : null}
                     <StatusChip label={`Transcript ${session.artifacts.transcript}`} tone={artifactTone(session.artifacts.transcript)} />
                     <StatusChip label={`Recap ${session.artifacts.recap}`} tone={artifactTone(session.artifacts.recap)} />
                   </div>

@@ -11,6 +11,8 @@ const DEMO_SESSIONS: SessionSummary[] = [
     date: "2026-03-01",
     status: "completed",
     source: "live",
+    sessionOrigin: "showtime",
+    isArchived: false,
     artifacts: {
       transcript: "available",
       recap: "available",
@@ -24,6 +26,8 @@ const DEMO_SESSIONS: SessionSummary[] = [
     date: "2026-03-05",
     status: "in_progress",
     source: "ingest",
+    sessionOrigin: "showtime",
+    isArchived: false,
     artifacts: {
       transcript: "available",
       recap: "available",
@@ -42,7 +46,9 @@ const DEMO_SESSION_DETAILS: Record<string, SessionDetail> = {
     date: "2026-03-01",
     status: "completed",
     source: "live",
+    sessionOrigin: "showtime",
     guildId: DEMO_GUILD_ID,
+    isArchived: false,
     transcript: [
       {
         id: "demo-s1-line-1",
@@ -74,6 +80,7 @@ const DEMO_SESSION_DETAILS: Record<string, SessionDetail> = {
       modelVersion: "demo-seeded-v1",
     },
     recapReadiness: "ready",
+    recapPhase: "complete",
     speakerAttribution: null,
     artifacts: {
       transcript: "available",
@@ -90,7 +97,9 @@ const DEMO_SESSION_DETAILS: Record<string, SessionDetail> = {
     date: "2026-03-05",
     status: "in_progress",
     source: "ingest",
+    sessionOrigin: "showtime",
     guildId: DEMO_GUILD_ID,
+    isArchived: false,
     transcript: [
       {
         id: "demo-s2-line-1",
@@ -122,6 +131,7 @@ const DEMO_SESSION_DETAILS: Record<string, SessionDetail> = {
       modelVersion: "demo-seeded-v1",
     },
     recapReadiness: "ready",
+    recapPhase: "live",
     speakerAttribution: null,
     artifacts: {
       transcript: "available",

@@ -44,8 +44,12 @@ export type UpsertSessionRecapArgs = {
 
 export const RECAP_DOMAIN_ERROR_CODES = [
   "RECAP_SESSION_NOT_FOUND",
+  "RECAP_SESSION_ACTIVE",
   "RECAP_TRANSCRIPT_UNAVAILABLE",
   "RECAP_SPEAKER_ATTRIBUTION_REQUIRED",
+  "RECAP_IN_PROGRESS",
+  "RECAP_RATE_LIMITED",
+  "RECAP_CAPACITY_REACHED",
   "RECAP_GENERATION_FAILED",
   "RECAP_INVALID_OUTPUT",
 ] as const;
@@ -228,7 +232,23 @@ function toRecapDomainError(error: unknown): RecapDomainError {
     return error;
   }
 
+  const errorCode =
+    typeof error === "object" && error !== null && "code" in error
+      ? String((error as { code?: unknown }).code ?? "")
+      : "";
   const message = error instanceof Error ? error.message : String(error);
+  if (errorCode === "ERR_RECAP_IN_PROGRESS") {
+    return new RecapDomainError("RECAP_IN_PROGRESS", message, { cause: error });
+  }
+
+  if (errorCode === "ERR_RECAP_RATE_LIMITED") {
+    return new RecapDomainError("RECAP_RATE_LIMITED", message, { cause: error });
+  }
+
+  if (errorCode === "ERR_RECAP_CAPACITY_REACHED") {
+    return new RecapDomainError("RECAP_CAPACITY_REACHED", message, { cause: error });
+  }
+
   if (/Session not found/i.test(message)) {
     return new RecapDomainError("RECAP_SESSION_NOT_FOUND", message, { cause: error });
   }
@@ -284,6 +304,13 @@ export async function generateSessionRecap(
   const session = getSessionById(args.guildId, args.sessionId, campaignSlug);
   if (!session) {
     throw new RecapDomainError("RECAP_SESSION_NOT_FOUND", `Session not found: ${args.sessionId}`);
+  }
+
+  if (session.status === "active") {
+    throw new RecapDomainError(
+      "RECAP_SESSION_ACTIVE",
+      `Recap generation is blocked while session ${args.sessionId} is still active.`
+    );
   }
 
   const attributionState = getSessionSpeakerAttributionState({

@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { CampaignOverview } from "@/components/campaign/campaign-overview";
+import { CampaignSessionsActions } from "@/components/campaign/campaign-sessions-actions";
 import { ArchiveShell } from "@/components/layout/archive-shell";
 import { EmptyState } from "@/components/shared/empty-state";
 import { WebApiError } from "@/lib/api/http";
@@ -16,6 +16,13 @@ type PageProps = {
 export default async function CampaignSessionsPage({ params, searchParams }: PageProps) {
   const { campaignSlug } = await params;
   const query = await searchParams;
+  const showArchived = (() => {
+    const raw = query.show_archived;
+    const value = Array.isArray(raw) ? raw[0] : raw;
+    if (typeof value !== "string") return false;
+    const normalized = value.trim().toLowerCase();
+    return normalized === "1" || normalized === "true" || normalized === "yes";
+  })();
   let campaign = null as Awaited<ReturnType<typeof getCampaignSessionsApi>>["campaign"] | null;
   let routeAmbiguous = false;
 
@@ -50,17 +57,7 @@ export default async function CampaignSessionsPage({ params, searchParams }: Pag
   return (
     <ArchiveShell section="Sessions" campaignName={campaign.name}>
       <div className="space-y-4">
-        <div className="flex justify-end">
-          <Link
-            href={{
-              pathname: `/campaigns/${campaign.slug}/compendium`,
-              ...(campaign.guildId ? { query: { guild_id: campaign.guildId } } : {}),
-            }}
-            className="rounded-full border border-border bg-background/35 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-foreground transition-colors hover:bg-background/55"
-          >
-            Open Compendium
-          </Link>
-        </div>
+        <CampaignSessionsActions campaignSlug={campaign.slug} guildId={campaign.guildId} showArchived={showArchived} />
         <CampaignOverview campaign={campaign} searchParams={query} />
       </div>
     </ArchiveShell>

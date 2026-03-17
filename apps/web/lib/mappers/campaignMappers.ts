@@ -19,6 +19,7 @@ export function toDashboardDto(model: DashboardModel): DashboardModel {
   return {
     ...model,
     campaigns: model.campaigns.map(toCampaignSummaryDto),
+    emptyGuilds: model.emptyGuilds.map((guild) => ({ ...guild })),
   };
 }
 

@@ -181,6 +181,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at_ms INTEGER NOT NULL,          -- When this session record was created (immutable timestamp)
   started_at_ms INTEGER NOT NULL,          -- When the session's content began (may differ for ingested sessions)
   ended_at_ms INTEGER,
+  archived_at_ms INTEGER,                  -- Nullable visibility marker; archived sessions remain readable by direct id
   ended_reason TEXT,                       -- Optional closure reason ('mode_change', 'mode_change_to_dormant', etc.)
   started_by_id TEXT,
   started_by_name TEXT,
@@ -751,6 +752,8 @@ CREATE TABLE IF NOT EXISTS entity_resolutions (
   campaign_slug TEXT NOT NULL,             -- Campaign scope
   candidate_name TEXT NOT NULL,            -- The surface name as detected in transcript/recap
   resolution TEXT NOT NULL,                -- 'resolved' | 'created' | 'ignored'
+  action_type TEXT NOT NULL,               -- 'resolve_existing' | 'create_entity' | 'add_alias' | 'ignore_candidate'
+  summary_text TEXT NOT NULL,              -- Stable UI summary for saved review decisions
   entity_id TEXT,                          -- FK to registry entity id (NULL if ignored)
   entity_category TEXT,                    -- Registry category at time of resolution (NULL if ignored)
   batch_id TEXT,                           -- Optional review batch provenance (NULL for legacy per-decision writes)

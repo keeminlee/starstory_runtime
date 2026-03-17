@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { saveSessionSpeakerAttributionApi } from "@/lib/api/sessions";
 import { WebApiError } from "@/lib/api/http";
 import type { SpeakerAttributionBatchRequest } from "@/lib/api/types";
@@ -96,6 +97,7 @@ export function SpeakerAttributionPanel({
   initialState,
   onBeginRecapGeneration,
 }: SpeakerAttributionPanelProps) {
+  const router = useRouter();
   const [attribution, setAttribution] = useState(initialState);
   const [drafts, setDrafts] = useState<Record<string, DraftRow>>(() => buildDrafts(initialState));
   const [banner, setBanner] = useState<BannerState>(null);
@@ -165,11 +167,14 @@ export function SpeakerAttributionPanel({
     setBanner(null);
     try {
       const saved = await persistDrafts();
+      if (saved.ready) {
+        router.refresh();
+        return;
+      }
+
       setBanner({
         tone: "success",
-        message: saved.ready
-          ? "Speaker attribution saved. Recap can now be generated."
-          : "Speaker attribution progress saved.",
+        message: "Speaker classifications saved.",
       });
     } catch (error) {
       setBanner({ tone: "danger", message: mapError(error) });
@@ -210,13 +215,13 @@ export function SpeakerAttributionPanel({
     <div className="rounded-2xl border border-border/70 bg-background/30 p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h4 className="font-serif text-lg">Speaker Attribution Required</h4>
+          <h4 className="font-serif text-lg">Attribution needed</h4>
           <p className="mt-1 text-sm text-muted-foreground">
-            Classify each transcript speaker before recap generation is allowed.
+            Classify each unresolved transcript speaker before recap generation can begin.
           </p>
         </div>
         <div className="rounded-full border border-border/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {attribution.ready ? "Ready" : `${attribution.pendingCount} pending`}
+          {`${attribution.pendingCount} pending`}
         </div>
       </div>
 

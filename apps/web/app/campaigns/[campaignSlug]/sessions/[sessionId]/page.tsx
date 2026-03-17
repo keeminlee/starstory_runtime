@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import { ArchiveShell } from "@/components/layout/archive-shell";
-import { EmptyState } from "@/components/shared/empty-state";
-import { RecapTabs } from "@/components/session/recap-tabs";
+import { SessionRecapSection } from "@/components/session/session-recap-section";
 import { SessionHeader } from "@/components/session/session-header";
 import { TranscriptViewer } from "@/components/session/transcript-viewer";
 import { WebApiError } from "@/lib/api/http";
@@ -55,47 +54,48 @@ export default async function CampaignSessionPage({ params, searchParams }: Page
         ? "Transcript retrieval failed for this session. Retry this page or check ingestion health."
         : "Transcript data is currently unavailable for this session.";
 
+  const showRecapSection = session.recapPhase !== "live";
+
   return (
     <ArchiveShell section="Sessions" campaignName={session.campaignName}>
       <div className="space-y-8 pb-16">
         <SessionHeader session={session} searchParams={query} />
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
-          <div className="lg:col-span-7">
-            <RecapTabs
-              recap={session.recap}
-              sessionId={session.id}
-              sessionTitle={session.title}
-              campaignSlug={session.campaignSlug}
-              speakerAttribution={session.speakerAttribution}
-              searchParams={query}
-              canRegenerate={
-                session.campaignSlug !== "demo"
-                && Boolean(process.env.OPENAI_API_KEY?.trim())
-                && Boolean(session.canWrite)
-              }
-              canWrite={Boolean(session.canWrite)}
-              showRegenerateUnavailableBanner={session.campaignSlug !== "demo"}
-              status={session.artifacts.recap}
-              emptyDescription={recapEmptyDescription}
-              warnings={session.warnings}
-            />
-          </div>
-          <div className="lg:col-span-5">
-            {session.transcript.length > 0 && session.artifacts.transcript === "available" ? (
-              <TranscriptViewer
-                entries={session.transcript}
+          {showRecapSection ? (
+            <div className="lg:col-span-7">
+              <SessionRecapSection
+                recap={session.recap}
+                recapPhase={session.recapPhase}
                 sessionId={session.id}
                 sessionTitle={session.title}
                 campaignSlug={session.campaignSlug}
-                status={session.artifacts.transcript}
+                speakerAttribution={session.speakerAttribution}
+                searchParams={query}
+                canRegenerate={
+                  session.campaignSlug !== "demo"
+                  && Boolean(process.env.OPENAI_API_KEY?.trim())
+                  && Boolean(session.canWrite)
+                }
+                canWrite={Boolean(session.canWrite)}
+                showRegenerateUnavailableBanner={session.campaignSlug !== "demo"}
+                status={session.artifacts.recap}
+                emptyDescription={recapEmptyDescription}
                 warnings={session.warnings}
               />
-            ) : (
-              <EmptyState
-                title={session.artifacts.transcript === "missing" ? "No transcript yet" : "Transcript unavailable"}
-                description={transcriptEmptyDescription}
-              />
-            )}
+            </div>
+          ) : null}
+          <div className={showRecapSection ? "lg:col-span-5" : "lg:col-span-12"}>
+            <TranscriptViewer
+              entries={session.transcript}
+              sessionId={session.id}
+              sessionTitle={session.title}
+              campaignSlug={session.campaignSlug}
+              status={session.artifacts.transcript}
+              sessionStatus={session.status}
+              warnings={session.warnings}
+              searchParams={query}
+              emptyDescription={transcriptEmptyDescription}
+            />
           </div>
         </div>
       </div>

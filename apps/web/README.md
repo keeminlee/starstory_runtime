@@ -22,19 +22,54 @@ Capabilities:
 
 - Rename campaign display name from campaign sessions view.
 - Edit session label from campaign sessions list and session detail header.
+- Archive completed/interrupted sessions from campaign sessions list and session detail header.
+- End an in-progress session from campaign sessions list and session detail header using the same runtime closure path as `/starstory showtime end`.
+- Toggle archived-session visibility from campaign sessions view with immediate route-state refresh.
 
 Internal API routes:
 
 - `PATCH /api/campaigns/[campaignSlug]`
 - `PATCH /api/sessions/[sessionId]`
+- `POST /api/sessions/[sessionId]/archive`
+- `POST /api/sessions/[sessionId]/end`
 
 Doctrine and guardrails:
 
 - Campaign slug identity is immutable; rename updates display name only.
 - Campaign rename upsert is allowed only after proving campaign slug ownership within authorized guild scope.
 - Session label mutation writes canonical `sessions.label` only.
+- Session archive writes canonical `sessions.archived_at_ms` only; archived sessions stay readable by direct session URL.
+- Active sessions cannot be archived; web returns typed conflict `active_session_archive_blocked`.
+- Web end-session reuses canonical runtime authority by calling `endSession(guildId, "showtime_end")` after proving the requested session is still the active runtime session.
 - Shared display helpers (`lib/campaigns/display.ts`) define campaign/session fallback naming.
 - Client UI uses optimistic updates with rollback on failure, user-safe error messaging, and canonical `router.refresh()` refetch.
+
+## Session Archive Visibility
+
+Archived sessions are hidden from default dashboard and campaign session lists.
+
+Behavior:
+
+- default dashboard and campaign views exclude archived sessions
+- `show_archived=1` opts the dashboard/campaign views back into archived rows
+- direct session detail remains readable even when a session is archived
+- owned campaigns with only archived sessions are hidden from the default campaign list
+- owned campaigns with zero sessions remain visible
+
+## Button Template
+
+Use the shared button utility classes in `app/globals.css` for archive UI controls instead of hand-rolled border and hover styling.
+
+Preferred templates:
+
+- `control-button-ghost` for secondary actions like `Show archived`, `Hide archived`, `Open Compendium`, `Sign out`, and safe cancel-style controls
+- `button-primary` for primary submit or confirm actions
+- `control-button-danger` for destructive actions that should carry explicit danger treatment
+
+Doctrine:
+
+- keep cursor, hover border, active press, and focus ring behavior consistent by composing the shared utility class with sizing/shape classes like `rounded-full px-4 py-2 text-xs`
+- do not recreate ghost-button visuals with one-off `border border-border ... hover:*` strings unless the control intentionally diverges from the shared pattern
 
 ## Campaign Context Stabilization
 

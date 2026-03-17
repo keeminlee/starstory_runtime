@@ -45,6 +45,36 @@ import type { CommandCtx } from "./index.js";
 
 const meepoLog = log.withScope("meepo");
 
+function getShowtimeExitBlockMessage(): string {
+  return "A showtime session is active. Use /meepo showtime end to finish it.";
+}
+
+function endLegacyLabSession(args: {
+  guildId: string;
+  channelId: string;
+  authorId: string;
+  authorName: string;
+  reason: string;
+}): ReturnType<typeof getActiveSession> {
+  const activeSession = getActiveSession(args.guildId);
+  if (!activeSession || activeSession.mode_at_start !== "lab") {
+    return null;
+  }
+
+  endSession(args.guildId, args.reason);
+  logSystemEvent({
+    guildId: args.guildId,
+    channelId: args.channelId,
+    eventType: "SESSION_ENDED",
+    content: JSON.stringify({ id: activeSession.session_id }),
+    authorId: args.authorId,
+    authorName: args.authorName,
+    narrativeWeight: "secondary",
+  });
+
+  return activeSession;
+}
+
 function getSessionLabelMap(sessionIds: string[], db: any): Map<string, string | null> {
   const stmt = db.prepare("SELECT label FROM sessions WHERE session_id = ? LIMIT 1");
   const out = new Map<string, string | null>();
@@ -721,6 +751,12 @@ export const meepo = {
     }
 
     if (sub === "sleep") {
+      const activeSession = getActiveSession(guildId);
+      if (activeSession && activeSession.mode_at_start !== "lab") {
+        await interaction.reply({ content: getShowtimeExitBlockMessage(), ephemeral: true });
+        return;
+      }
+
       const active = getActiveMeepo(guildId);
       if (active) {
         // Log system event (narrative secondary - state change)
@@ -735,10 +771,22 @@ export const meepo = {
         });
       }
 
+      const endedLabSession = endLegacyLabSession({
+        guildId,
+        channelId: active?.channel_id ?? interaction.channelId,
+        authorId: interaction.user.id,
+        authorName: interaction.user.username,
+        reason: "sleep",
+      });
+
       const changes = sleepMeepo(guildId);
 
       await interaction.reply({
-        content: changes > 0 ? "Meepo goes dormant." : "Meepo is already asleep.",
+        content: endedLabSession
+          ? "Meepo goes dormant and closes the active lab session."
+          : changes > 0
+            ? "Meepo goes dormant."
+            : "Meepo is already asleep.",
         ephemeral: true,
       });
 
@@ -1017,12 +1065,65 @@ export const meepo = {
           connectedAt: Date.now(),
         });
 
-        // Start receiver for STT
-        startReceiver(guildId);
+        // Start receiver for STT and fail loudly if capture cannot be activated.
+        const receiverResult = startReceiver(guildId);
+        if (receiverResult && !receiverResult.ok) {
+          leaveVoice(guildId);
+          meepoLog.error("Legacy voice join failed to start receiver", {
+            event_type: "VOICE_RECEIVER_START",
+            guild_id: guildId,
+            channel_id: userVoiceChannel.id,
+            receiver_ok: false,
+            receiver_reason: receiverResult.reason,
+          });
+          await interaction.editReply({
+            content: `Meep meep... voice capture could not start (${receiverResult.reason}).`,
+          }).catch((editErr: any) => {
+            meepoLog.error("Legacy voice join failed to edit reply after receiver failure", {
+              guild_id: guildId,
+              error: String(editErr?.message ?? editErr ?? "unknown_error"),
+            });
+          });
+          return;
+        }
 
         // Set Meepo's overlay presence
         overlayEmitPresence("meepo", true);
-        console.log(`[Overlay] Set Meepo presence on manual join`);
+
+        const activeSession = getActiveSession(guildId);
+        const legacySession = activeSession ?? startSession(guildId, interaction.user.id, interaction.user.username, {
+          source: "live",
+          kind: sessionKindForMode("lab"),
+          modeAtStart: "lab",
+        });
+
+        if (!activeSession) {
+          logSystemEvent({
+            guildId,
+            channelId: active.channel_id,
+            eventType: "SESSION_STARTED",
+            content: JSON.stringify({
+              id: legacySession.session_id,
+              kind: legacySession.kind,
+              mode_at_start: legacySession.mode_at_start,
+              source: legacySession.source,
+              legacy_origin: "lab_legacy",
+            }),
+            authorId: interaction.user.id,
+            authorName: interaction.user.username,
+            narrativeWeight: "secondary",
+          });
+        }
+
+        meepoLog.info("Legacy manual voice join completed", {
+          event_type: "VOICE_JOIN",
+          guild_id: guildId,
+          channel_id: userVoiceChannel.id,
+          session_id: legacySession.session_id,
+          session_created: !activeSession,
+          receiver_ok: receiverResult?.ok ?? true,
+          receiver_reason: receiverResult?.reason ?? "mock_or_legacy_void_return",
+        });
 
         // Log system event (narrative secondary - state change)
         logSystemEvent({
@@ -1039,24 +1140,49 @@ export const meepo = {
         await interaction.editReply({
           content: `*poof!* Meepo is here! Listening in <#${userVoiceChannel.id}>! Meep meep! 🎧`,
         }).catch((editErr: any) => {
-          console.error("[Voice] Failed to edit reply after join:", editErr);
+          meepoLog.error("Legacy voice join failed to edit success reply", {
+            guild_id: guildId,
+            error: String(editErr?.message ?? editErr ?? "unknown_error"),
+          });
         });
       } catch (err: any) {
-        console.error("[Voice] Failed to join:", err);
+        meepoLog.error("Legacy voice join failed", {
+          event_type: "VOICE_JOIN",
+          guild_id: guildId,
+          channel_id: userVoiceChannel.id,
+          error: String(err?.message ?? err ?? "unknown_error"),
+        });
         
         // Ensure interaction is resolved even if join failed
         await interaction.editReply({
           content: `Meep meep... Meepo couldn't get there! (${err.message})`,
         }).catch((editErr: any) => {
-          console.error("[Voice] Failed to edit reply after error:", editErr);
+          meepoLog.error("Legacy voice join failed to edit error reply", {
+            guild_id: guildId,
+            error: String(editErr?.message ?? editErr ?? "unknown_error"),
+          });
         });
       }
       return;
     }
 
     if (sub === "leave") {
+      const activeSession = getActiveSession(guildId);
+      if (activeSession && activeSession.mode_at_start !== "lab") {
+        await interaction.reply({ content: getShowtimeExitBlockMessage(), ephemeral: true });
+        return;
+      }
+
       const currentState = getVoiceState(guildId);
-      if (!currentState) {
+      const endedLabSession = endLegacyLabSession({
+        guildId,
+        channelId: getActiveMeepo(guildId)?.channel_id ?? interaction.channelId,
+        authorId: interaction.user.id,
+        authorName: interaction.user.username,
+        reason: "leave",
+      });
+
+      if (!currentState && !endedLabSession) {
         await interaction.reply({
           content: "Meep? Meepo isn't in voice right now!",
           ephemeral: true,
@@ -1064,16 +1190,18 @@ export const meepo = {
         return;
       }
 
-      const channelId = currentState.channelId;
-      
-      // Stop receiver if active
-      stopReceiver(guildId);
-      
-      leaveVoice(guildId);
+      const channelId = currentState?.channelId ?? null;
+
+      if (currentState) {
+        // Stop receiver if active
+        stopReceiver(guildId);
+
+        leaveVoice(guildId);
+      }
 
       // Log system event (narrative secondary - state change)
       const active = getActiveMeepo(guildId);
-      if (active) {
+      if (active && currentState) {
         logSystemEvent({
           guildId,
           channelId: active.channel_id,
@@ -1086,7 +1214,11 @@ export const meepo = {
       }
 
       await interaction.reply({
-        content: `*poof!* Meepo leaves <#${channelId}>. Bye bye! Meep!`,
+        content: currentState
+          ? endedLabSession
+            ? `*poof!* Meepo leaves <#${channelId}> and closes the lab session. Bye bye! Meep!`
+            : `*poof!* Meepo leaves <#${channelId}>. Bye bye! Meep!`
+          : "Meepo isn't in voice right now, but the active lab session has been closed.",
         ephemeral: true,
       });
       return;

@@ -6,10 +6,12 @@ export type ArchiveSessionRow = {
   session_id: string;
   guild_id: string;
   status: "active" | "completed" | "interrupted";
+  mode_at_start: string | null;
   label: string | null;
   started_at_ms: number;
   started_by_id: string | null;
   source: string | null;
+  archived_at_ms: number | null;
 };
 
 export type GuildCampaignRecord = {
@@ -279,10 +281,28 @@ function getCampaignDbCandidates(args: { campaignSlug: string; guildId?: string 
   return out;
 }
 
+function sessionsTableHasModeAtStartColumn(db: Database.Database): boolean {
+  try {
+    const columns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name?: string }>;
+    return columns.some((column) => column.name === "mode_at_start");
+  } catch {
+    return false;
+  }
+}
+
 function sessionsTableHasGuildIdColumn(db: Database.Database): boolean {
   try {
     const columns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name?: string }>;
     return columns.some((column) => column.name === "guild_id");
+  } catch {
+    return false;
+  }
+}
+
+function sessionsTableHasArchivedAtColumn(db: Database.Database): boolean {
+  try {
+    const columns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name?: string }>;
+    return columns.some((column) => column.name === "archived_at_ms");
   } catch {
     return false;
   }
@@ -498,11 +518,6 @@ export function isCampaignSlugOwnedByGuild(args: {
   const normalizedRequested = args.campaignSlug.trim();
   if (!normalizedRequested) return false;
 
-  const configuredSlug = getGuildCampaignSlug(args.guildId);
-  if (configuredSlug === normalizedRequested) {
-    return true;
-  }
-
   return getGuildCampaignRecord({ guildId: args.guildId, campaignSlug: normalizedRequested }) !== null;
 }
 
@@ -611,6 +626,7 @@ export function listSessionsForGuildCampaign(args: {
   guildId: string;
   campaignSlug: string;
   limit: number;
+  includeArchived?: boolean;
 }): ArchiveSessionRow[] {
   const boundedLimit = Math.max(1, Math.min(100, Math.trunc(args.limit)));
   const guildId = args.guildId.trim();
@@ -620,14 +636,20 @@ export function listSessionsForGuildCampaign(args: {
 
   for (const candidate of dbCandidates) {
     const hasGuildColumn = sessionsTableHasGuildIdColumn(candidate.db);
+    const hasModeAtStartColumn = sessionsTableHasModeAtStartColumn(candidate.db);
+    const hasArchivedAtColumn = sessionsTableHasArchivedAtColumn(candidate.db);
+    const modeAtStartSelect = hasModeAtStartColumn ? "mode_at_start" : "NULL as mode_at_start";
+    const archivedAtSelect = hasArchivedAtColumn ? "archived_at_ms" : "NULL as archived_at_ms";
+    const archiveFilter = hasArchivedAtColumn && !args.includeArchived ? "AND archived_at_ms IS NULL" : "";
 
     try {
       if (hasGuildColumn) {
         const exactRows = candidate.db
           .prepare(
-            `SELECT session_id, guild_id, status, label, started_at_ms, started_by_id, source
+            `SELECT session_id, guild_id, status, ${modeAtStartSelect}, label, started_at_ms, started_by_id, source, ${archivedAtSelect}
              FROM sessions
              WHERE guild_id = ?
+             ${archiveFilter}
              ORDER BY started_at_ms DESC
              LIMIT ?`
           )
@@ -639,9 +661,10 @@ export function listSessionsForGuildCampaign(args: {
 
         const trimmedRows = candidate.db
           .prepare(
-            `SELECT session_id, guild_id, status, label, started_at_ms, started_by_id, source
+            `SELECT session_id, guild_id, status, ${modeAtStartSelect}, label, started_at_ms, started_by_id, source, ${archivedAtSelect}
              FROM sessions
              WHERE TRIM(guild_id) = ?
+             ${archiveFilter}
              ORDER BY started_at_ms DESC
              LIMIT ?`
           )
@@ -672,8 +695,9 @@ export function listSessionsForGuildCampaign(args: {
 
       const legacyRows = candidate.db
         .prepare(
-          `SELECT session_id, ? as guild_id, status, label, started_at_ms, started_by_id, source
+          `SELECT session_id, ? as guild_id, status, ${modeAtStartSelect}, label, started_at_ms, started_by_id, source, ${archivedAtSelect}
            FROM sessions
+           ${hasArchivedAtColumn && !args.includeArchived ? "WHERE archived_at_ms IS NULL" : ""}
            ORDER BY started_at_ms DESC
            LIMIT ?`
         )
@@ -720,12 +744,16 @@ export function findSessionByGuildAndId(args: {
 
   for (const candidate of dbCandidates) {
     const hasGuildColumn = sessionsTableHasGuildIdColumn(candidate.db);
+    const hasModeAtStartColumn = sessionsTableHasModeAtStartColumn(candidate.db);
+    const hasArchivedAtColumn = sessionsTableHasArchivedAtColumn(candidate.db);
+    const modeAtStartSelect = hasModeAtStartColumn ? "mode_at_start" : "NULL as mode_at_start";
+    const archivedAtSelect = hasArchivedAtColumn ? "archived_at_ms" : "NULL as archived_at_ms";
 
     try {
       if (hasGuildColumn) {
         const exactRow = candidate.db
           .prepare(
-            `SELECT session_id, guild_id, status, label, started_at_ms, started_by_id, source
+            `SELECT session_id, guild_id, status, ${modeAtStartSelect}, label, started_at_ms, started_by_id, source, ${archivedAtSelect}
              FROM sessions
              WHERE guild_id = ? AND session_id = ?
              LIMIT 1`
@@ -735,7 +763,7 @@ export function findSessionByGuildAndId(args: {
 
         const trimmedRow = candidate.db
           .prepare(
-            `SELECT session_id, guild_id, status, label, started_at_ms, started_by_id, source
+            `SELECT session_id, guild_id, status, ${modeAtStartSelect}, label, started_at_ms, started_by_id, source, ${archivedAtSelect}
              FROM sessions
              WHERE TRIM(guild_id) = ? AND session_id = ?
              LIMIT 1`
@@ -758,7 +786,7 @@ export function findSessionByGuildAndId(args: {
 
       const legacyRow = candidate.db
         .prepare(
-          `SELECT session_id, ? as guild_id, status, label, started_at_ms, started_by_id, source
+          `SELECT session_id, ? as guild_id, status, ${modeAtStartSelect}, label, started_at_ms, started_by_id, source, ${archivedAtSelect}
            FROM sessions
            WHERE session_id = ?
            LIMIT 1`
@@ -802,6 +830,31 @@ export function updateSessionLabel(args: {
          WHERE guild_id = ? AND session_id = ?`
       )
       .run(args.label, args.guildId, args.sessionId);
+    db.close();
+    return Number(result.changes ?? 0) > 0;
+  } catch {
+    return false;
+  }
+}
+
+export function archiveSession(args: {
+  guildId: string;
+  campaignSlug: string;
+  sessionId: string;
+  archivedAtMs: number;
+}): boolean {
+  const dbPath = resolveCampaignDbPath({ campaignSlug: args.campaignSlug, guildId: args.guildId });
+  if (!dbPath || !fs.existsSync(dbPath)) return false;
+
+  try {
+    const db = new Database(dbPath);
+    const result = db
+      .prepare(
+        `UPDATE sessions
+         SET archived_at_ms = COALESCE(archived_at_ms, ?)
+         WHERE guild_id = ? AND session_id = ?`
+      )
+      .run(args.archivedAtMs, args.guildId, args.sessionId);
     db.close();
     return Number(result.changes ?? 0) > 0;
   } catch {
@@ -1086,8 +1139,12 @@ export function readSessionRecapReadiness(args: {
     return "ready";
   }
 
-  if (args.sessionStatus === "completed" || args.sessionStatus === "active") {
+  if (args.sessionStatus === "active") {
     return "pending";
+  }
+
+  if (args.sessionStatus === "completed") {
+    return "ready";
   }
 
   return "failed";

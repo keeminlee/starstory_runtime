@@ -317,7 +317,7 @@ describe("/meepo lifecycle run 1", () => {
     await Promise.resolve();
 
     expect(ensureBronzeTranscriptExportCachedMock).toHaveBeenCalled();
-    expect(generateSessionRecapMock).toHaveBeenCalled();
+    expect(generateSessionRecapMock).not.toHaveBeenCalled();
 
     const mostRecent = getMostRecentSession("guild-1");
     expect(mostRecent?.status).toBe("completed");

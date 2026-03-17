@@ -213,6 +213,8 @@ function applyMigrations(db: Database.Database) {
     .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'entity_resolutions'")
     .get() as { sql?: string } | undefined;
   const hasEntityResolutionBatchId = entityResolutionColumns.some((col) => col.name === "batch_id");
+  const hasEntityResolutionActionType = entityResolutionColumns.some((col) => col.name === "action_type");
+  const hasEntityResolutionSummaryText = entityResolutionColumns.some((col) => col.name === "summary_text");
   const hasEntityResolutionUniqueConstraint =
     typeof entityResolutionTable?.sql === "string"
     && entityResolutionTable.sql.includes("UNIQUE(session_id, candidate_name)");
@@ -229,6 +231,8 @@ function applyMigrations(db: Database.Database) {
         campaign_slug TEXT NOT NULL,
         candidate_name TEXT NOT NULL,
         resolution TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        summary_text TEXT NOT NULL,
         entity_id TEXT,
         entity_category TEXT,
         batch_id TEXT,
@@ -243,6 +247,8 @@ function applyMigrations(db: Database.Database) {
         campaign_slug,
         candidate_name,
         resolution,
+        action_type,
+        summary_text,
         entity_id,
         entity_category,
         batch_id,
@@ -256,6 +262,16 @@ function applyMigrations(db: Database.Database) {
         campaign_slug,
         candidate_name,
         resolution,
+        CASE
+          WHEN resolution = 'created' THEN 'create_entity'
+          WHEN resolution = 'ignored' THEN 'ignore_candidate'
+          ELSE 'resolve_existing'
+        END,
+        CASE
+          WHEN resolution = 'created' THEN 'Created entity.'
+          WHEN resolution = 'ignored' THEN 'Ignored candidate.'
+          ELSE 'Linked to entity.'
+        END,
         entity_id,
         entity_category,
         NULL,
@@ -279,6 +295,35 @@ function applyMigrations(db: Database.Database) {
 
       CREATE INDEX IF NOT EXISTS idx_entity_resolutions_campaign
       ON entity_resolutions(guild_id, campaign_slug);
+    `);
+  }
+
+  if (!hasEntityResolutionActionType) {
+    console.log("Migrating: Adding entity_resolutions.action_type");
+    db.exec(`
+      ALTER TABLE entity_resolutions ADD COLUMN action_type TEXT NOT NULL DEFAULT 'resolve_existing';
+
+      UPDATE entity_resolutions
+      SET action_type = CASE
+        WHEN resolution = 'created' THEN 'create_entity'
+        WHEN resolution = 'ignored' THEN 'ignore_candidate'
+        ELSE 'resolve_existing'
+      END;
+    `);
+  }
+
+  if (!hasEntityResolutionSummaryText) {
+    console.log("Migrating: Adding entity_resolutions.summary_text");
+    db.exec(`
+      ALTER TABLE entity_resolutions ADD COLUMN summary_text TEXT NOT NULL DEFAULT '';
+
+      UPDATE entity_resolutions
+      SET summary_text = CASE
+        WHEN resolution = 'created' THEN 'Created entity.'
+        WHEN resolution = 'ignored' THEN 'Ignored candidate.'
+        ELSE 'Linked to entity.'
+      END
+      WHERE summary_text = '';
     `);
   }
 
@@ -547,6 +592,7 @@ function applyMigrations(db: Database.Database) {
           created_at_ms INTEGER NOT NULL,
           started_at_ms INTEGER NOT NULL,
           ended_at_ms INTEGER,
+          archived_at_ms INTEGER,
           ended_reason TEXT,
           started_by_id TEXT,
           started_by_name TEXT,
@@ -580,6 +626,7 @@ function applyMigrations(db: Database.Database) {
           started_at_ms,
           ended_at_ms,
           NULL,
+          NULL,
           started_by_id,
           started_by_name,
           source
@@ -602,6 +649,7 @@ function applyMigrations(db: Database.Database) {
           created_at_ms INTEGER NOT NULL,
           started_at_ms INTEGER NOT NULL,
           ended_at_ms INTEGER,
+          archived_at_ms INTEGER,
           ended_reason TEXT,
           started_by_id TEXT,
           started_by_name TEXT,
@@ -793,6 +841,16 @@ function applyMigrations(db: Database.Database) {
       SET mode_at_start = ?
       WHERE mode_at_start IS NULL
     `).run(cfg.mode);
+  }
+
+  const sessionColumnsWithArchiveMarker = db.pragma("table_info(sessions)") as any[];
+  const hasArchivedAtMs = sessionColumnsWithArchiveMarker.some((col: any) => col.name === "archived_at_ms");
+
+  if (!hasArchivedAtMs) {
+    console.log("Migrating: Adding archived_at_ms to sessions table");
+    db.exec(`
+      ALTER TABLE sessions ADD COLUMN archived_at_ms INTEGER;
+    `);
   }
 
   // Migration: Create session_artifacts table for recap/transcript metadata

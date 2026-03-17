@@ -11,6 +11,8 @@ const SESSIONS: SessionDetail[] = [
     date: "2026-01-14",
     status: "completed",
     source: "live",
+    sessionOrigin: "showtime",
+    isArchived: false,
     transcript: [
       {
         id: "t1",
@@ -53,6 +55,7 @@ const SESSIONS: SessionDetail[] = [
       modelVersion: "megameecap-final-v1",
     },
     recapReadiness: "ready",
+    recapPhase: "complete",
     speakerAttribution: null,
     artifacts: {
       transcript: "available",
@@ -70,6 +73,8 @@ const SESSIONS: SessionDetail[] = [
     date: "2026-01-21",
     status: "completed",
     source: "live",
+    sessionOrigin: "showtime",
+    isArchived: false,
     transcript: [
       {
         id: "t6",
@@ -100,6 +105,7 @@ const SESSIONS: SessionDetail[] = [
       modelVersion: "megameecap-final-v1",
     },
     recapReadiness: "ready",
+    recapPhase: "complete",
     speakerAttribution: null,
     artifacts: {
       transcript: "available",
@@ -126,6 +132,8 @@ const CAMPAIGNS: CampaignSummary[] = [
       date: session.date,
       status: session.status,
       source: session.source,
+      sessionOrigin: session.sessionOrigin,
+      isArchived: session.isArchived,
       artifacts: {
         transcript: session.artifacts.transcript,
         recap: session.artifacts.recap,
@@ -140,6 +148,7 @@ export const MOCK_DASHBOARD: DashboardModel = {
   campaignCount: CAMPAIGNS.length,
   wordsRecorded: 45281,
   campaigns: CAMPAIGNS,
+  emptyGuilds: [],
 };
 
 export function getMockCampaigns(): CampaignSummary[] {
