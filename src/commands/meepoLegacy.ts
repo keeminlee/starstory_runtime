@@ -1017,12 +1017,65 @@ export const meepo = {
           connectedAt: Date.now(),
         });
 
-        // Start receiver for STT
-        startReceiver(guildId);
+        // Start receiver for STT and fail loudly if capture cannot be activated.
+        const receiverResult = startReceiver(guildId);
+        if (receiverResult && !receiverResult.ok) {
+          leaveVoice(guildId);
+          meepoLog.error("Legacy voice join failed to start receiver", {
+            event_type: "VOICE_RECEIVER_START",
+            guild_id: guildId,
+            channel_id: userVoiceChannel.id,
+            receiver_ok: false,
+            receiver_reason: receiverResult.reason,
+          });
+          await interaction.editReply({
+            content: `Meep meep... voice capture could not start (${receiverResult.reason}).`,
+          }).catch((editErr: any) => {
+            meepoLog.error("Legacy voice join failed to edit reply after receiver failure", {
+              guild_id: guildId,
+              error: String(editErr?.message ?? editErr ?? "unknown_error"),
+            });
+          });
+          return;
+        }
 
         // Set Meepo's overlay presence
         overlayEmitPresence("meepo", true);
-        console.log(`[Overlay] Set Meepo presence on manual join`);
+
+        const activeSession = getActiveSession(guildId);
+        const legacySession = activeSession ?? startSession(guildId, interaction.user.id, interaction.user.username, {
+          source: "live",
+          kind: sessionKindForMode("lab"),
+          modeAtStart: "lab",
+        });
+
+        if (!activeSession) {
+          logSystemEvent({
+            guildId,
+            channelId: active.channel_id,
+            eventType: "SESSION_STARTED",
+            content: JSON.stringify({
+              id: legacySession.session_id,
+              kind: legacySession.kind,
+              mode_at_start: legacySession.mode_at_start,
+              source: legacySession.source,
+              legacy_origin: "lab_legacy",
+            }),
+            authorId: interaction.user.id,
+            authorName: interaction.user.username,
+            narrativeWeight: "secondary",
+          });
+        }
+
+        meepoLog.info("Legacy manual voice join completed", {
+          event_type: "VOICE_JOIN",
+          guild_id: guildId,
+          channel_id: userVoiceChannel.id,
+          session_id: legacySession.session_id,
+          session_created: !activeSession,
+          receiver_ok: receiverResult?.ok ?? true,
+          receiver_reason: receiverResult?.reason ?? "mock_or_legacy_void_return",
+        });
 
         // Log system event (narrative secondary - state change)
         logSystemEvent({
@@ -1039,16 +1092,27 @@ export const meepo = {
         await interaction.editReply({
           content: `*poof!* Meepo is here! Listening in <#${userVoiceChannel.id}>! Meep meep! 🎧`,
         }).catch((editErr: any) => {
-          console.error("[Voice] Failed to edit reply after join:", editErr);
+          meepoLog.error("Legacy voice join failed to edit success reply", {
+            guild_id: guildId,
+            error: String(editErr?.message ?? editErr ?? "unknown_error"),
+          });
         });
       } catch (err: any) {
-        console.error("[Voice] Failed to join:", err);
+        meepoLog.error("Legacy voice join failed", {
+          event_type: "VOICE_JOIN",
+          guild_id: guildId,
+          channel_id: userVoiceChannel.id,
+          error: String(err?.message ?? err ?? "unknown_error"),
+        });
         
         // Ensure interaction is resolved even if join failed
         await interaction.editReply({
           content: `Meep meep... Meepo couldn't get there! (${err.message})`,
         }).catch((editErr: any) => {
-          console.error("[Voice] Failed to edit reply after error:", editErr);
+          meepoLog.error("Legacy voice join failed to edit error reply", {
+            guild_id: guildId,
+            error: String(editErr?.message ?? editErr ?? "unknown_error"),
+          });
         });
       }
       return;

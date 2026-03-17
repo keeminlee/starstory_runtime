@@ -140,6 +140,8 @@ type SessionRow = {
   mode_at_start: "canon" | "ambient" | "lab" | "dormant";
   started_at_ms: number;
   ended_at_ms: number | null;
+  status?: "active" | "completed" | "interrupted";
+  source?: string | null;
 };
 
 type SessionArtifactRow = {
@@ -1700,7 +1702,18 @@ async function ensureVoiceConnection(interaction: any, guildId: string): Promise
   const currentVoiceState = getVoiceState(guildId);
 
   if (currentVoiceState) {
-    startReceiver(guildId);
+    const receiverResult = startReceiver(guildId);
+    meepoCommandLog.info("Showtime voice connection reused", {
+      event_type: "SHOWTIME_VOICE_SETUP",
+      guild_id: guildId,
+      channel_id: currentVoiceState.channelId,
+      reused_connection: true,
+      receiver_ok: receiverResult?.ok ?? true,
+      receiver_reason: receiverResult?.reason ?? "mock_or_legacy_void_return",
+    });
+    if (receiverResult && !receiverResult.ok) {
+      throw new Error(`Receiver startup failed (${receiverResult.reason})`);
+    }
     setVoiceHushEnabled(guildId, true);
     return {
       joinedVoiceChannelId: null,
@@ -1720,6 +1733,13 @@ async function ensureVoiceConnection(interaction: any, guildId: string): Promise
     };
   }
 
+  meepoCommandLog.info("Showtime voice join requested", {
+    event_type: "SHOWTIME_VOICE_SETUP",
+    guild_id: guildId,
+    channel_id: invokerVoiceChannelId,
+    reused_connection: false,
+  });
+
   const connection = await joinVoice({
     guildId,
     channelId: invokerVoiceChannelId,
@@ -1735,7 +1755,20 @@ async function ensureVoiceConnection(interaction: any, guildId: string): Promise
     connectedAt: Date.now(),
   });
 
-  startReceiver(guildId);
+  const receiverResult = startReceiver(guildId);
+  if (receiverResult && !receiverResult.ok) {
+    leaveVoice(guildId);
+    throw new Error(`Receiver startup failed (${receiverResult.reason})`);
+  }
+
+  meepoCommandLog.info("Showtime voice capture ready", {
+    event_type: "SHOWTIME_VOICE_SETUP",
+    guild_id: guildId,
+    channel_id: invokerVoiceChannelId,
+    reused_connection: false,
+    receiver_ok: receiverResult?.ok ?? true,
+    receiver_reason: receiverResult?.reason ?? "mock_or_legacy_void_return",
+  });
 
   return {
     joinedVoiceChannelId: invokerVoiceChannelId,
@@ -2020,193 +2053,12 @@ function kickoffShowtimeArtifactsAsync(args: {
 
       const strategy = getGuildDefaultRecapStyle(args.guildId) ?? DEFAULT_RECAP_STRATEGY;
 
-      emitSessionRecapReadiness({
-        guildId: args.guildId,
-        channelId: args.channelId,
-        campaignSlug: args.campaignSlug,
-        sessionId: args.sessionId,
-        traceId: args.ctx.trace_id,
-        readiness: "pending",
-        strategy,
-        attempt: 0,
-        maxAttempts: RECAP_POSTSESSION_MAX_ATTEMPTS,
-        reason: "showtime_async_kickoff_started",
-      });
-
-      let recapResult: SessionRecapContract | null = null;
-      let successfulAttempt = 0;
-
-      for (let attempt = 1; attempt <= RECAP_POSTSESSION_MAX_ATTEMPTS; attempt += 1) {
-        logSystemEvent({
-          guildId: args.guildId,
-          channelId: args.channelId,
-          eventType: "RECAP_GENERATE",
-          content: JSON.stringify(
-            buildCanonicalShowtimeEventPayload({
-              eventType: "RECAP_GENERATE",
-              guildId: args.guildId,
-              campaignSlug: args.campaignSlug,
-              sessionId: args.sessionId,
-              traceId: args.ctx.trace_id,
-              outcome: "start",
-              extra: {
-                strategy,
-                attempt,
-                max_attempts: RECAP_POSTSESSION_MAX_ATTEMPTS,
-              },
-            })
-          ),
-          authorId: "system",
-          authorName: "SYSTEM",
-          narrativeWeight: "secondary",
-        });
-
-        try {
-          recapResult = await generateSessionRecapContract({
-            guildId: args.guildId,
-            sessionId: args.sessionId,
-            campaignSlug: args.campaignSlug,
-          });
-          successfulAttempt = attempt;
-          break;
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          logSystemEvent({
-            guildId: args.guildId,
-            channelId: args.channelId,
-            eventType: "RECAP_GENERATE",
-            content: JSON.stringify(
-              buildCanonicalShowtimeEventPayload({
-                eventType: "RECAP_GENERATE",
-                guildId: args.guildId,
-                campaignSlug: args.campaignSlug,
-                sessionId: args.sessionId,
-                traceId: args.ctx.trace_id,
-                outcome: "failure",
-                error: errorMessage,
-                extra: {
-                  strategy,
-                  attempt,
-                  max_attempts: RECAP_POSTSESSION_MAX_ATTEMPTS,
-                },
-              })
-            ),
-            authorId: "system",
-            authorName: "SYSTEM",
-            narrativeWeight: "secondary",
-          });
-
-          const exhausted = attempt >= RECAP_POSTSESSION_MAX_ATTEMPTS;
-          if (exhausted) {
-            emitSessionRecapReadiness({
-              guildId: args.guildId,
-              channelId: args.channelId,
-              campaignSlug: args.campaignSlug,
-              sessionId: args.sessionId,
-              traceId: args.ctx.trace_id,
-              readiness: "failed",
-              strategy,
-              attempt,
-              maxAttempts: RECAP_POSTSESSION_MAX_ATTEMPTS,
-              reason: "postsession_retries_exhausted",
-              error: errorMessage,
-            });
-            throw error;
-          }
-
-          emitSessionRecapReadiness({
-            guildId: args.guildId,
-            channelId: args.channelId,
-            campaignSlug: args.campaignSlug,
-            sessionId: args.sessionId,
-            traceId: args.ctx.trace_id,
-            readiness: "pending",
-            strategy,
-            attempt,
-            maxAttempts: RECAP_POSTSESSION_MAX_ATTEMPTS,
-            reason: "retry_scheduled",
-            error: errorMessage,
-            retryDelayMs: RECAP_POSTSESSION_RETRY_DELAY_MS,
-          });
-
-          await delayMs(RECAP_POSTSESSION_RETRY_DELAY_MS);
-        }
-      }
-
-      if (!recapResult) {
-        throw new Error("Recap generation exhausted retries without result.");
-      }
-
-      const recapMeta = parseRecapMetaJson(recapResult.meta_json);
-      const recapStyleMeta = getRecapStyleMeta(recapMeta, strategy);
-      const recapCacheHit = recapStyleMeta.cacheHit === true;
-
-      logSystemEvent({
-        guildId: args.guildId,
-        channelId: args.channelId,
-        eventType: "SESSION_RECAP_GENERATED",
-        content: JSON.stringify(
-          buildCanonicalShowtimeEventPayload({
-            eventType: "SESSION_RECAP_GENERATED",
-            guildId: args.guildId,
-            campaignSlug: args.campaignSlug,
-            sessionId: args.sessionId,
-            traceId: args.ctx.trace_id,
-            extra: {
-              strategy,
-              cache_hit: recapCacheHit,
-              attempt: successfulAttempt,
-              max_attempts: RECAP_POSTSESSION_MAX_ATTEMPTS,
-            },
-          })
-        ),
-        authorId: "system",
-        authorName: "SYSTEM",
-        narrativeWeight: "secondary",
-      });
-
-      logSystemEvent({
-        guildId: args.guildId,
-        channelId: args.channelId,
-        eventType: "RECAP_GENERATE",
-        content: JSON.stringify(
-          buildCanonicalShowtimeEventPayload({
-            eventType: "RECAP_GENERATE",
-            guildId: args.guildId,
-            campaignSlug: args.campaignSlug,
-            sessionId: args.sessionId,
-            traceId: args.ctx.trace_id,
-            outcome: "success",
-            extra: {
-              strategy,
-              attempt: successfulAttempt,
-              max_attempts: RECAP_POSTSESSION_MAX_ATTEMPTS,
-            },
-          })
-        ),
-        authorId: "system",
-        authorName: "SYSTEM",
-        narrativeWeight: "secondary",
-      });
-
-      emitSessionRecapReadiness({
-        guildId: args.guildId,
-        channelId: args.channelId,
-        campaignSlug: args.campaignSlug,
-        sessionId: args.sessionId,
-        traceId: args.ctx.trace_id,
-        readiness: "ready",
-        strategy,
-        attempt: successfulAttempt,
-        maxAttempts: RECAP_POSTSESSION_MAX_ATTEMPTS,
-        reason: "canonical_recap_generated",
-      });
-
       meepoCommandLog.info("Showtime artifact kickoff succeeded", {
         event_type: "SHOWTIME_ARTIFACT_KICKOFF",
         stage: "success",
         session_id: args.sessionId,
         strategy,
+        recap_generation_mode: "manual_only",
       }, {
         guild_id: args.guildId,
         campaign_slug: args.campaignSlug,
@@ -2229,6 +2081,7 @@ function kickoffShowtimeArtifactsAsync(args: {
             extra: {
               stage: "success",
               strategy,
+              recap_generation_mode: "manual_only",
             },
           })
         ),
@@ -2328,6 +2181,14 @@ async function handleAwaken(interaction: any, ctx: CommandCtx): Promise<void> {
 
 async function handleShowtimeStart(interaction: any, ctx: CommandCtx): Promise<void> {
   const guildId = interaction.guildId as string;
+  meepoCommandLog.info("Showtime start requested", {
+    event_type: "SHOWTIME_START_REQUESTED",
+    guild_id: guildId,
+    campaign_slug: ctx.campaignSlug,
+    interaction_id: ctx.interaction_id,
+    trace_id: ctx.trace_id,
+    user_id: interaction.user.id,
+  });
 
   const activeSession = getGuildActiveSession(guildId) as SessionRow | null;
   if (activeSession) {
@@ -2395,7 +2256,25 @@ async function handleShowtimeStart(interaction: any, ctx: CommandCtx): Promise<v
   // Showtime sessions always bind to an explicit showtime campaign scope.
   setGuildCampaignSlug(guildId, selectedCampaignSlug);
 
-  const voiceConnection = await ensureVoiceConnection(interaction, guildId);
+  let voiceConnection;
+  try {
+    voiceConnection = await ensureVoiceConnection(interaction, guildId);
+  } catch (error) {
+    meepoCommandLog.error("Showtime start voice setup failed", {
+      event_type: "SHOWTIME_START_FAILED",
+      guild_id: guildId,
+      campaign_slug: selectedCampaignSlug,
+      interaction_id: ctx.interaction_id,
+      trace_id: ctx.trace_id,
+      error: String((error as any)?.message ?? error ?? "unknown_error"),
+    });
+    await interaction.reply({
+      content: `Unable to start showtime voice capture: ${String((error as any)?.message ?? error ?? "unknown error")}.`,
+      ephemeral: true,
+    });
+    return;
+  }
+
   if (!voiceConnection.joinedVoiceChannelId && !getVoiceState(guildId)) {
     await interaction.reply({
       content: "Join a voice channel first, then run `/starstory showtime start` again. Closed Alpha showtime is listen-only.",
@@ -2409,6 +2288,19 @@ async function handleShowtimeStart(interaction: any, ctx: CommandCtx): Promise<v
     modeAtStart: "canon",
     kind: "canon",
   }) as SessionRow;
+
+  meepoCommandLog.info("Showtime session created", {
+    event_type: "SHOWTIME_SESSION_CREATED",
+    guild_id: guildId,
+    campaign_slug: selectedCampaignSlug,
+    session_id: startedSession.session_id,
+    status: startedSession.status,
+    source: startedSession.source,
+    kind: startedSession.kind,
+    mode_at_start: startedSession.mode_at_start,
+    interaction_id: ctx.interaction_id,
+    trace_id: ctx.trace_id,
+  });
 
   logSystemEvent({
     guildId,
@@ -2468,6 +2360,16 @@ async function handleShowtimeStart(interaction: any, ctx: CommandCtx): Promise<v
       ? `🎭 Showtime begins.\n\nCreated campaign **${selectedCampaignName}** (\`${selectedCampaignSlug}\`) and started session recording.\nMeepo is now listening in ${formatChannel(voiceConnection.joinedVoiceChannelId ?? getVoiceState(guildId)?.channelId ?? null)} (listen-only).`
       : `🎭 Showtime begins.\n\nUsing campaign **${selectedCampaignName}** (\`${selectedCampaignSlug}\`) and started session recording.\nMeepo is now listening in ${formatChannel(voiceConnection.joinedVoiceChannelId ?? getVoiceState(guildId)?.channelId ?? null)} (listen-only).`,
     ephemeral: true,
+  });
+
+  meepoCommandLog.info("Showtime start completed", {
+    event_type: "SHOWTIME_START_COMPLETED",
+    guild_id: guildId,
+    campaign_slug: selectedCampaignSlug,
+    session_id: startedSession.session_id,
+    joined_voice_channel_id: voiceConnection.joinedVoiceChannelId ?? getVoiceState(guildId)?.channelId ?? null,
+    interaction_id: ctx.interaction_id,
+    trace_id: ctx.trace_id,
   });
 }
 

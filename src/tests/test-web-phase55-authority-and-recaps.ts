@@ -117,6 +117,51 @@ async function setupGuildCampaignAndSession(args: {
   };
 }
 
+async function setupGuildCampaignWithActiveSession(args: {
+  guildId: string;
+  dmUserId: string;
+  playerUserId: string;
+}): Promise<{ campaignSlug: string; sessionId: string }> {
+  await setAuth({ userId: args.playerUserId, guilds: [{ id: args.guildId, name: "Guild One" }] });
+
+  const { getDbForCampaign } = await import("../db.js");
+  const {
+    ensureGuildConfig,
+    setGuildCampaignSlug,
+    setGuildMetaCampaignSlug,
+    setGuildDmUserId,
+  } = await import("../campaign/guildConfig.js");
+  const { createShowtimeCampaign } = await import("../campaign/showtimeCampaigns.js");
+  const { startSession, getMostRecentSession } = await import("../sessions/sessions.js");
+
+  const db = getDbForCampaign("default");
+  const cfg = ensureGuildConfig(args.guildId, "Guild One");
+  setGuildMetaCampaignSlug(args.guildId, cfg.campaign_slug);
+  setGuildDmUserId(args.guildId, args.dmUserId);
+
+  const campaign = createShowtimeCampaign({
+    guildId: args.guildId,
+    campaignName: "Campaign Alpha",
+    createdByUserId: args.dmUserId,
+    dmUserId: args.dmUserId,
+  });
+  setGuildCampaignSlug(args.guildId, campaign.campaign_slug);
+
+  startSession(args.guildId, args.dmUserId, "DM", {
+    source: "live",
+    kind: "canon",
+    modeAtStart: "canon",
+  });
+
+  const session = getMostRecentSession(args.guildId);
+  expect(session?.session_id).toBeTruthy();
+
+  return {
+    campaignSlug: campaign.campaign_slug,
+    sessionId: session!.session_id,
+  };
+}
+
 async function seedSessionTranscript(args: {
   guildId: string;
   campaignSlug: string;
@@ -324,6 +369,7 @@ describe("Phase 5.5 recap source visibility", () => {
     expect(detail.speakerAttribution?.required).toBe(true);
     expect(detail.speakerAttribution?.ready).toBe(false);
     expect(detail.speakerAttribution?.pendingCount).toBe(1);
+    expect(detail.recapPhase).toBe("ended_pending_attribution");
     expect(detail.speakerAttribution?.speakers).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -411,6 +457,8 @@ describe("Phase 5.5 recap source visibility", () => {
     const { getWebSessionDetail } = await getSessionReaders();
     const detail = await getWebSessionDetail({ sessionId, searchParams: { campaign_slug: campaignSlug } });
     expect(detail.speakerAttribution?.ready).toBe(true);
+    expect(detail.recapPhase).toBe("ended_ready");
+    expect(detail.recapReadiness).toBe("ready");
     expect(detail.speakerAttribution?.availablePcs).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ canonicalName: "Jamison" }),
@@ -448,6 +496,7 @@ describe("Phase 5.5 recap source visibility", () => {
     expect(detail.recap?.source).toBe("canonical");
     expect(detail.recap?.balanced).toContain("Canonical balanced");
     expect(detail.recapReadiness).toBe("ready");
+    expect(detail.recapPhase).toBe("complete");
   });
 
   test("session detail exposes failed recap readiness from lifecycle status events", async () => {
@@ -492,6 +541,36 @@ describe("Phase 5.5 recap source visibility", () => {
   const detail = await getWebSessionDetail({ sessionId });
     expect(detail.recap).toBeNull();
     expect(detail.recapReadiness).toBe("failed");
+    expect(detail.recapPhase).toBe("failed");
+  });
+
+  test("active session detail reports live recap phase and blocks recap regeneration", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-phase55-recap-live-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const guildId = "guild-1";
+    const dmUserId = "dm-1";
+    const playerUserId = "player-1";
+    const { campaignSlug, sessionId } = await setupGuildCampaignWithActiveSession({ guildId, dmUserId, playerUserId });
+
+    await setAuth({ userId: dmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+    const { getWebSessionDetail, regenerateWebSessionRecap } = await getSessionReaders();
+    const detail = await getWebSessionDetail({ sessionId, searchParams: { campaign_slug: campaignSlug } });
+
+    expect(detail.status).toBe("in_progress");
+    expect(detail.recapPhase).toBe("live");
+
+    await expect(
+      regenerateWebSessionRecap({
+        sessionId,
+        reason: "manual-web-regenerate",
+        searchParams: { campaign_slug: campaignSlug },
+      } as any)
+    ).rejects.toMatchObject({
+      code: "conflict",
+      status: 409,
+    });
   });
 
   test("session detail exposes legacy artifact recap source when canonical row is absent", async () => {

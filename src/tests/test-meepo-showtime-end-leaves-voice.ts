@@ -32,6 +32,7 @@ const generateSessionRecapMock = vi.fn(async () => ({
 const voiceSpeakMock = vi.fn();
 const joinVoiceMock = vi.fn();
 const leaveVoiceMock = vi.fn();
+const startReceiverMock = vi.fn();
 const stopReceiverMock = vi.fn();
 
 let voiceConnected = false;
@@ -60,7 +61,7 @@ vi.mock("../voice/connection.js", () => ({
 }));
 
 vi.mock("../voice/receiver.js", () => ({
-  startReceiver: vi.fn(),
+  startReceiver: startReceiverMock,
   stopReceiver: stopReceiverMock,
 }));
 
@@ -133,6 +134,7 @@ afterEach(() => {
   voiceConnected = false;
   leaveVoiceMock.mockReset();
   joinVoiceMock.mockReset();
+  startReceiverMock.mockReset();
   voiceSpeakMock.mockReset();
   stopReceiverMock.mockReset();
   ensureBronzeTranscriptExportCachedMock.mockReset();
@@ -180,6 +182,45 @@ describe("showtime lifecycle hardening", () => {
     expect(voiceSpeakMock).not.toHaveBeenCalled();
     const content = String(startInteraction.reply.mock.calls[0]?.[0]?.content ?? "");
     expect(content).toContain("listen-only");
+
+    db.close();
+  });
+
+  test("/meepo showtime start surfaces receiver startup failure without creating a session", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-showtime-start-receiver-fail-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    startReceiverMock.mockReturnValueOnce({
+      ok: false,
+      reason: "listener_registration_failed",
+      channelId: "voice-1",
+    });
+
+    const { meepo } = await import("../commands/meepo.js");
+    const { getDbForCampaign } = await import("../db.js");
+    const { getActiveSession } = await import("../sessions/sessions.js");
+    const db = getDbForCampaign("default");
+
+    const execCtx = {
+      guildId: "guild-1",
+      campaignSlug: "default",
+      dbPath: "test.sqlite",
+      db,
+      trace_id: "trace-showtime-start-receiver-fail",
+      interaction_id: "interaction-showtime-start-receiver-fail",
+    } as any;
+
+    await meepo.execute(buildInteraction({ subcommand: "awaken" }), execCtx);
+    const startInteraction = buildInteraction({ subcommand: "start", subcommandGroup: "showtime", voiceChannelId: "voice-1" });
+    await meepo.execute(startInteraction, execCtx);
+
+    expect(joinVoiceMock).toHaveBeenCalledTimes(1);
+    expect(leaveVoiceMock).toHaveBeenCalledWith("guild-1");
+    expect(getActiveSession("guild-1")).toBeNull();
+    const content = String(startInteraction.reply.mock.calls[0]?.[0]?.content ?? "");
+    expect(content).toContain("Unable to start showtime voice capture");
+    expect(content).toContain("listener_registration_failed");
 
     db.close();
   });
@@ -364,24 +405,13 @@ describe("showtime lifecycle hardening", () => {
     const recapGenerateRows = rows
       .filter((item) => item.tags === "system,RECAP_GENERATE")
       .map((item) => JSON.parse(item.content) as Record<string, unknown>);
-    expect(recapGenerateRows.length).toBeGreaterThanOrEqual(2);
-    expect(recapGenerateRows.some((payload) => payload.outcome === "start")).toBe(true);
-    expect(recapGenerateRows.some((payload) => payload.outcome === "success")).toBe(true);
-    for (const payload of recapGenerateRows) {
-      assertCanonical(payload, "RECAP_GENERATE");
-      expect(typeof payload.strategy).toBe("string");
-    }
+    expect(recapGenerateRows).toEqual([]);
 
     const recapStatusRows = rows
       .filter((item) => item.tags === "system,SESSION_RECAP_STATUS")
       .map((item) => JSON.parse(item.content) as Record<string, unknown>);
-    expect(recapStatusRows.some((payload) => payload.readiness === "pending")).toBe(true);
-    expect(recapStatusRows.some((payload) => payload.readiness === "ready")).toBe(true);
-
-    const recapGenerated = payloadFor("SESSION_RECAP_GENERATED");
-    assertCanonical(recapGenerated, "SESSION_RECAP_GENERATED");
-    expect(typeof recapGenerated.strategy).toBe("string");
-    expect(typeof recapGenerated.cache_hit).toBe("boolean");
+    expect(recapStatusRows).toEqual([]);
+    expect(rows.some((item) => item.tags === "system,SESSION_RECAP_GENERATED")).toBe(false);
 
     const showtimeEnd = payloadFor("SHOWTIME_END");
     assertCanonical(showtimeEnd, "SHOWTIME_END");
@@ -397,13 +427,16 @@ describe("showtime lifecycle hardening", () => {
     expect(kickoffRows.some((payload) => payload.stage === "success")).toBe(true);
     for (const payload of kickoffRows) {
       assertCanonical(payload, "SHOWTIME_ARTIFACT_KICKOFF");
+      if (payload.stage === "success") {
+        expect(payload.recap_generation_mode).toBe("manual_only");
+      }
     }
 
     eventDb.close();
     db.close();
   });
 
-  test("emits coherent failure-path events when recap generation fails", async () => {
+  test("does not emit recap side effects during manual-only artifact kickoff", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-showtime-events-failure-"));
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
@@ -446,28 +479,23 @@ describe("showtime lifecycle hardening", () => {
     const recapGenerateRows = rows
       .filter((item) => item.tags === "system,RECAP_GENERATE")
       .map((item) => JSON.parse(item.content) as Record<string, unknown>);
-    expect(recapGenerateRows.some((payload) => payload.outcome === "start")).toBe(true);
-    const recapFailures = recapGenerateRows.filter((payload) => payload.outcome === "failure");
-    expect(recapFailures.length).toBeGreaterThanOrEqual(1);
-    const recapFailure = recapFailures.at(-1);
-    expect(recapFailure).toBeTruthy();
-    expect(String(recapFailure?.error ?? "")).toContain("recap failure");
+    expect(recapGenerateRows).toEqual([]);
 
     const recapStatusRows = rows
       .filter((item) => item.tags === "system,SESSION_RECAP_STATUS")
       .map((item) => JSON.parse(item.content) as Record<string, unknown>);
-    expect(recapStatusRows.some((payload) => payload.readiness === "pending")).toBe(true);
-    expect(recapStatusRows.some((payload) => payload.readiness === "failed")).toBe(true);
+    expect(recapStatusRows).toEqual([]);
+    expect(rows.some((item) => item.tags === "system,SESSION_RECAP_GENERATED")).toBe(false);
 
-    const kickoffError = JSON.parse(
+    const kickoffSuccess = JSON.parse(
       String(
         rows
           .filter((item) => item.tags === "system,SHOWTIME_ARTIFACT_KICKOFF")
-          .find((item) => JSON.parse(item.content).stage === "error")?.content ?? "{}"
+          .find((item) => JSON.parse(item.content).stage === "success")?.content ?? "{}"
       )
     ) as Record<string, unknown>;
-    expect(kickoffError.outcome).toBe("failure");
-    expect(String(kickoffError.error ?? "")).toContain("recap failure");
+    expect(kickoffSuccess.outcome).toBe("success");
+    expect(kickoffSuccess.recap_generation_mode).toBe("manual_only");
 
     eventDb.close();
     db.close();

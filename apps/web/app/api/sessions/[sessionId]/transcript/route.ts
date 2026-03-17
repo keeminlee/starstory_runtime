@@ -16,6 +16,7 @@ export async function GET(request: NextRequest, context: RouteContext): Promise<
       {
         sessionId: session.id,
         campaignSlug: session.campaignSlug,
+        sessionStatus: session.status,
         status: session.artifacts.transcript,
         warnings: session.warnings,
         lineCount: session.transcript.length,

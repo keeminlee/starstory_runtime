@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { getWebDashboardModel } from "../../apps/web/lib/server/campaignReaders";
+import { getWebCampaignDetail, getWebDashboardModel } from "../../apps/web/lib/server/campaignReaders";
 import { resolveWebAuthContext } from "../../apps/web/lib/server/authContext";
 
 process.env.DISCORD_TOKEN ??= "test-token";
@@ -164,7 +164,7 @@ describe("web dashboard Phase B state engine", () => {
     const { getDbForCampaign } = await import("../db.js");
     const { ensureGuildConfig, setGuildAwakened, setGuildMetaCampaignSlug, setGuildCampaignSlug } = await import("../campaign/guildConfig.js");
     const { createShowtimeCampaign } = await import("../campaign/showtimeCampaigns.js");
-    const { startSession, endSession } = await import("../sessions/sessions.js");
+    const { startSession, endSession, interruptSessionById } = await import("../sessions/sessions.js");
     const db = getDbForCampaign("default");
 
     const cfg = ensureGuildConfig("guild-1", "Guild One");
@@ -182,7 +182,11 @@ describe("web dashboard Phase B state engine", () => {
     startSession("guild-1", "dm-user", "DM", { source: "live", kind: "canon", modeAtStart: "canon" });
     endSession("guild-1", "showtime_end");
 
-    // Session 2: active.
+    // Session 2: interrupted.
+    const interrupted = startSession("guild-1", "dm-user", "DM", { source: "live", kind: "canon", modeAtStart: "canon" });
+    interruptSessionById("guild-1", interrupted.session_id, "boot_recovery_interrupted");
+
+    // Session 3: active.
     startSession("guild-1", "dm-user", "DM", { source: "live", kind: "canon", modeAtStart: "canon" });
 
     const model = await getWebDashboardModel();
@@ -192,6 +196,44 @@ describe("web dashboard Phase B state engine", () => {
     const statuses = model.campaigns.flatMap((campaign: any) => campaign.sessions.map((session: any) => session.status));
     expect(statuses).toContain("in_progress");
     expect(statuses).toContain("completed");
+    expect(statuses).toContain("interrupted");
+
+    db.close();
+  });
+
+  test("surfaces legacy lab sessions even without a showtime campaign record", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-web-phaseb-legacy-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    await setAuthGuildsDetailed([{ id: "guild-1", name: "Guild One" }], "dm-user");
+
+    const { getDbForCampaign } = await import("../db.js");
+    const { ensureGuildConfig, setGuildAwakened, setGuildMetaCampaignSlug } = await import("../campaign/guildConfig.js");
+    const { startSession, endSession } = await import("../sessions/sessions.js");
+    const db = getDbForCampaign("default");
+
+    const cfg = ensureGuildConfig("guild-1", "Guild One");
+    setGuildAwakened("guild-1", true);
+    setGuildMetaCampaignSlug("guild-1", cfg.campaign_slug);
+
+    startSession("guild-1", "dm-user", "DM", { source: "live", modeAtStart: "lab" });
+    endSession("guild-1", "showtime_end");
+
+    const model = await getWebDashboardModel();
+    expect(model.authState).toBe("ok");
+    expect(model.campaigns).toHaveLength(1);
+    expect(model.campaigns[0]?.slug).toBe(cfg.campaign_slug);
+    expect(model.campaigns[0]?.name).toBe("Lab legacy");
+    expect(model.campaigns[0]?.editable).toBe(false);
+    expect(model.campaigns[0]?.sessions[0]?.sessionOrigin).toBe("lab_legacy");
+
+    const campaignDetail = await getWebCampaignDetail({
+      campaignSlug: cfg.campaign_slug,
+      searchParams: { guild_id: "guild-1" },
+    });
+    expect(campaignDetail?.slug).toBe(cfg.campaign_slug);
+    expect(campaignDetail?.sessions[0]?.sessionOrigin).toBe("lab_legacy");
 
     db.close();
   });

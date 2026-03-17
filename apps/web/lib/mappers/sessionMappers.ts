@@ -8,7 +8,9 @@ import { formatSessionDisplayTitle, prettifyCampaignSlug } from "@/lib/campaigns
 import type {
   SessionArtifactStatus,
   SessionDetail,
+  SessionOrigin,
   SessionRecap,
+  SessionRecapPhase,
   SessionSpeakerAttributionState,
   SessionStatus,
   TranscriptEntry,
@@ -26,7 +28,13 @@ function toClockTime(ms: number): string {
 }
 
 export function mapCanonicalStatusToWebStatus(status: Session["status"]): SessionStatus {
-  return status === "active" ? "in_progress" : "completed";
+  if (status === "active") return "in_progress";
+  if (status === "interrupted") return "interrupted";
+  return "completed";
+}
+
+export function mapCanonicalSessionOrigin(session: Pick<Session, "mode_at_start">): SessionOrigin {
+  return session.mode_at_start === "lab" ? "lab_legacy" : "showtime";
 }
 
 export function mapCanonicalTranscriptToWebTranscript(transcript: SessionTranscript | null): TranscriptEntry[] {
@@ -64,6 +72,7 @@ export function buildSessionDetail(args: {
   transcript: SessionTranscript | null;
   recap: CanonicalSessionRecap | null;
   recapReadiness: ArchiveRecapReadiness;
+  recapPhase: SessionRecapPhase;
   speakerAttribution: SessionSpeakerAttributionState | null;
   transcriptStatus: SessionArtifactStatus;
   recapStatus: SessionArtifactStatus;
@@ -85,9 +94,11 @@ export function buildSessionDetail(args: {
     date: toIsoDate(args.session.started_at_ms),
     status: mapCanonicalStatusToWebStatus(args.session.status),
     source,
+    sessionOrigin: mapCanonicalSessionOrigin(args.session),
     transcript: mapCanonicalTranscriptToWebTranscript(args.transcript),
     recap: mapCanonicalRecapToWebRecap(args.recap),
     recapReadiness: args.recapReadiness,
+    recapPhase: args.recapPhase,
     speakerAttribution: args.speakerAttribution,
     artifacts: {
       transcript: args.transcriptStatus,

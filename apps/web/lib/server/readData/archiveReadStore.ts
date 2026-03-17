@@ -6,6 +6,7 @@ export type ArchiveSessionRow = {
   session_id: string;
   guild_id: string;
   status: "active" | "completed" | "interrupted";
+  mode_at_start: string | null;
   label: string | null;
   started_at_ms: number;
   started_by_id: string | null;
@@ -279,6 +280,15 @@ function getCampaignDbCandidates(args: { campaignSlug: string; guildId?: string 
   return out;
 }
 
+function sessionsTableHasModeAtStartColumn(db: Database.Database): boolean {
+  try {
+    const columns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name?: string }>;
+    return columns.some((column) => column.name === "mode_at_start");
+  } catch {
+    return false;
+  }
+}
+
 function sessionsTableHasGuildIdColumn(db: Database.Database): boolean {
   try {
     const columns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name?: string }>;
@@ -498,11 +508,6 @@ export function isCampaignSlugOwnedByGuild(args: {
   const normalizedRequested = args.campaignSlug.trim();
   if (!normalizedRequested) return false;
 
-  const configuredSlug = getGuildCampaignSlug(args.guildId);
-  if (configuredSlug === normalizedRequested) {
-    return true;
-  }
-
   return getGuildCampaignRecord({ guildId: args.guildId, campaignSlug: normalizedRequested }) !== null;
 }
 
@@ -620,12 +625,14 @@ export function listSessionsForGuildCampaign(args: {
 
   for (const candidate of dbCandidates) {
     const hasGuildColumn = sessionsTableHasGuildIdColumn(candidate.db);
+    const hasModeAtStartColumn = sessionsTableHasModeAtStartColumn(candidate.db);
+    const modeAtStartSelect = hasModeAtStartColumn ? "mode_at_start" : "NULL as mode_at_start";
 
     try {
       if (hasGuildColumn) {
         const exactRows = candidate.db
           .prepare(
-            `SELECT session_id, guild_id, status, label, started_at_ms, started_by_id, source
+            `SELECT session_id, guild_id, status, ${modeAtStartSelect}, label, started_at_ms, started_by_id, source
              FROM sessions
              WHERE guild_id = ?
              ORDER BY started_at_ms DESC
@@ -639,7 +646,7 @@ export function listSessionsForGuildCampaign(args: {
 
         const trimmedRows = candidate.db
           .prepare(
-            `SELECT session_id, guild_id, status, label, started_at_ms, started_by_id, source
+            `SELECT session_id, guild_id, status, ${modeAtStartSelect}, label, started_at_ms, started_by_id, source
              FROM sessions
              WHERE TRIM(guild_id) = ?
              ORDER BY started_at_ms DESC
@@ -672,7 +679,7 @@ export function listSessionsForGuildCampaign(args: {
 
       const legacyRows = candidate.db
         .prepare(
-          `SELECT session_id, ? as guild_id, status, label, started_at_ms, started_by_id, source
+          `SELECT session_id, ? as guild_id, status, ${modeAtStartSelect}, label, started_at_ms, started_by_id, source
            FROM sessions
            ORDER BY started_at_ms DESC
            LIMIT ?`
@@ -720,12 +727,14 @@ export function findSessionByGuildAndId(args: {
 
   for (const candidate of dbCandidates) {
     const hasGuildColumn = sessionsTableHasGuildIdColumn(candidate.db);
+    const hasModeAtStartColumn = sessionsTableHasModeAtStartColumn(candidate.db);
+    const modeAtStartSelect = hasModeAtStartColumn ? "mode_at_start" : "NULL as mode_at_start";
 
     try {
       if (hasGuildColumn) {
         const exactRow = candidate.db
           .prepare(
-            `SELECT session_id, guild_id, status, label, started_at_ms, started_by_id, source
+            `SELECT session_id, guild_id, status, ${modeAtStartSelect}, label, started_at_ms, started_by_id, source
              FROM sessions
              WHERE guild_id = ? AND session_id = ?
              LIMIT 1`
@@ -735,7 +744,7 @@ export function findSessionByGuildAndId(args: {
 
         const trimmedRow = candidate.db
           .prepare(
-            `SELECT session_id, guild_id, status, label, started_at_ms, started_by_id, source
+            `SELECT session_id, guild_id, status, ${modeAtStartSelect}, label, started_at_ms, started_by_id, source
              FROM sessions
              WHERE TRIM(guild_id) = ? AND session_id = ?
              LIMIT 1`
@@ -758,7 +767,7 @@ export function findSessionByGuildAndId(args: {
 
       const legacyRow = candidate.db
         .prepare(
-          `SELECT session_id, ? as guild_id, status, label, started_at_ms, started_by_id, source
+          `SELECT session_id, ? as guild_id, status, ${modeAtStartSelect}, label, started_at_ms, started_by_id, source
            FROM sessions
            WHERE session_id = ?
            LIMIT 1`
@@ -1086,8 +1095,12 @@ export function readSessionRecapReadiness(args: {
     return "ready";
   }
 
-  if (args.sessionStatus === "completed" || args.sessionStatus === "active") {
+  if (args.sessionStatus === "active") {
     return "pending";
+  }
+
+  if (args.sessionStatus === "completed") {
+    return "ready";
   }
 
   return "failed";

@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Download, RefreshCw } from "lucide-react";
 import { EmptyState } from "@/components/shared/empty-state";
-import { EntityResolutionPanel } from "@/components/session/entity-resolution-panel";
 import { EntityPreviewPanel } from "@/components/session/entity-preview-panel";
 import { SpeakerAttributionPanel } from "@/components/session/speaker-attribution-panel";
 import { regenerateSessionRecapApi, getAnnotatedRecapsApi } from "@/lib/api/sessions";
@@ -12,6 +11,7 @@ import { WebApiError } from "@/lib/api/http";
 import type {
   RecapTab,
   SessionArtifactStatus,
+  SessionRecapPhase,
   SessionRecap,
   SessionAnnotatedRecaps,
   AnnotatedRecapLine,
@@ -44,6 +44,7 @@ const TABS: Array<{ id: RecapTab; label: string }> = [
 
 type RecapTabsProps = {
   recap: SessionRecap | null;
+  recapPhase: SessionRecapPhase;
   sessionId: string;
   sessionTitle: string;
   campaignSlug: string;
@@ -55,6 +56,7 @@ type RecapTabsProps = {
   status?: SessionArtifactStatus;
   emptyDescription?: string;
   warnings?: string[];
+  annotationVersion?: number;
 };
 
 type BannerState =
@@ -79,8 +81,20 @@ function mapRegenerateError(error: unknown): string {
     if (error.code === "recap_unavailable") {
       return "Recap is unavailable for this session.";
     }
+    if (error.code === "recap_in_progress") {
+      return "A recap job is already running for this session. Wait for it to finish, then refresh.";
+    }
+    if (error.code === "recap_rate_limited") {
+      return "That recap was requested very recently. Wait a moment before trying again.";
+    }
+    if (error.code === "recap_capacity_reached") {
+      return "Recap generation is currently at capacity. Please retry shortly.";
+    }
     if (error.code === "transcript_unavailable") {
       return "Recap generation needs transcript data, but transcript lines are currently unavailable.";
+    }
+    if (error.code === "recap_invalid_output") {
+      return "Recap generation returned incomplete output. Please retry in a moment.";
     }
     if (error.code === "generation_failed") {
       return "Recap generation failed this time. Please try again in a moment.";
@@ -180,6 +194,7 @@ function getAnchorRect(target: HTMLElement): PreviewEntityState["anchorRect"] {
 
 export function RecapTabs({
   recap,
+  recapPhase,
   sessionId,
   sessionTitle,
   campaignSlug,
@@ -191,6 +206,7 @@ export function RecapTabs({
   status = "available",
   emptyDescription,
   warnings = [],
+  annotationVersion = 0,
 }: RecapTabsProps) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<RecapTab>(resolveDefaultTab(recap));
@@ -231,7 +247,7 @@ export function RecapTabs({
 
   useEffect(() => {
     loadAnnotations();
-  }, [loadAnnotations]);
+  }, [annotationVersion, loadAnnotations]);
 
   useEffect(() => {
     return () => {
@@ -308,6 +324,20 @@ export function RecapTabs({
     && recap.source !== "canonical"
     && activeRecapText.trim().length > 0
   );
+  const allowRegenerateAction = recapPhase === "ended_ready" || recapPhase === "complete" || recapPhase === "failed";
+  const allowDownloadAction = recapPhase === "complete" && Boolean(recap);
+  const recapPhaseSubtitle =
+    recapPhase === "ended_pending_attribution"
+      ? "Awaiting speaker attribution"
+      : recapPhase === "ended_ready"
+        ? "Ready for generation"
+        : recapPhase === "generating"
+          ? "Generation in progress"
+          : recapPhase === "failed"
+            ? "Generation failed"
+            : recapPhase === "live"
+              ? "Unavailable during live session"
+              : `Recap ${status}`;
 
   function clearHoverOpenTimer() {
     if (hoverOpenTimerRef.current !== null) {
@@ -403,17 +433,13 @@ export function RecapTabs({
     setPinnedPreviewEntity(null);
   }
 
-  function handleResolutionChange() {
-    loadAnnotations();
-  }
-
   return (
     <div className="rounded-2xl card-glass">
       <div className="flex items-center justify-between border-b border-border px-6 py-4">
         <div className="space-y-1">
           <h3 className="font-serif text-lg">Recap</h3>
           <p className="text-xs uppercase tracking-widest text-muted-foreground">
-            {recap ? `Model ${recap.modelVersion}` : `Recap ${status}`}
+            {recap ? `Model ${recap.modelVersion}` : recapPhaseSubtitle}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -425,14 +451,15 @@ export function RecapTabs({
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
-                  title={enabled ? tab.label : "This recap style is unavailable"}
+                  title={enabled && recapPhase === "complete" ? tab.label : "This recap style is unavailable"}
                   className={`rounded-md px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-all ${
-                    activeTab === tab.id
+                    activeTab === tab.id && recapPhase === "complete"
                       ? "bg-primary text-primary-foreground"
-                      : enabled
+                      : enabled && recapPhase === "complete"
                         ? "text-muted-foreground hover:text-foreground"
                         : "text-muted-foreground/40"
                   }`}
+                  disabled={recapPhase !== "complete"}
                 >
                   {tab.label}
                 </button>
@@ -442,12 +469,12 @@ export function RecapTabs({
           <button
             type="button"
             onClick={handleRegenerateRecap}
-            disabled={isPending || !canRegenerate}
-            title={canRegenerate ? "Regenerate recap" : "Recap regeneration is unavailable"}
+            disabled={isPending || !canRegenerate || !allowRegenerateAction}
+            title={canRegenerate && allowRegenerateAction ? "Regenerate recap" : "Recap regeneration is unavailable"}
             className="inline-flex items-center gap-2 rounded-full button-primary px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isPending ? "animate-spin" : ""}`} />
-            {isPending ? "Regenerating" : "Regenerate"}
+            {isPending ? "Regenerating" : recapPhase === "ended_ready" ? "Generate" : "Regenerate"}
           </button>
           <button
             type="button"
@@ -458,7 +485,7 @@ export function RecapTabs({
                 "text/plain;charset=utf-8"
               )
             }
-            disabled={!recap}
+            disabled={!allowDownloadAction}
             className="inline-flex items-center gap-2 rounded-full border border-border bg-background/40 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Download className="h-3.5 w-3.5" />
@@ -467,18 +494,7 @@ export function RecapTabs({
         </div>
       </div>
       <div className="space-y-4 p-6">
-        {/* Entity resolution panel — shown before recap content */}
-        {recap && (
-          <EntityResolutionPanel
-            sessionId={sessionId}
-            campaignSlug={campaignSlug}
-            searchParams={searchParams}
-            canWrite={canWrite}
-            onResolutionChange={handleResolutionChange}
-          />
-        )}
-
-        {recap ? (
+        {recapPhase === "complete" && recap ? (
           <>
             {activeRecapLines.length > 0 ? (
               <>
@@ -544,7 +560,7 @@ export function RecapTabs({
               </div>
             ) : null}
           </>
-        ) : speakerAttribution?.required ? (
+        ) : recapPhase === "ended_pending_attribution" && speakerAttribution ? (
           <SpeakerAttributionPanel
             sessionId={sessionId}
             campaignSlug={campaignSlug}
@@ -553,9 +569,24 @@ export function RecapTabs({
             initialState={speakerAttribution}
             onBeginRecapGeneration={performRegenerateRecap}
           />
+        ) : recapPhase === "ended_ready" ? (
+          <EmptyState
+            title="Recap ready to generate"
+            description={emptyDescription ?? "Speaker attribution is complete. Generate the recap when you're ready."}
+          />
+        ) : recapPhase === "generating" ? (
+          <EmptyState
+            title="Recap generating"
+            description="Recap generation is currently in progress. Refresh this page in a moment."
+          />
+        ) : recapPhase === "failed" ? (
+          <EmptyState
+            title="Recap generation failed"
+            description={warnings[0] ?? emptyDescription ?? "The last recap attempt failed. Review warnings, then try again."}
+          />
         ) : (
           <EmptyState
-            title={status === "missing" ? "No recap yet" : "Recap unavailable"}
+            title={recapPhase === "live" ? "Recap unavailable during live session" : status === "missing" ? "No recap yet" : "Recap unavailable"}
             description={emptyDescription ?? "No recap is currently available for this session."}
           />
         )}

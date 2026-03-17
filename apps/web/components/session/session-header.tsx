@@ -10,6 +10,7 @@ import type { SessionDetail } from "@/lib/types";
 import { formatSessionDisplayTitle } from "@/lib/campaigns/display";
 import { updateSessionLabelApi } from "@/lib/api/sessions";
 import { WebApiError } from "@/lib/api/http";
+import { buildBugReportHref } from "@/lib/bug-report";
 
 type SessionHeaderProps = {
   session: SessionDetail;
@@ -22,8 +23,20 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
   const [draftLabel, setDraftLabel] = useState(session.label ?? "");
   const [isEditing, setIsEditing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const statusTone = session.status === "in_progress" ? "warning" : "success";
+  const statusTone = session.status === "in_progress" ? "warning" : session.status === "interrupted" ? "danger" : "success";
   type StatusChipModel = { label: string; tone: StatusChipTone };
+  const recapPhaseLabel =
+    session.recapPhase === "live"
+      ? "Recap live"
+      : session.recapPhase === "ended_pending_attribution"
+        ? "Recap awaiting attribution"
+        : session.recapPhase === "ended_ready"
+          ? "Recap ready"
+          : session.recapPhase === "generating"
+            ? "Recap generating"
+            : session.recapPhase === "failed"
+              ? "Recap failed"
+              : "Recap complete";
   const sessionLabel = useMemo(
     () => formatSessionDisplayTitle({ label, sessionId: session.id }),
     [label, session.id]
@@ -31,7 +44,12 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
   const statusChips = useMemo(() => {
     const chips: StatusChipModel[] = [
       {
-        label: session.status === "in_progress" ? "In progress" : "Completed",
+        label:
+          session.status === "in_progress"
+            ? "In progress"
+            : session.status === "interrupted"
+              ? "Interrupted"
+              : "Completed",
         tone: statusTone,
       },
       {
@@ -39,13 +57,17 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
         tone: "info" as const,
       },
       {
-        label: `Recap ${session.recapReadiness}`,
+        label: recapPhaseLabel,
         tone:
-          session.recapReadiness === "ready"
+          session.recapPhase === "complete" || session.recapPhase === "ended_ready"
             ? "success"
-            : session.recapReadiness === "failed"
+            : session.recapPhase === "failed"
               ? "danger"
               : "warning",
+      },
+      {
+        label: session.sessionOrigin === "lab_legacy" ? "Origin lab legacy" : "Origin showtime",
+        tone: session.sessionOrigin === "lab_legacy" ? ("warning" as const) : ("info" as const),
       },
       ...(session.speakerAttribution?.required
         ? [
@@ -90,7 +112,18 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
       seen.add(key);
       return true;
     });
-  }, [session.artifacts.recap, session.artifacts.transcript, session.recapReadiness, session.source, session.speakerAttribution, session.status, statusTone]);
+  }, [recapPhaseLabel, session.artifacts.recap, session.artifacts.transcript, session.recapPhase, session.sessionOrigin, session.source, session.speakerAttribution, session.status, statusTone]);
+  const reportBugHref = useMemo(
+    () =>
+      buildBugReportHref({
+        path: `/campaigns/${session.campaignSlug}/sessions/${session.id}`,
+        campaignSlug: session.campaignSlug,
+        sessionId: session.id,
+        sessionTitle: sessionLabel,
+        issue: session.recapPhase === "failed" ? "Recap issue" : null,
+      }),
+    [session.campaignSlug, session.id, session.recapPhase, sessionLabel]
+  );
 
   return (
     <header className="space-y-4">
@@ -182,6 +215,12 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
           </div>
         </div>
         <div className="inline-flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
+          <Link
+            href={reportBugHref}
+            className="rounded-full border border-border px-3 py-1 font-semibold transition-colors hover:border-primary/40 hover:text-primary"
+          >
+            Report bug
+          </Link>
           <Clock className="h-3.5 w-3.5" />
           Recorded {session.date}
         </div>

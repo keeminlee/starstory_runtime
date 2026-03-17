@@ -44,6 +44,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   }
 
   const isUnsigned = model.authState === "unsigned";
+  const hasEmptyGuilds = model.emptyGuilds.length > 0;
+  const showNoCampaignsState = model.authState === "signed_in_no_sessions";
   const visibleCampaigns = isUnsigned
     ? model.campaigns.filter((campaign) => campaign.slug === "demo")
     : model.campaigns;
@@ -52,21 +54,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     return (
       <ArchiveShell section="Dashboard">
         <EmptyState
-          title="Add StarStory to a Discord server"
-          description="Add StarStory to a Discord server to begin capturing sessions."
-          actionLabel="Invite StarStory"
+          title="Add Starstory to a Discord server"
+          description="Add Starstory to a Discord server to begin capturing sessions."
+          actionLabel="Invite Starstory"
           actionHref={DISCORD_INVITE_URL}
-        />
-      </ArchiveShell>
-    );
-  }
-
-  if (model.authState === "signed_in_no_sessions") {
-    return (
-      <ArchiveShell section="Dashboard">
-        <EmptyState
-          title="No sessions yet"
-          description="Start your first session in Discord with /starstory showtime start"
         />
       </ArchiveShell>
     );
@@ -101,20 +92,28 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             actionHref={DISCORD_SIGN_IN_URL}
           />
         ) : (
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-            <div className="rounded-2xl card-glass p-6">
-              <div className="text-xs uppercase tracking-widest text-muted-foreground">Total Sessions</div>
-              <div className="mt-2 text-4xl font-bold text-primary">{model.totalSessions}</div>
+          <>
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+              <div className="rounded-2xl card-glass p-6">
+                <div className="text-xs uppercase tracking-widest text-muted-foreground">Total Sessions</div>
+                <div className="mt-2 text-4xl font-bold text-primary">{model.totalSessions}</div>
+              </div>
+              <div className="rounded-2xl card-glass p-6">
+                <div className="text-xs uppercase tracking-widest text-muted-foreground">Campaigns</div>
+                <div className="mt-2 text-4xl font-bold text-primary">{model.campaignCount}</div>
+              </div>
+              <div className="rounded-2xl card-glass p-6">
+                <div className="text-xs uppercase tracking-widest text-muted-foreground">Words Recorded</div>
+                <div className="mt-2 text-4xl font-bold text-primary">{model.wordsRecorded.toLocaleString()}</div>
+              </div>
             </div>
-            <div className="rounded-2xl card-glass p-6">
-              <div className="text-xs uppercase tracking-widest text-muted-foreground">Campaigns</div>
-              <div className="mt-2 text-4xl font-bold text-primary">{model.campaignCount}</div>
-            </div>
-            <div className="rounded-2xl card-glass p-6">
-              <div className="text-xs uppercase tracking-widest text-muted-foreground">Words Recorded</div>
-              <div className="mt-2 text-4xl font-bold text-primary">{model.wordsRecorded.toLocaleString()}</div>
-            </div>
-          </div>
+            {showNoCampaignsState ? (
+              <EmptyState
+                title="No campaigns yet"
+                description="Start your first session to create one."
+              />
+            ) : null}
+          </>
         )}
 
         <div className="space-y-8">
@@ -165,6 +164,34 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               </div>
             </section>
           ))}
+
+          {model.emptyGuilds.map((guild) => (
+            <section key={`empty-${guild.guildId}`} className="space-y-3">
+              <h2 className="flex items-center gap-3 text-2xl font-serif">
+                {guild.guildIconUrl ? (
+                  <img
+                    src={guild.guildIconUrl}
+                    alt={`${guild.guildName} icon`}
+                    className="h-8 w-8 rounded-full border border-border/60 object-cover"
+                    loading="lazy"
+                  />
+                ) : null}
+                <span>{guild.guildName}</span>
+              </h2>
+              <div className="rounded-xl border border-dashed border-border/60 bg-background/25 p-6">
+                <h3 className="text-xl font-serif">No campaign yet</h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Start your first session in this guild to create a campaign.
+                </p>
+              </div>
+            </section>
+          ))}
+
+          {showNoCampaignsState && !hasEmptyGuilds ? (
+            <div className="rounded-xl border border-dashed border-border/60 bg-background/25 p-6 text-sm text-muted-foreground">
+              Guilds will appear here after Starstory is invited to them.
+            </div>
+          ) : null}
         </div>
       </div>
     </ArchiveShell>

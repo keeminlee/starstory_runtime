@@ -236,7 +236,25 @@ export function CampaignOverview({ campaign, searchParams }: CampaignOverviewPro
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-4 text-xs uppercase tracking-wider text-muted-foreground">
                     <span className="inline-flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />{session.date}</span>
-                    <StatusChip label={session.status === "in_progress" ? "In progress" : "Completed"} tone={session.status === "in_progress" ? "warning" : "neutral"} />
+                    <StatusChip
+                      label={
+                        session.status === "in_progress"
+                          ? "In progress"
+                          : session.status === "interrupted"
+                            ? "Interrupted"
+                            : "Completed"
+                      }
+                      tone={
+                        session.status === "in_progress"
+                          ? "warning"
+                          : session.status === "interrupted"
+                            ? "danger"
+                            : "neutral"
+                      }
+                    />
+                    {session.sessionOrigin === "lab_legacy" ? (
+                      <StatusChip label="Lab legacy" tone="warning" />
+                    ) : null}
                     <StatusChip label={`Transcript ${session.artifacts.transcript}`} tone={artifactTone(session.artifacts.transcript)} />
                     <StatusChip label={`Recap ${session.artifacts.recap}`} tone={artifactTone(session.artifacts.recap)} />
                   </div>

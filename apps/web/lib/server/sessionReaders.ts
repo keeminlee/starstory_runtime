@@ -18,7 +18,7 @@ import {
 } from "@/lib/server/readData/archiveReadStore";
 import { assertSessionGuildInAuthorizedScope, ScopeGuardError } from "@/lib/server/scopeGuards";
 import { readSessionSpeakerAttributionSnapshot } from "@/lib/server/sessionSpeakerAttributionService";
-import type { SessionArtifactStatus, SessionDetail } from "@/lib/types";
+import type { SessionArtifactStatus, SessionDetail, SessionRecapPhase } from "@/lib/types";
 import { assertUserCanWriteCampaignArchive, canUserWriteCampaignArchive } from "@/lib/server/writeAuthority";
 
 export type CanonicalSessionDetail = {
@@ -28,11 +28,41 @@ export type CanonicalSessionDetail = {
   transcript: ArchiveTranscript | null;
   recap: ArchiveRecap | null;
   recapReadiness: "pending" | "ready" | "failed";
+  recapPhase: SessionRecapPhase;
   speakerAttribution: SessionDetail["speakerAttribution"];
   transcriptStatus: SessionArtifactStatus;
   recapStatus: SessionArtifactStatus;
   warnings: string[];
 };
+
+function deriveSessionRecapPhase(args: {
+  session: ArchiveSessionRow;
+  recap: ArchiveRecap | null;
+  recapReadiness: "pending" | "ready" | "failed";
+  speakerAttribution: SessionDetail["speakerAttribution"];
+}): SessionRecapPhase {
+  if (args.session.status === "active") {
+    return "live";
+  }
+
+  if (args.recap) {
+    return "complete";
+  }
+
+  if (args.recapReadiness === "failed" || args.session.status === "interrupted") {
+    return "failed";
+  }
+
+  if (args.speakerAttribution?.required && !args.speakerAttribution.ready) {
+    return "ended_pending_attribution";
+  }
+
+  if (args.recapReadiness === "pending") {
+    return "generating";
+  }
+
+  return "ended_ready";
+}
 
 function normalizeAuthorizedGuildIds(ids: string[]): string[] {
   const seen = new Set<string>();
@@ -257,6 +287,13 @@ export async function getCanonicalSessionDetail(args: {
     sessionId: args.sessionId,
   });
 
+  const recapPhase = deriveSessionRecapPhase({
+    session,
+    recap,
+    recapReadiness,
+    speakerAttribution,
+  });
+
   return {
     guildId,
     campaignSlug,
@@ -264,6 +301,7 @@ export async function getCanonicalSessionDetail(args: {
     transcript,
     recap,
     recapReadiness,
+    recapPhase,
     speakerAttribution,
     transcriptStatus,
     recapStatus,
@@ -319,6 +357,7 @@ export async function getWebSessionDetail(args: {
       transcript: canonical.transcript,
       recap: canonical.recap,
       recapReadiness: canonical.recapReadiness,
+      recapPhase: canonical.recapPhase,
       speakerAttribution: canonical.speakerAttribution,
       transcriptStatus: canonical.transcriptStatus,
       recapStatus: canonical.recapStatus,
@@ -356,6 +395,29 @@ export async function regenerateWebSessionRecap(args: {
       campaignSlug,
       userId: auth.user?.id ?? null,
     });
+
+    const canonical = await getCanonicalSessionDetail({
+      authorizedGuildIds: auth.authorizedGuildIds,
+      sessionId: args.sessionId,
+      searchParams: args.searchParams,
+    });
+
+    if (canonical.recapPhase === "live") {
+      throw new WebDataError("conflict", 409, "Recap generation is blocked while the session is still active.");
+    }
+
+    if (canonical.recapPhase === "ended_pending_attribution") {
+      const pendingCount = canonical.speakerAttribution?.pendingCount ?? 0;
+      throw new WebDataError(
+        "RECAP_SPEAKER_ATTRIBUTION_REQUIRED",
+        409,
+        `Recap generation requires speaker attribution for this session. ${pendingCount} speaker(s) remain unclassified.`
+      );
+    }
+
+    if (canonical.recapPhase === "generating") {
+      throw new WebDataError("recap_in_progress", 409, "A recap job is already running for this session.");
+    }
 
     // Recap generation requires OpenAI at execution time; read paths remain independent.
     assertOpenAiConfigured();

@@ -11,6 +11,7 @@ const DEMO_SESSIONS: SessionSummary[] = [
     date: "2026-03-01",
     status: "completed",
     source: "live",
+    sessionOrigin: "showtime",
     artifacts: {
       transcript: "available",
       recap: "available",
@@ -24,6 +25,7 @@ const DEMO_SESSIONS: SessionSummary[] = [
     date: "2026-03-05",
     status: "in_progress",
     source: "ingest",
+    sessionOrigin: "showtime",
     artifacts: {
       transcript: "available",
       recap: "available",
@@ -42,6 +44,7 @@ const DEMO_SESSION_DETAILS: Record<string, SessionDetail> = {
     date: "2026-03-01",
     status: "completed",
     source: "live",
+    sessionOrigin: "showtime",
     guildId: DEMO_GUILD_ID,
     transcript: [
       {
@@ -74,6 +77,7 @@ const DEMO_SESSION_DETAILS: Record<string, SessionDetail> = {
       modelVersion: "demo-seeded-v1",
     },
     recapReadiness: "ready",
+    recapPhase: "complete",
     speakerAttribution: null,
     artifacts: {
       transcript: "available",
@@ -90,6 +94,7 @@ const DEMO_SESSION_DETAILS: Record<string, SessionDetail> = {
     date: "2026-03-05",
     status: "in_progress",
     source: "ingest",
+    sessionOrigin: "showtime",
     guildId: DEMO_GUILD_ID,
     transcript: [
       {
@@ -122,6 +127,7 @@ const DEMO_SESSION_DETAILS: Record<string, SessionDetail> = {
       modelVersion: "demo-seeded-v1",
     },
     recapReadiness: "ready",
+    recapPhase: "live",
     speakerAttribution: null,
     artifacts: {
       transcript: "available",

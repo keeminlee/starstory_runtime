@@ -10,6 +10,10 @@ export type WebDataErrorCode =
   | "conflict"
   | "transcript_unavailable"
   | "recap_unavailable"
+  | "recap_invalid_output"
+  | "recap_in_progress"
+  | "recap_rate_limited"
+  | "recap_capacity_reached"
   | "generation_failed"
   | "RECAP_SPEAKER_ATTRIBUTION_REQUIRED"
   | "openai_unconfigured"
@@ -61,8 +65,23 @@ export function mapToWebDataError(error: unknown): WebDataError {
     if (recapCode === "RECAP_SESSION_NOT_FOUND") {
       return new WebDataError("not_found", 404, message, { cause: error });
     }
+    if (recapCode === "RECAP_SESSION_ACTIVE") {
+      return new WebDataError("conflict", 409, message, { cause: error });
+    }
     if (recapCode === "RECAP_TRANSCRIPT_UNAVAILABLE") {
       return new WebDataError("transcript_unavailable", 424, message, { cause: error });
+    }
+    if (recapCode === "RECAP_INVALID_OUTPUT") {
+      return new WebDataError("recap_invalid_output", 502, message, { cause: error });
+    }
+    if (recapCode === "RECAP_IN_PROGRESS") {
+      return new WebDataError("recap_in_progress", 409, message, { cause: error });
+    }
+    if (recapCode === "RECAP_RATE_LIMITED") {
+      return new WebDataError("recap_rate_limited", 429, message, { cause: error });
+    }
+    if (recapCode === "RECAP_CAPACITY_REACHED") {
+      return new WebDataError("recap_capacity_reached", 503, message, { cause: error });
     }
     if (recapCode === "RECAP_GENERATION_FAILED") {
       return new WebDataError("generation_failed", 502, message, { cause: error });

@@ -128,6 +128,19 @@ type ReceiverHandlers = {
 };
 const receiverHandlers = new Map<string, ReceiverHandlers>();
 
+export type ReceiverStartReason =
+  | "started"
+  | "already_active"
+  | "no_voice_state"
+  | "stt_disabled"
+  | "listener_registration_failed";
+
+export type ReceiverStartResult = {
+  ok: boolean;
+  reason: ReceiverStartReason;
+  channelId: string | null;
+};
+
 type SpeakingSubscription = {
   userId: string;
   guildId: string;
@@ -533,6 +546,15 @@ export async function processTranscribedVoiceText(opts: {
 
     // Get active session if one exists (for session_id tracking)
     const activeSession = getActiveSession(guildId);
+    if (!activeSession) {
+      voiceLog.warn("Voice transcription captured without active session", {
+        guild_id: guildId,
+        channel_id: channelId,
+        user_id: userId,
+        source: "voice",
+        event_type: "VOICE_LEDGER_WITHOUT_SESSION",
+      });
+    }
 
     // Emit to ledger - voice is primary narrative by default
     appendLedgerEntry({
@@ -653,21 +675,50 @@ export async function processTranscribedVoiceText(opts: {
   }
 }
 
-export function startReceiver(guildId: string): void {
+export function startReceiver(guildId: string): ReceiverStartResult {
   const state = getVoiceState(guildId);
   if (!state) {
-    voiceLog.warn(`No voice state`);
-    return;
+    voiceLog.warn("Receiver start skipped: no voice state", {
+      guild_id: guildId,
+      event_type: "VOICE_RECEIVER_START",
+      receiver_ok: false,
+      reason: "no_voice_state",
+    });
+    return {
+      ok: false,
+      reason: "no_voice_state",
+      channelId: null,
+    };
   }
   if (!state.sttEnabled) {
-    voiceLog.warn(`STT not enabled`);
-    return;
+    voiceLog.warn("Receiver start skipped: STT disabled", {
+      guild_id: guildId,
+      channel_id: state.channelId,
+      event_type: "VOICE_RECEIVER_START",
+      receiver_ok: false,
+      reason: "stt_disabled",
+    });
+    return {
+      ok: false,
+      reason: "stt_disabled",
+      channelId: state.channelId,
+    };
   }
 
   // Idempotent: don't register twice
   if (receiverHandlers.has(guildId)) {
-    voiceLog.debug(`Receiver already active`);
-    return;
+    voiceLog.debug("Receiver already active", {
+      guild_id: guildId,
+      channel_id: state.channelId,
+      event_type: "VOICE_RECEIVER_START",
+      receiver_ok: true,
+      reason: "already_active",
+    });
+    return {
+      ok: true,
+      reason: "already_active",
+      channelId: state.channelId,
+    };
   }
 
   const connection = state.connection;
@@ -678,7 +729,12 @@ export function startReceiver(guildId: string): void {
   if (!pcmCaptures.has(guildId)) pcmCaptures.set(guildId, new Map());
   if (!userCooldowns.has(guildId)) userCooldowns.set(guildId, new Map());
 
-  voiceLog.info(`Starting receiver for channel #${channelName}`);
+  voiceLog.info("Starting receiver", {
+    guild_id: guildId,
+    channel_id: channelId,
+    channel_name: channelName,
+    event_type: "VOICE_RECEIVER_START",
+  });
 
   const onStart = async (userId: string) => {
     const speakers = activeSpeakers.get(guildId);
@@ -902,9 +958,49 @@ export function startReceiver(guildId: string): void {
     // No-op: stream lifecycle handles cleanup
   };
 
-  receiverHandlers.set(guildId, { onStart, onEnd });
-  connection.receiver.speaking.on("start", onStart);
-  connection.receiver.speaking.on("end", onEnd);
+  try {
+    connection.receiver.speaking.on("start", onStart);
+    connection.receiver.speaking.on("end", onEnd);
+    receiverHandlers.set(guildId, { onStart, onEnd });
+  } catch (error) {
+    try {
+      connection.receiver.speaking.off("start", onStart);
+      connection.receiver.speaking.off("end", onEnd);
+    } catch {
+      // Best-effort cleanup after partial listener registration failure.
+    }
+
+    voiceLog.error("Receiver startup failed", {
+      guild_id: guildId,
+      channel_id: channelId,
+      channel_name: channelName,
+      event_type: "VOICE_RECEIVER_START",
+      receiver_ok: false,
+      reason: "listener_registration_failed",
+      error: String((error as any)?.message ?? error ?? "unknown_error"),
+    });
+
+    return {
+      ok: false,
+      reason: "listener_registration_failed",
+      channelId,
+    };
+  }
+
+  voiceLog.info("Receiver active", {
+    guild_id: guildId,
+    channel_id: channelId,
+    channel_name: channelName,
+    event_type: "VOICE_RECEIVER_START",
+    receiver_ok: true,
+    reason: "started",
+  });
+
+  return {
+    ok: true,
+    reason: "started",
+    channelId,
+  };
 }
 
 export function stopReceiver(guildId: string): void {
@@ -914,7 +1010,13 @@ export function stopReceiver(guildId: string): void {
     return;
   }
 
-  voiceLog.info(`Stopping receiver for guild ${guildId}`);
+  voiceLog.info("Stopping receiver without mutating session state", {
+    event_type: "VOICE_RECEIVER_STOP",
+    guild_id: guildId,
+    channel_id: state.channelId,
+    cleanup_only: true,
+    session_authority_preserved: true,
+  });
 
   const handlers = receiverHandlers.get(guildId);
   if (handlers) {

@@ -49,6 +49,7 @@ export type UpdateSessionLabelResponse = SessionDetailResponse;
 export type SessionTranscriptResponse = {
   sessionId: string;
   campaignSlug: string;
+  sessionStatus: SessionDetail["status"];
   status: SessionDetail["artifacts"]["transcript"];
   warnings: string[];
   lineCount: number;

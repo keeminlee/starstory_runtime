@@ -1,6 +1,6 @@
 export type RecapTab = "concise" | "balanced" | "detailed";
 
-export type SessionStatus = "completed" | "in_progress";
+export type SessionStatus = "completed" | "in_progress" | "interrupted";
 
 export type SessionArtifactStatus =
   | "available"
@@ -8,6 +8,16 @@ export type SessionArtifactStatus =
   | "unavailable";
 
 export type SessionRecapReadiness = "pending" | "ready" | "failed";
+
+export type SessionRecapPhase =
+  | "live"
+  | "ended_pending_attribution"
+  | "ended_ready"
+  | "generating"
+  | "complete"
+  | "failed";
+
+export type SessionOrigin = "showtime" | "lab_legacy";
 
 export type SessionSpeakerClassificationType = "pc" | "dm" | "ignore";
 
@@ -44,6 +54,7 @@ export type SessionSummary = {
   startedByUserId?: string | null;
   status: SessionStatus;
   source: "live" | "ingest";
+  sessionOrigin: SessionOrigin;
   artifacts: {
     transcript: SessionArtifactStatus;
     recap: SessionArtifactStatus;
@@ -67,6 +78,12 @@ export type CampaignSummary = {
   persisted?: boolean;
   canWrite?: boolean;
   readOnlyReason?: "not_campaign_dm" | "demo_mode";
+};
+
+export type DashboardEmptyGuild = {
+  guildId: string;
+  guildName: string;
+  guildIconUrl?: string | null;
 };
 
 export type TranscriptEntry = {
@@ -98,10 +115,12 @@ export type SessionDetail = {
   date: string;
   status: SessionStatus;
   source: "live" | "ingest";
+  sessionOrigin: SessionOrigin;
   guildId: string;
   transcript: TranscriptEntry[];
   recap: SessionRecap | null;
   recapReadiness: SessionRecapReadiness;
+  recapPhase: SessionRecapPhase;
   speakerAttribution: SessionSpeakerAttributionState | null;
   artifacts: {
     transcript: SessionArtifactStatus;
@@ -116,6 +135,7 @@ export type DashboardModel = {
   campaignCount: number;
   wordsRecorded: number;
   campaigns: CampaignSummary[];
+  emptyGuilds: DashboardEmptyGuild[];
   authState?:
     | "ok"
     | "unsigned"

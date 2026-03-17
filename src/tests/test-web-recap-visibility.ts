@@ -124,6 +124,7 @@ describe("web recap visibility reflection", () => {
     expect(detail.campaignSlug).toBe(alpha.campaign_slug);
     expect(detail.artifacts.recap).toBe("available");
     expect(detail.recap?.balanced).toContain("Balanced recap");
+    expect(detail.recapPhase).toBe("complete");
 
     db.close();
   });
