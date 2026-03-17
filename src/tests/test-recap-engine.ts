@@ -359,6 +359,7 @@ test("recap path preserves anthropic guild provider context even when env defaul
   vi.resetModules();
 
   const { setGuildLlmProvider } = await import("../campaign/guildConfig.js");
+  const { getSessionArtifact } = await import("../sessions/sessions.js");
   const { resolveDefaultLlmModel, resolveRuntimeLlmProvider } = await import("../config/providerSelection.js");
   const { generateSessionRecap } = await import("../sessions/recapEngine.js");
 
@@ -382,6 +383,10 @@ test("recap path preserves anthropic guild provider context even when env defaul
     expect(call.executedProvider).toBe("anthropic");
     expect(call.model).toBe(resolvedModel);
   }
+  const recapArtifact = getSessionArtifact(guildId, sessionId, "recap_final", undefined, campaignSlug);
+  const recapMeta = recapArtifact?.meta_json ? JSON.parse(recapArtifact.meta_json) as Record<string, unknown> : null;
+  expect(recapMeta?.llm_provider).toBe("anthropic");
+  expect(recapMeta?.llm_model).toBe("claude-haiku-4-5");
   expect(mockChatCalls.some((call) => call.executedProvider === "openai")).toBe(false);
 });
 

@@ -65,6 +65,8 @@ export type RecapResult = {
   strategy: RecapStrategy;
   engine: "megameecap";
   strategyVersion: string;
+  llmProvider: "openai" | "anthropic" | "google" | null;
+  llmModel: string | null;
   baseVersion: string;
   finalVersion: string;
   sourceTranscriptHash: string;
@@ -106,6 +108,8 @@ export type FinalFromBaseResult = {
   finalStyle: RecapStrategy;
   sourceHash: string;
   finalVersion: string;
+  llmProvider: "openai" | "anthropic" | "google" | null;
+  llmModel: string | null;
   outputPathMd: string;
   outputPathMetaJson: string;
   cacheHit: boolean;
@@ -330,6 +334,8 @@ async function generateSessionRecapInternal(
   const metaPayload = {
     engine: MEGAMEECAP_ENGINE,
     final_style: strategy,
+    llm_provider: final.llmProvider,
+    llm_model: final.llmModel,
     source_hash: final.sourceHash,
     base_version: base.baseVersion,
     final_version: final.finalVersion,
@@ -365,6 +371,8 @@ async function generateSessionRecapInternal(
     strategy,
     engine: "megameecap",
     strategyVersion: MEGAMEECAP_FINAL_VERSION,
+    llmProvider: final.llmProvider,
+    llmModel: final.llmModel,
     baseVersion: MEGAMEECAP_BASE_VERSION,
     finalVersion: MEGAMEECAP_FINAL_VERSION,
     sourceTranscriptHash: final.sourceHash,
@@ -472,6 +480,8 @@ export async function ensureMegameecapBase(
   const createdAtMs = deps.now();
   const baseMeta = {
     engine: MEGAMEECAP_ENGINE,
+    llm_provider: resolvedProvider,
+    llm_model: resolvedModel,
     source_hash: sourceHash,
     base_version: MEGAMEECAP_BASE_VERSION,
     created_at_ms: createdAtMs,
@@ -564,12 +574,23 @@ export async function generateFinalRecapFromBase(
   if (useCache) {
     const cachedText = readMegameecapFinalText(expectedPaths) ?? existingFinal?.content_text ?? "";
     if (cachedText.length > 0 && !looksLikeIncompleteRecap(cachedText)) {
+      let cachedMeta = {} as Record<string, unknown>;
+      try {
+        cachedMeta = existingFinal?.meta_json ? JSON.parse(existingFinal.meta_json) as Record<string, unknown> : {};
+      } catch {
+        cachedMeta = {};
+      }
+
       return {
         text: cachedText,
         createdAtMs: existingFinal?.created_at_ms ?? deps.now(),
         finalStyle: args.style,
         sourceHash: deps.baseSourceHash,
         finalVersion: MEGAMEECAP_FINAL_VERSION,
+        llmProvider: typeof cachedMeta.llm_provider === "string"
+          ? cachedMeta.llm_provider as "openai" | "anthropic" | "google"
+          : null,
+        llmModel: typeof cachedMeta.llm_model === "string" ? cachedMeta.llm_model : null,
         outputPathMd: expectedPaths.recapPath,
         outputPathMetaJson: expectedPaths.metaPath,
         cacheHit: true,
@@ -608,6 +629,8 @@ export async function generateFinalRecapFromBase(
   const finalMeta = {
     engine: MEGAMEECAP_ENGINE,
     final_style: args.style,
+    llm_provider: resolvedProvider,
+    llm_model: resolvedModel,
     source_hash: deps.baseSourceHash,
     base_version: deps.baseVersion,
     final_version: MEGAMEECAP_FINAL_VERSION,
@@ -625,6 +648,8 @@ export async function generateFinalRecapFromBase(
     finalStyle: args.style,
     sourceHash: deps.baseSourceHash,
     finalVersion: MEGAMEECAP_FINAL_VERSION,
+    llmProvider: resolvedProvider,
+    llmModel: resolvedModel,
     outputPathMd: expectedPaths.recapPath,
     outputPathMetaJson: expectedPaths.metaPath,
     cacheHit: false,

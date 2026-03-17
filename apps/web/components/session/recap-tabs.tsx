@@ -145,7 +145,7 @@ function toRecapTxt(args: {
     return `Session: ${title}\nSession ID: ${args.sessionId}\nCampaign: ${args.campaignSlug}\n\nNo recap available.`;
   }
 
-  const displayModel = args.recap.displayModel ?? args.recap.modelVersion;
+  const displayModel = args.recap.llmModel?.trim() || "Unknown";
 
   return [
     `Session: ${title}`,
@@ -153,6 +153,7 @@ function toRecapTxt(args: {
     `Campaign: ${args.campaignSlug}`,
     `Generated At: ${args.recap.generatedAt}`,
     `Model: ${displayModel}`,
+    `Strategy: ${args.recap.strategyVersion ?? args.recap.modelVersion}`,
     "",
     "[Concise]",
     args.recap.concise,
@@ -211,7 +212,7 @@ export function RecapTabs({
   annotationVersion = 0,
 }: RecapTabsProps) {
   const router = useRouter();
-  const recapDisplayModel = recap?.displayModel ?? recap?.modelVersion ?? null;
+  const recapDisplayModel = recap ? (recap.llmModel?.trim() || "Unknown") : null;
   const [activeTab, setActiveTab] = useState<RecapTab>(resolveDefaultTab(recap));
   const [isPending, setIsPending] = useState(false);
   const [banner, setBanner] = useState<BannerState>(

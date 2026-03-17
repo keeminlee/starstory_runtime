@@ -123,7 +123,8 @@ export type SessionRecap = {
   detailed: string;
   generatedAt: string;
   modelVersion: string;
-  displayModel?: string | null;
+  llmProvider?: "openai" | "anthropic" | "google" | null;
+  llmModel?: string | null;
   source?: "canonical" | "legacy_artifact" | "legacy_meecap";
   engine?: string | null;
   sourceHash?: string | null;

@@ -58,6 +58,8 @@ export type ArchiveRecap = {
   campaignSlug: string;
   generatedAt: number;
   modelVersion: string;
+  llmProvider: "openai" | "anthropic" | "google" | null;
+  llmModel: string | null;
   createdAtMs: number;
   updatedAtMs: number;
   engine: string | null;
@@ -79,6 +81,16 @@ const DEFAULT_DB_FILENAME = "db.sqlite";
 const DEFAULT_DATA_ROOT = "data";
 
 const readDbCache = new Map<string, Database.Database | null>();
+
+function parseRecapMetaJson(metaJson: string | null): Record<string, unknown> {
+  if (!metaJson) return {};
+  try {
+    const parsed = JSON.parse(metaJson) as Record<string, unknown>;
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 type CampaignDbSource = "scoped" | "legacy";
 
@@ -981,6 +993,7 @@ export function readSessionRecap(args: {
 
     if (row) {
       const modelVersion = row.strategy_version ?? "session-recaps-v2";
+      const meta = parseRecapMetaJson(row.meta_json);
 
       return {
         sessionId: row.session_id,
@@ -988,6 +1001,10 @@ export function readSessionRecap(args: {
         campaignSlug: args.campaignSlug,
         generatedAt: row.updated_at_ms,
         modelVersion,
+        llmProvider: typeof meta.llm_provider === "string"
+          ? meta.llm_provider as "openai" | "anthropic" | "google"
+          : null,
+        llmModel: typeof meta.llm_model === "string" ? meta.llm_model : null,
         createdAtMs: row.created_at_ms,
         updatedAtMs: row.updated_at_ms,
         engine: row.engine,
@@ -1029,12 +1046,17 @@ export function readSessionRecap(args: {
 
     const content = artifact?.content_text?.trim();
     if (artifact && content) {
+      const meta = parseRecapMetaJson(artifact.meta_json);
       return {
         sessionId: args.sessionId,
         guildId: args.guildId,
         campaignSlug: args.campaignSlug,
         generatedAt: artifact.created_at_ms,
         modelVersion: artifact.strategy_version ?? "session-recaps-legacy-artifact-v1",
+        llmProvider: typeof meta.llm_provider === "string"
+          ? meta.llm_provider as "openai" | "anthropic" | "google"
+          : null,
+        llmModel: typeof meta.llm_model === "string" ? meta.llm_model : null,
         createdAtMs: artifact.created_at_ms,
         updatedAtMs: artifact.created_at_ms,
         engine: artifact.engine,
@@ -1078,6 +1100,8 @@ export function readSessionRecap(args: {
         campaignSlug: args.campaignSlug,
         generatedAt: meecap.updated_at_ms,
         modelVersion: "session-recaps-legacy-meecap-v1",
+        llmProvider: null,
+        llmModel: meecap.model,
         createdAtMs: meecap.created_at_ms,
         updatedAtMs: meecap.updated_at_ms,
         engine: meecap.model,

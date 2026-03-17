@@ -31,7 +31,8 @@ afterEach(() => {
 
 async function seedSessionAndLedger(guildId: string, sessionId: string): Promise<void> {
   const { getDbForCampaign } = await import("../db.js");
-  const db = getDbForCampaign("default");
+  const { resolveCampaignSlug } = await import("../campaign/guildConfig.js");
+  const db = getDbForCampaign(resolveCampaignSlug({ guildId }));
   const now = Date.now();
 
   db.prepare(
@@ -124,6 +125,33 @@ async function markSpeakerAttributionReady(guildId: string, sessionId: string): 
   });
 }
 
+function buildStyleRecapResult(args: {
+  strategy: RecapStrategy;
+  text?: string;
+  createdAtMs?: number;
+  sourceTranscriptHash?: string;
+  llmProvider?: "openai" | "anthropic" | "google" | null;
+  llmModel?: string | null;
+}) {
+  return {
+    text: args.text ?? `${args.strategy}-output`,
+    createdAtMs: args.createdAtMs ?? Date.now(),
+    strategy: args.strategy,
+    engine: "megameecap" as const,
+    strategyVersion: "megameecap-final-v1",
+    llmProvider: args.llmProvider ?? "openai",
+    llmModel: args.llmModel ?? "gpt-4o-mini",
+    baseVersion: "megameecap-base-v1",
+    finalVersion: "megameecap-final-v1",
+    sourceTranscriptHash: args.sourceTranscriptHash ?? `hash-${args.strategy}`,
+    cacheHit: false,
+    artifactPaths: {
+      recapPath: `${args.strategy}.md`,
+      metaPath: `${args.strategy}.json`,
+    },
+  };
+}
+
 test("sessionRecaps upsert/get round-trip preserves canonical three-view shape", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-session-recaps-api-"));
   tempDirs.push(tempDir);
@@ -144,7 +172,7 @@ test("sessionRecaps upsert/get round-trip preserves canonical three-view shape",
     engine: "megameecap",
     sourceHash: "hash-abc",
     strategyVersion: "session-recaps-v2",
-    metaJson: JSON.stringify({ run: "run1" }),
+    metaJson: JSON.stringify({ run: "run1", llm_provider: "anthropic", llm_model: "claude-haiku-4-5" }),
     views: {
       concise: "Concise recap",
       balanced: "Balanced recap",
@@ -156,6 +184,8 @@ test("sessionRecaps upsert/get round-trip preserves canonical three-view shape",
   expect(created.views.concise).toBe("Concise recap");
   expect(created.views.balanced).toBe("Balanced recap");
   expect(created.views.detailed).toBe("Detailed recap");
+  expect(created.llmProvider).toBe("anthropic");
+  expect(created.llmModel).toBe("claude-haiku-4-5");
 
   const loaded = getSessionRecap(guildId, sessionId);
   expect(loaded).toBeTruthy();
@@ -163,6 +193,8 @@ test("sessionRecaps upsert/get round-trip preserves canonical three-view shape",
   expect(loaded?.views.balanced).toBe("Balanced recap");
   expect(loaded?.views.detailed).toBe("Detailed recap");
   expect(loaded?.sourceHash).toBe("hash-abc");
+  expect(loaded?.llmProvider).toBe("anthropic");
+  expect(loaded?.llmModel).toBe("claude-haiku-4-5");
 });
 
 test("getSessionRecap falls back to legacy session_artifacts recap when canonical row is missing", async () => {
@@ -175,7 +207,8 @@ test("getSessionRecap falls back to legacy session_artifacts recap when canonica
   await seedSessionAndLedger(guildId, sessionId);
 
   const { getDbForCampaign } = await import("../db.js");
-  const db = getDbForCampaign("default");
+  const { resolveCampaignSlug } = await import("../campaign/guildConfig.js");
+  const db = getDbForCampaign(resolveCampaignSlug({ guildId }));
   const now = Date.now();
 
   db.exec(`
@@ -217,6 +250,7 @@ test("getSessionRecap falls back to legacy session_artifacts recap when canonica
   expect(loaded?.views.detailed).toBe("");
   expect(loaded?.modelVersion).toBe("legacy-artifact-v1");
   expect(loaded?.sourceHash).toBe("hash-legacy-artifact");
+  expect(loaded?.llmModel).toBeNull();
 });
 
 test("getSessionRecap falls back to legacy meecaps narrative when canonical row is missing", async () => {
@@ -229,7 +263,8 @@ test("getSessionRecap falls back to legacy meecaps narrative when canonical row 
   await seedSessionAndLedger(guildId, sessionId);
 
   const { getDbForCampaign } = await import("../db.js");
-  const db = getDbForCampaign("default");
+  const { resolveCampaignSlug } = await import("../campaign/guildConfig.js");
+  const db = getDbForCampaign(resolveCampaignSlug({ guildId }));
   const now = Date.now();
 
   db.exec(`
@@ -267,6 +302,7 @@ test("getSessionRecap falls back to legacy meecaps narrative when canonical row 
   expect(loaded?.views.detailed).toBe("");
   expect(loaded?.modelVersion).toBe("session-recaps-legacy-meecap-v1");
   expect(loaded?.engine).toBe("legacy-model");
+  expect(loaded?.llmModel).toBe("legacy-model");
 });
 
 test("sessionTranscript returns normalized transcript line contract", async () => {
@@ -320,19 +356,12 @@ test("generateSessionRecap orchestrates all three styles and persists session_re
       generateStyleRecap: async ({ strategy }) => {
         styleCalls.push(strategy);
         return {
-          text: `${strategy.toUpperCase()} recap output`,
-          createdAtMs: Date.now(),
-          strategy,
-          engine: "megameecap",
-          strategyVersion: "megameecap-final-v1",
-          baseVersion: "megameecap-base-v1",
-          finalVersion: "megameecap-final-v1",
-          sourceTranscriptHash: `hash-${strategy}`,
-          cacheHit: false,
-          artifactPaths: {
-            recapPath: `${strategy}.md`,
-            metaPath: `${strategy}.json`,
-          },
+          ...buildStyleRecapResult({
+            strategy,
+            text: `${strategy.toUpperCase()} recap output`,
+            llmProvider: "anthropic",
+            llmModel: "claude-haiku-4-5",
+          }),
           sourceRange: {
             startLine: 0,
             endLine: 2,
@@ -349,6 +378,10 @@ test("generateSessionRecap orchestrates all three styles and persists session_re
   expect(generated.views.detailed).toContain("DETAILED");
   expect(generated.generatedAt).toBeGreaterThan(0);
   expect(generated.modelVersion).toBe("megameecap-final-v1");
+  expect(generated.llmProvider).toBe("anthropic");
+  expect(generated.llmModel).toBe("claude-haiku-4-5");
+  expect(generated.metaJson).toContain('"llm_provider":"anthropic"');
+  expect(generated.metaJson).toContain('"llm_model":"claude-haiku-4-5"');
 
   const loaded = getSessionRecap(guildId, sessionId);
   expect(loaded).toBeTruthy();
@@ -356,6 +389,8 @@ test("generateSessionRecap orchestrates all three styles and persists session_re
   expect(loaded?.views.balanced).toContain("BALANCED");
   expect(loaded?.views.detailed).toContain("DETAILED");
   expect(loaded?.modelVersion).toBe("megameecap-final-v1");
+  expect(loaded?.llmProvider).toBe("anthropic");
+  expect(loaded?.llmModel).toBe("claude-haiku-4-5");
 });
 
 test("regenerateSessionRecap overwrites safely and records regeneration reason", async () => {
@@ -377,42 +412,25 @@ test("regenerateSessionRecap overwrites safely and records regeneration reason",
   await generateSessionRecap(
     { guildId, sessionId },
     {
-      generateStyleRecap: async ({ strategy }) => ({
-        text: `v1-${strategy}`,
-        createdAtMs: Date.now(),
-        strategy,
-        engine: "megameecap",
-        strategyVersion: "megameecap-final-v1",
-        baseVersion: "megameecap-base-v1",
-        finalVersion: "megameecap-final-v1",
-        sourceTranscriptHash: "hash-v1",
-        cacheHit: false,
-        artifactPaths: {
-          recapPath: `${strategy}-v1.md`,
-          metaPath: `${strategy}-v1.json`,
-        },
-      }),
+      generateStyleRecap: async ({ strategy }) =>
+        buildStyleRecapResult({
+          strategy,
+          text: `v1-${strategy}`,
+          sourceTranscriptHash: "hash-v1",
+        }),
     }
   );
 
   const regenerated = await regenerateSessionRecap(
     { guildId, sessionId, reason: "manual_qc" },
     {
-      generateStyleRecap: async ({ strategy }) => ({
-        text: `v2-${strategy}`,
-        createdAtMs: Date.now() + 1,
-        strategy,
-        engine: "megameecap",
-        strategyVersion: "megameecap-final-v1",
-        baseVersion: "megameecap-base-v1",
-        finalVersion: "megameecap-final-v1",
-        sourceTranscriptHash: "hash-v2",
-        cacheHit: false,
-        artifactPaths: {
-          recapPath: `${strategy}-v2.md`,
-          metaPath: `${strategy}-v2.json`,
-        },
-      }),
+      generateStyleRecap: async ({ strategy }) =>
+        buildStyleRecapResult({
+          strategy,
+          text: `v2-${strategy}`,
+          createdAtMs: Date.now() + 1,
+          sourceTranscriptHash: "hash-v2",
+        }),
     }
   );
 
@@ -442,42 +460,25 @@ test("repeated generateSessionRecap preserves createdAt and overwrites stored vi
   const first = await generateSessionRecap(
     { guildId, sessionId },
     {
-      generateStyleRecap: async ({ strategy }) => ({
-        text: `first-${strategy}`,
-        createdAtMs: Date.now(),
-        strategy,
-        engine: "megameecap",
-        strategyVersion: "megameecap-final-v1",
-        baseVersion: "megameecap-base-v1",
-        finalVersion: "megameecap-final-v1",
-        sourceTranscriptHash: "hash-first",
-        cacheHit: false,
-        artifactPaths: {
-          recapPath: `${strategy}-first.md`,
-          metaPath: `${strategy}-first.json`,
-        },
-      }),
+      generateStyleRecap: async ({ strategy }) =>
+        buildStyleRecapResult({
+          strategy,
+          text: `first-${strategy}`,
+          sourceTranscriptHash: "hash-first",
+        }),
     }
   );
 
   const second = await generateSessionRecap(
     { guildId, sessionId },
     {
-      generateStyleRecap: async ({ strategy }) => ({
-        text: `second-${strategy}`,
-        createdAtMs: Date.now() + 10,
-        strategy,
-        engine: "megameecap",
-        strategyVersion: "megameecap-final-v1",
-        baseVersion: "megameecap-base-v1",
-        finalVersion: "megameecap-final-v1",
-        sourceTranscriptHash: "hash-second",
-        cacheHit: false,
-        artifactPaths: {
-          recapPath: `${strategy}-second.md`,
-          metaPath: `${strategy}-second.json`,
-        },
-      }),
+      generateStyleRecap: async ({ strategy }) =>
+        buildStyleRecapResult({
+          strategy,
+          text: `second-${strategy}`,
+          createdAtMs: Date.now() + 10,
+          sourceTranscriptHash: "hash-second",
+        }),
     }
   );
 
@@ -528,19 +529,11 @@ test("generateSessionRecap maps missing transcript and invalid output to typed r
       { guildId, sessionId },
       {
         generateStyleRecap: async ({ strategy }) => ({
-          text: strategy === "balanced" ? "   " : `${strategy}-ok`,
-          createdAtMs: Date.now(),
-          strategy,
-          engine: "megameecap",
-          strategyVersion: "megameecap-final-v1",
-          baseVersion: "megameecap-base-v1",
-          finalVersion: "megameecap-final-v1",
-          sourceTranscriptHash: "hash-invalid",
-          cacheHit: false,
-          artifactPaths: {
-            recapPath: `${strategy}.md`,
-            metaPath: `${strategy}.json`,
-          },
+          ...buildStyleRecapResult({
+            strategy,
+            text: strategy === "balanced" ? "   " : `${strategy}-ok`,
+            sourceTranscriptHash: "hash-invalid",
+          }),
         }),
       }
     )
@@ -570,21 +563,12 @@ test("generateSessionRecap returns explicit attribution-required domain error wh
     generateSessionRecap(
       { guildId, sessionId },
       {
-        generateStyleRecap: async ({ strategy }) => ({
-          text: `${strategy}-ok`,
-          createdAtMs: Date.now(),
-          strategy,
-          engine: "megameecap",
-          strategyVersion: "megameecap-final-v1",
-          baseVersion: "megameecap-base-v1",
-          finalVersion: "megameecap-final-v1",
-          sourceTranscriptHash: "hash-attribution",
-          cacheHit: false,
-          artifactPaths: {
-            recapPath: `${strategy}.md`,
-            metaPath: `${strategy}.json`,
-          },
-        }),
+        generateStyleRecap: async ({ strategy }) =>
+          buildStyleRecapResult({
+            strategy,
+            text: `${strategy}-ok`,
+            sourceTranscriptHash: "hash-attribution",
+          }),
       }
     )
   ).rejects.toMatchObject({
