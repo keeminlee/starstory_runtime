@@ -76,7 +76,7 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
                 ? "danger"
                 : "warning",
       },
-      ...(session.status !== "in_progress" && session.speakerAttribution?.required && !session.speakerAttribution.ready
+      ...(session.recapPhase === "ended_pending_attribution"
         ? [
             {
               label: "Attribution needed",
@@ -95,7 +95,7 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
       seen.add(key);
       return true;
     });
-  }, [session.artifacts.transcript, session.isArchived, session.sessionOrigin, session.source, session.speakerAttribution, session.status, statusTone]);
+  }, [session.artifacts.transcript, session.isArchived, session.recapPhase, session.sessionOrigin, session.source, session.status, statusTone]);
   const reportBugHref = useMemo(
     () =>
       buildBugReportHref({
