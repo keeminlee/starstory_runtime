@@ -238,6 +238,110 @@ describe("web dashboard Phase B state engine", () => {
     db.close();
   });
 
+  test("hides archived sessions from default dashboard and campaign lists", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-web-phaseb-archive-hidden-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    await setAuthGuildsDetailed([{ id: "guild-1", name: "Guild One" }], "dm-user");
+
+    const { getDbForCampaign } = await import("../db.js");
+    const { ensureGuildConfig, setGuildAwakened, setGuildMetaCampaignSlug, setGuildCampaignSlug } = await import("../campaign/guildConfig.js");
+    const { createShowtimeCampaign } = await import("../campaign/showtimeCampaigns.js");
+    const { startSession, endSession, getMostRecentSession } = await import("../sessions/sessions.js");
+    const { archiveSession } = await import("../../apps/web/lib/server/readData/archiveReadStore");
+    const db = getDbForCampaign("default");
+
+    const cfg = ensureGuildConfig("guild-1", "Guild One");
+    setGuildAwakened("guild-1", true);
+    setGuildMetaCampaignSlug("guild-1", cfg.campaign_slug);
+
+    const campaign = createShowtimeCampaign({
+      guildId: "guild-1",
+      campaignName: "Campaign Alpha",
+      createdByUserId: "dm-user",
+    });
+    setGuildCampaignSlug("guild-1", campaign.campaign_slug);
+
+    startSession("guild-1", "dm-user", "DM", { source: "live", kind: "canon", modeAtStart: "canon" });
+    endSession("guild-1", "showtime_end");
+    const session = getMostRecentSession("guild-1");
+    expect(session?.session_id).toBeTruthy();
+
+    const archived = archiveSession({
+      guildId: "guild-1",
+      campaignSlug: campaign.campaign_slug,
+      sessionId: session!.session_id,
+      archivedAtMs: Date.now(),
+    });
+    expect(archived).toBe(true);
+
+    const model = await getWebDashboardModel();
+    expect(model.authState).toBe("signed_in_no_sessions");
+    expect(model.totalSessions).toBe(0);
+    expect(model.campaigns).toEqual([]);
+
+    const campaignDetail = await getWebCampaignDetail({
+      campaignSlug: campaign.campaign_slug,
+      searchParams: { guild_id: "guild-1" },
+    });
+    expect(campaignDetail).toBeNull();
+
+    db.close();
+  });
+
+  test("surfaces archived sessions when explicitly requested", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-web-phaseb-archive-visible-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    await setAuthGuildsDetailed([{ id: "guild-1", name: "Guild One" }], "dm-user");
+
+    const { getDbForCampaign } = await import("../db.js");
+    const { ensureGuildConfig, setGuildAwakened, setGuildMetaCampaignSlug, setGuildCampaignSlug } = await import("../campaign/guildConfig.js");
+    const { createShowtimeCampaign } = await import("../campaign/showtimeCampaigns.js");
+    const { startSession, endSession, getMostRecentSession } = await import("../sessions/sessions.js");
+    const { archiveSession } = await import("../../apps/web/lib/server/readData/archiveReadStore");
+    const db = getDbForCampaign("default");
+
+    const cfg = ensureGuildConfig("guild-1", "Guild One");
+    setGuildAwakened("guild-1", true);
+    setGuildMetaCampaignSlug("guild-1", cfg.campaign_slug);
+
+    const campaign = createShowtimeCampaign({
+      guildId: "guild-1",
+      campaignName: "Campaign Alpha",
+      createdByUserId: "dm-user",
+    });
+    setGuildCampaignSlug("guild-1", campaign.campaign_slug);
+
+    startSession("guild-1", "dm-user", "DM", { source: "live", kind: "canon", modeAtStart: "canon" });
+    endSession("guild-1", "showtime_end");
+    const session = getMostRecentSession("guild-1");
+    expect(session?.session_id).toBeTruthy();
+
+    archiveSession({
+      guildId: "guild-1",
+      campaignSlug: campaign.campaign_slug,
+      sessionId: session!.session_id,
+      archivedAtMs: Date.now(),
+    });
+
+    const model = await getWebDashboardModel({ searchParams: { show_archived: "1" } });
+    expect(model.authState).toBe("ok");
+    expect(model.totalSessions).toBe(1);
+    expect(model.campaigns[0]?.sessions[0]?.isArchived).toBe(true);
+
+    const campaignDetail = await getWebCampaignDetail({
+      campaignSlug: campaign.campaign_slug,
+      searchParams: { guild_id: "guild-1", show_archived: "1" },
+    });
+    expect(campaignDetail?.sessions).toHaveLength(1);
+    expect(campaignDetail?.sessions[0]?.isArchived).toBe(true);
+
+    db.close();
+  });
+
   test("keeps campaign visible when configured slug matches meta campaign slug", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-web-phaseb-"));
     tempDirs.push(tempDir);

@@ -46,6 +46,10 @@ export type UpdateSessionLabelRequest = {
 
 export type UpdateSessionLabelResponse = SessionDetailResponse;
 
+export type ArchiveSessionResponse = SessionDetailResponse;
+
+export type EndSessionResponse = SessionDetailResponse;
+
 export type SessionTranscriptResponse = {
   sessionId: string;
   campaignSlug: string;

@@ -92,6 +92,7 @@ export function buildSessionDetail(args: {
       sessionId: args.session.session_id,
     }),
     date: toIsoDate(args.session.started_at_ms),
+    isArchived: args.session.archived_at_ms !== null,
     status: mapCanonicalStatusToWebStatus(args.session.status),
     source,
     sessionOrigin: mapCanonicalSessionOrigin(args.session),

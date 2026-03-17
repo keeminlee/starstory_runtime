@@ -5,6 +5,7 @@ import { resolveWebAuthContext, WebAuthError } from "@/lib/server/authContext";
 import { listWebCampaignsForGuilds } from "@/lib/server/campaignReaders";
 import { getDemoSessionDetail, isDemoSessionId } from "@/lib/server/demoCampaign";
 import {
+  archiveSession,
   findSessionByGuildAndId,
   getGuildCampaignSlug,
   listGuildCampaignRecords,
@@ -20,6 +21,7 @@ import { assertSessionGuildInAuthorizedScope, ScopeGuardError } from "@/lib/serv
 import { readSessionSpeakerAttributionSnapshot } from "@/lib/server/sessionSpeakerAttributionService";
 import type { SessionArtifactStatus, SessionDetail, SessionRecapPhase } from "@/lib/types";
 import { assertUserCanWriteCampaignArchive, canUserWriteCampaignArchive } from "@/lib/server/writeAuthority";
+import { endSession, getActiveSession } from "../../../../src/sessions/sessions.js";
 
 export type CanonicalSessionDetail = {
   guildId: string;
@@ -216,6 +218,107 @@ export async function updateWebSessionLabel(args: {
 
     if (!updated) {
       throw new ScopeGuardError("Session is out of scope for the authorized guild set.");
+    }
+
+    return getWebSessionDetail({
+      sessionId: args.sessionId,
+      searchParams: args.searchParams,
+    });
+  } catch (error) {
+    throw mapToWebDataError(error);
+  }
+}
+
+export async function archiveWebSession(args: {
+  sessionId: string;
+  searchParams?: Record<string, string | string[] | undefined>;
+}): Promise<SessionDetail> {
+  try {
+    if (isDemoSessionId(args.sessionId)) {
+      throw new WebDataError("invalid_request", 422, "Demo sessions do not support archive actions.");
+    }
+
+    const auth = await resolveWebAuthContext(args.searchParams);
+    const canonical = await getCanonicalSessionDetail({
+      authorizedGuildIds: auth.authorizedGuildIds,
+      sessionId: args.sessionId,
+      searchParams: args.searchParams,
+    });
+
+    assertUserCanWriteCampaignArchive({
+      guildId: canonical.guildId,
+      campaignSlug: canonical.campaignSlug,
+      userId: auth.user?.id ?? null,
+    });
+
+    if (canonical.session.status === "active") {
+      throw new WebDataError(
+        "active_session_archive_blocked",
+        409,
+        "Active sessions cannot be archived. End the session first."
+      );
+    }
+
+    if (canonical.session.archived_at_ms === null) {
+      const updated = archiveSession({
+        guildId: canonical.guildId,
+        campaignSlug: canonical.campaignSlug,
+        sessionId: args.sessionId,
+        archivedAtMs: Date.now(),
+      });
+
+      if (!updated) {
+        throw new ScopeGuardError("Session is out of scope for the authorized guild set.");
+      }
+    }
+
+    return getWebSessionDetail({
+      sessionId: args.sessionId,
+      searchParams: args.searchParams,
+    });
+  } catch (error) {
+    throw mapToWebDataError(error);
+  }
+}
+
+export async function endWebSession(args: {
+  sessionId: string;
+  searchParams?: Record<string, string | string[] | undefined>;
+}): Promise<SessionDetail> {
+  try {
+    if (isDemoSessionId(args.sessionId)) {
+      throw new WebDataError("invalid_request", 422, "Demo sessions do not support end-session actions.");
+    }
+
+    const auth = await resolveWebAuthContext(args.searchParams);
+    const canonical = await getCanonicalSessionDetail({
+      authorizedGuildIds: auth.authorizedGuildIds,
+      sessionId: args.sessionId,
+      searchParams: args.searchParams,
+    });
+
+    assertUserCanWriteCampaignArchive({
+      guildId: canonical.guildId,
+      campaignSlug: canonical.campaignSlug,
+      userId: auth.user?.id ?? null,
+    });
+
+    if (canonical.session.status !== "active") {
+      throw new WebDataError("conflict", 409, "This session is no longer in progress.");
+    }
+
+    const active = getActiveSession(canonical.guildId);
+    if (!active || active.session_id !== args.sessionId) {
+      throw new WebDataError(
+        "conflict",
+        409,
+        "This session is no longer the active showtime session. Refresh and try again."
+      );
+    }
+
+    const changes = endSession(canonical.guildId, "showtime_end");
+    if (changes === 0) {
+      throw new WebDataError("conflict", 409, "This session is no longer in progress.");
     }
 
     return getWebSessionDetail({

@@ -321,6 +321,93 @@ describe("Phase 5.5 write authority enforcement", () => {
     expect(updated.label).toBe("Campaign Owner Label");
   });
 
+  test("non-DM is denied session archive and DM can archive without changing lifecycle status", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-phase55-archive-auth-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const guildId = "guild-1";
+    const dmUserId = "dm-1";
+    const playerUserId = "player-1";
+    const { campaignSlug, sessionId } = await setupGuildCampaignAndSession({ guildId, dmUserId, playerUserId });
+
+    await setAuth({ userId: playerUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+    const { archiveWebSession } = await getSessionReaders();
+    await expect(archiveWebSession({ sessionId, searchParams: { campaign_slug: campaignSlug } })).rejects.toMatchObject({
+      code: "unauthorized",
+      status: 403,
+    });
+
+    await setAuth({ userId: dmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+    const { archiveWebSession: archiveWebSessionAsDm, getWebSessionDetail } = await getSessionReaders();
+    const archived = await archiveWebSessionAsDm({ sessionId, searchParams: { campaign_slug: campaignSlug } });
+    expect(archived.isArchived).toBe(true);
+    expect(archived.status).toBe("completed");
+
+    await setAuth({ userId: playerUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+    const { getWebSessionDetail: getArchivedSessionDetail } = await getSessionReaders();
+    const detail = await getArchivedSessionDetail({ sessionId, searchParams: { campaign_slug: campaignSlug } });
+    expect(detail.isArchived).toBe(true);
+    expect(detail.status).toBe("completed");
+  });
+
+  test("active session archive is blocked and leaves lifecycle status unchanged", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-phase55-archive-active-blocked-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const guildId = "guild-1";
+    const dmUserId = "dm-1";
+    const playerUserId = "player-1";
+    const { campaignSlug, sessionId } = await setupGuildCampaignWithActiveSession({ guildId, dmUserId, playerUserId });
+
+    await setAuth({ userId: dmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+    const { archiveWebSession, getWebSessionDetail } = await getSessionReaders();
+    await expect(archiveWebSession({ sessionId, searchParams: { campaign_slug: campaignSlug } })).rejects.toMatchObject({
+      code: "active_session_archive_blocked",
+      status: 409,
+    });
+
+    const detail = await getWebSessionDetail({ sessionId, searchParams: { campaign_slug: campaignSlug } });
+    expect(detail.isArchived).toBe(false);
+    expect(detail.status).toBe("in_progress");
+  });
+
+  test("non-DM is denied ending an in-progress session and DM can end it with showtime semantics", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-phase55-end-session-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const guildId = "guild-1";
+    const dmUserId = "dm-1";
+    const playerUserId = "player-1";
+    const { campaignSlug, sessionId } = await setupGuildCampaignWithActiveSession({ guildId, dmUserId, playerUserId });
+
+    await setAuth({ userId: playerUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+    const { endWebSession } = await getSessionReaders();
+    await expect(endWebSession({ sessionId, searchParams: { campaign_slug: campaignSlug } })).rejects.toMatchObject({
+      code: "unauthorized",
+      status: 403,
+    });
+
+    await setAuth({ userId: dmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+    const { endWebSession: endWebSessionAsDm, getWebSessionDetail } = await getSessionReaders();
+    const ended = await endWebSessionAsDm({ sessionId, searchParams: { campaign_slug: campaignSlug } });
+    expect(ended.status).toBe("completed");
+
+    const detail = await getWebSessionDetail({ sessionId, searchParams: { campaign_slug: campaignSlug } });
+    expect(detail.status).toBe("completed");
+
+    const { getDbForCampaign } = await import("../db.js");
+    const db = getDbForCampaign(campaignSlug);
+    const row = db
+      .prepare("SELECT status, ended_reason FROM sessions WHERE session_id = ? LIMIT 1")
+      .get(sessionId) as { status: string; ended_reason: string | null } | undefined;
+
+    expect(row?.status).toBe("completed");
+    expect(row?.ended_reason).toBe("showtime_end");
+  });
+
   test("non-DM is denied recap regenerate before capability checks; DM reaches capability gate", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-phase55-auth-"));
     tempDirs.push(tempDir);

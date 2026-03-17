@@ -20,6 +20,8 @@ import type {
   RevertEntityReviewBatchResponse,
   EntityReviewBatchesResponse,
   SessionAnnotatedRecapsResponse,
+  ArchiveSessionResponse,
+  EndSessionResponse,
 } from "@/lib/api/types";
 
 type QueryInput = Record<string, string | string[] | undefined> | undefined;
@@ -109,6 +111,26 @@ export async function updateSessionLabelApi(
     method: "PATCH",
     query: toQuery(searchParams),
     body: payload,
+  });
+}
+
+export async function archiveSessionApi(
+  sessionId: string,
+  searchParams?: QueryInput
+): Promise<ArchiveSessionResponse> {
+  return fetchJson<ArchiveSessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/archive`, {
+    method: "POST",
+    query: toQuery(searchParams),
+  });
+}
+
+export async function endSessionApi(
+  sessionId: string,
+  searchParams?: QueryInput
+): Promise<EndSessionResponse> {
+  return fetchJson<EndSessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/end`, {
+    method: "POST",
+    query: toQuery(searchParams),
   });
 }
 

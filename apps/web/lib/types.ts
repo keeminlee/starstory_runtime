@@ -51,6 +51,7 @@ export type SessionSummary = {
   label: string | null;
   title: string;
   date: string;
+  isArchived: boolean;
   startedByUserId?: string | null;
   status: SessionStatus;
   source: "live" | "ingest";
@@ -113,6 +114,7 @@ export type SessionDetail = {
   label: string | null;
   title: string;
   date: string;
+  isArchived: boolean;
   status: SessionStatus;
   source: "live" | "ingest";
   sessionOrigin: SessionOrigin;

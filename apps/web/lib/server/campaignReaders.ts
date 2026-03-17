@@ -19,6 +19,14 @@ import type { CampaignSummary, DashboardEmptyGuild, DashboardModel, SessionArtif
 
 type QueryInput = Record<string, string | string[] | undefined> | undefined;
 
+function readIncludeArchived(searchParams?: QueryInput): boolean {
+  const raw = searchParams?.show_archived ?? searchParams?.include_archived;
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
 function toIsoDate(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
@@ -87,13 +95,52 @@ function guildHasVisibleCampaignSlug(args: { guildId: string; campaignSlug: stri
     guildId: args.guildId,
     campaignSlug: args.campaignSlug,
     limit: 1,
+    includeArchived: false,
   }).length > 0;
+}
+
+function guildHasVisibleCampaignSlugForMode(args: {
+  guildId: string;
+  campaignSlug: string;
+  includeArchived: boolean;
+}): boolean {
+  const hasVisibleSessions = listSessionsForGuildCampaign({
+    guildId: args.guildId,
+    campaignSlug: args.campaignSlug,
+    limit: 1,
+    includeArchived: false,
+  }).length > 0;
+
+  if (args.includeArchived) {
+    return isCampaignSlugOwnedByGuild(args) || listSessionsForGuildCampaign({
+      guildId: args.guildId,
+      campaignSlug: args.campaignSlug,
+      limit: 1,
+      includeArchived: true,
+    }).length > 0;
+  }
+
+  if (hasVisibleSessions) {
+    return true;
+  }
+
+  if (isCampaignSlugOwnedByGuild(args)) {
+    return listSessionsForGuildCampaign({
+      guildId: args.guildId,
+      campaignSlug: args.campaignSlug,
+      limit: 1,
+      includeArchived: true,
+    }).length === 0;
+  }
+
+  return false;
 }
 
 function resolveGuildScopeForSlug(args: {
   auth: Awaited<ReturnType<typeof resolveWebAuthContext>>;
   campaignSlug: string;
   searchParams?: QueryInput;
+  includeArchived?: boolean;
 }): { guildId: string; guildName?: string; guildIconUrl?: string } | null {
   const requestedGuildId = readGuildIdDisambiguator(args.searchParams);
   const campaignSlug = args.campaignSlug.trim();
@@ -107,7 +154,11 @@ function resolveGuildScopeForSlug(args: {
       throw new ScopeGuardError("Campaign is out of scope for the authorized guild set.");
     }
 
-    if (!guildHasVisibleCampaignSlug({ guildId: requestedGuildId, campaignSlug })) {
+    if (!guildHasVisibleCampaignSlugForMode({
+      guildId: requestedGuildId,
+      campaignSlug,
+      includeArchived: args.includeArchived ?? false,
+    })) {
       return null;
     }
 
@@ -120,7 +171,9 @@ function resolveGuildScopeForSlug(args: {
 
   const matches: Array<{ guildId: string; guildName?: string; guildIconUrl?: string }> = [];
   for (const guildId of args.auth.authorizedGuildIds) {
-    if (!guildHasVisibleCampaignSlug({ guildId, campaignSlug })) continue;
+    if (!guildHasVisibleCampaignSlugForMode({ guildId, campaignSlug, includeArchived: args.includeArchived ?? false })) {
+      continue;
+    }
     matches.push({
       guildId,
       guildName: readGuildNameById(args.auth, guildId),
@@ -147,11 +200,13 @@ export async function listWebSessionsForCampaign(args: {
   guildId: string;
   campaignSlug: string;
   limit?: number;
+  includeArchived?: boolean;
 }): Promise<SessionSummaryWithStats[]> {
   const rows = listSessionsForGuildCampaign({
     guildId: args.guildId,
     campaignSlug: args.campaignSlug,
     limit: args.limit ?? 25,
+    includeArchived: args.includeArchived ?? false,
   });
 
   return rows.map((row) => {
@@ -193,6 +248,7 @@ export async function listWebSessionsForCampaign(args: {
         label: row.label,
         title: formatSessionDisplayTitle({ label: row.label, sessionId: row.session_id }),
         date: toIsoDate(row.started_at_ms),
+        isArchived: row.archived_at_ms !== null,
         startedByUserId: row.started_by_id,
         status:
           row.status === "active"
@@ -218,6 +274,7 @@ async function listWebCampaignForGuild(args: {
   guildName?: string;
   guildIconUrl?: string;
   authorizedUserId?: string | null;
+  includeArchived?: boolean;
 }): Promise<{ campaigns: CampaignSummary[]; wordsRecorded: number; emptyGuild: DashboardEmptyGuild | null }> {
   const guildDisplayName = resolveGuildDisplayName({ guildId: args.guildId, guildName: args.guildName });
   const guildIconUrl = resolveGuildIconUrl(args.guildIconUrl);
@@ -237,6 +294,7 @@ async function listWebCampaignForGuild(args: {
         guildId: args.guildId,
         campaignSlug,
         limit: 50,
+        includeArchived: args.includeArchived ?? false,
       });
 
       if (sessions.length === 0) {
@@ -300,7 +358,12 @@ async function listWebCampaignForGuild(args: {
       guildId: args.guildId,
       campaignSlug,
       limit: 50,
+      includeArchived: args.includeArchived ?? false,
     });
+
+    if (sessions.length === 0) {
+      continue;
+    }
 
     const campaignName = campaignRecord.campaign_name?.trim() || prettifyCampaignSlug(campaignSlug);
 
@@ -339,6 +402,7 @@ export async function listWebCampaignsForGuilds(args: {
   authorizedGuilds?: WebAuthorizedGuild[];
   authorizedUserId?: string | null;
   includeDemoFallback?: boolean;
+  includeArchived?: boolean;
 }): Promise<{ campaigns: CampaignSummary[]; wordsRecorded: number; emptyGuilds: DashboardEmptyGuild[] }> {
   const guildNameMap = new Map<string, string>();
   const guildIconMap = new Map<string, string>();
@@ -368,6 +432,7 @@ export async function listWebCampaignsForGuilds(args: {
         guildName: guildNameMap.get(guildId),
         guildIconUrl: guildIconMap.get(guildId),
         authorizedUserId: args.authorizedUserId ?? null,
+        includeArchived: args.includeArchived ?? false,
       })
     )
   );
@@ -445,6 +510,7 @@ export async function getWebDashboardModel(args?: {
     authorizedGuilds: auth.authorizedGuilds,
     authorizedUserId: auth.user?.id ?? null,
     includeDemoFallback: false,
+    includeArchived: readIncludeArchived(args?.searchParams),
   });
 
   const totalSessions = model.campaigns.reduce((sum, campaign) => sum + campaign.sessionCount, 0);
@@ -474,6 +540,7 @@ export async function getWebCampaignDetail(args: {
   campaignSlug: string;
   searchParams?: QueryInput;
 }): Promise<CampaignSummary | null> {
+  const includeArchived = readIncludeArchived(args.searchParams);
   let auth = null as Awaited<ReturnType<typeof resolveWebAuthContext>> | null;
   try {
     auth = await resolveWebAuthContext(args.searchParams);
@@ -488,6 +555,7 @@ export async function getWebCampaignDetail(args: {
     auth,
     campaignSlug: args.campaignSlug,
     searchParams: args.searchParams,
+    includeArchived,
   });
 
   if (!resolvedScope) {
@@ -499,6 +567,7 @@ export async function getWebCampaignDetail(args: {
     guildId,
     campaignSlug: args.campaignSlug,
     limit: 50,
+    includeArchived,
   });
   const guildDisplayName = resolveGuildDisplayName({ guildId, guildName: resolvedScope.guildName });
   const guildIconUrl = resolveGuildIconUrl(resolvedScope.guildIconUrl);

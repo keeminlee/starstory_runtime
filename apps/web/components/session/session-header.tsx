@@ -8,7 +8,7 @@ import { StatusChip } from "@/components/shared/status-chip";
 import type { StatusChipTone } from "@/components/shared/status-chip";
 import type { SessionDetail } from "@/lib/types";
 import { formatSessionDisplayTitle } from "@/lib/campaigns/display";
-import { updateSessionLabelApi } from "@/lib/api/sessions";
+import { archiveSessionApi, endSessionApi, updateSessionLabelApi } from "@/lib/api/sessions";
 import { WebApiError } from "@/lib/api/http";
 import { buildBugReportHref } from "@/lib/bug-report";
 
@@ -22,6 +22,8 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
   const [label, setLabel] = useState(session.label);
   const [draftLabel, setDraftLabel] = useState(session.label ?? "");
   const [isEditing, setIsEditing] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [isEnding, setIsEnding] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const statusTone = session.status === "in_progress" ? "warning" : session.status === "interrupted" ? "danger" : "success";
   type StatusChipModel = { label: string; tone: StatusChipTone };
@@ -48,6 +50,14 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
         label: session.sessionOrigin === "lab_legacy" ? "Origin lab legacy" : "Origin showtime",
         tone: session.sessionOrigin === "lab_legacy" ? ("info" as const) : ("neutral" as const),
       },
+      ...(session.isArchived
+        ? [
+            {
+              label: "Archived",
+              tone: "neutral" as const,
+            },
+          ]
+        : []),
       {
         label:
           session.status === "in_progress"
@@ -85,7 +95,7 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
       seen.add(key);
       return true;
     });
-  }, [session.artifacts.transcript, session.sessionOrigin, session.source, session.speakerAttribution, session.status, statusTone]);
+  }, [session.artifacts.transcript, session.isArchived, session.sessionOrigin, session.source, session.speakerAttribution, session.status, statusTone]);
   const reportBugHref = useMemo(
     () =>
       buildBugReportHref({
@@ -113,17 +123,79 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
             <h1 className="text-5xl font-serif italic">{sessionLabel}</h1>
             {session.canWrite ? (
               !isEditing ? (
-                <button
-                  type="button"
-                  className="rounded-full border border-border px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
-                  onClick={() => {
-                    setDraftLabel(label ?? "");
-                    setIsEditing(true);
-                    setErrorMessage(null);
-                  }}
-                >
-                  Edit label
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="rounded-full border border-border px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+                    onClick={() => {
+                      setDraftLabel(label ?? "");
+                      setIsEditing(true);
+                      setErrorMessage(null);
+                    }}
+                  >
+                    Edit label
+                  </button>
+                  {session.status === "in_progress" ? (
+                    <button
+                      type="button"
+                      disabled={isEnding}
+                      title="End session"
+                      className="rounded-full border border-border px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-rose-400/40 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={async () => {
+                        if (!window.confirm("End this session now? This uses the same closure path as showtime end.")) {
+                          return;
+                        }
+
+                        setIsEnding(true);
+                        setErrorMessage(null);
+                        try {
+                          await endSessionApi(session.id, searchParams);
+                          router.refresh();
+                        } catch (error) {
+                          if (error instanceof WebApiError) {
+                            setErrorMessage(error.message);
+                          } else {
+                            setErrorMessage("Unable to end this session right now.");
+                          }
+                        } finally {
+                          setIsEnding(false);
+                        }
+                      }}
+                    >
+                      {isEnding ? "Ending" : "End session"}
+                    </button>
+                  ) : null}
+                  {!session.isArchived ? (
+                    <button
+                      type="button"
+                      disabled={isArchiving || session.status === "in_progress"}
+                      title={session.status === "in_progress" ? "Active sessions cannot be archived." : "Archive session"}
+                      className="rounded-full border border-border px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-amber-400/40 hover:text-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={async () => {
+                        if (!window.confirm("Archive this session? It will be hidden from default lists but remain readable by direct link.")) {
+                          return;
+                        }
+
+                        setIsArchiving(true);
+                        setErrorMessage(null);
+                        try {
+                          await archiveSessionApi(session.id, searchParams);
+                          router.refresh();
+                        } catch (error) {
+                          if (error instanceof WebApiError) {
+                            setErrorMessage(error.message);
+                          } else {
+                            setErrorMessage("Unable to archive this session right now.");
+                          }
+                        } finally {
+                          setIsArchiving(false);
+                        }
+                      }}
+                    >
+                      {isArchiving ? "Archiving" : session.status === "in_progress" ? "Archive blocked" : "Archive session"}
+                    </button>
+                  ) : null}
+                </>
               ) : (
                 <form
                   className="inline-flex items-center gap-2"

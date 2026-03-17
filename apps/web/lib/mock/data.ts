@@ -12,6 +12,7 @@ const SESSIONS: SessionDetail[] = [
     status: "completed",
     source: "live",
     sessionOrigin: "showtime",
+    isArchived: false,
     transcript: [
       {
         id: "t1",
@@ -73,6 +74,7 @@ const SESSIONS: SessionDetail[] = [
     status: "completed",
     source: "live",
     sessionOrigin: "showtime",
+    isArchived: false,
     transcript: [
       {
         id: "t6",
@@ -131,6 +133,7 @@ const CAMPAIGNS: CampaignSummary[] = [
       status: session.status,
       source: session.source,
       sessionOrigin: session.sessionOrigin,
+      isArchived: session.isArchived,
       artifacts: {
         transcript: session.artifacts.transcript,
         recap: session.artifacts.recap,

@@ -12,6 +12,7 @@ const DEMO_SESSIONS: SessionSummary[] = [
     status: "completed",
     source: "live",
     sessionOrigin: "showtime",
+    isArchived: false,
     artifacts: {
       transcript: "available",
       recap: "available",
@@ -26,6 +27,7 @@ const DEMO_SESSIONS: SessionSummary[] = [
     status: "in_progress",
     source: "ingest",
     sessionOrigin: "showtime",
+    isArchived: false,
     artifacts: {
       transcript: "available",
       recap: "available",
@@ -46,6 +48,7 @@ const DEMO_SESSION_DETAILS: Record<string, SessionDetail> = {
     source: "live",
     sessionOrigin: "showtime",
     guildId: DEMO_GUILD_ID,
+    isArchived: false,
     transcript: [
       {
         id: "demo-s1-line-1",
@@ -96,6 +99,7 @@ const DEMO_SESSION_DETAILS: Record<string, SessionDetail> = {
     source: "ingest",
     sessionOrigin: "showtime",
     guildId: DEMO_GUILD_ID,
+    isArchived: false,
     transcript: [
       {
         id: "demo-s2-line-1",

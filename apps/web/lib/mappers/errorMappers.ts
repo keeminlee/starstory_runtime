@@ -5,6 +5,7 @@ export type WebDataErrorCode =
   | "unauthorized"
   | "not_found"
   | "invalid_request"
+  | "active_session_archive_blocked"
   | "ambiguous_campaign_scope"
   | "ambiguous_session_scope"
   | "conflict"
