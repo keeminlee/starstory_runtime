@@ -8,7 +8,7 @@ export default function SettingsPage() {
         <header className="space-y-2">
           <h1 className="text-4xl font-serif">Settings</h1>
           <p className="text-sm text-muted-foreground">
-            Configure archive atmosphere preferences. Changes apply instantly and persist across routes and reloads.
+            No configurable settings yet.
           </p>
         </header>
 

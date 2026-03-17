@@ -99,6 +99,7 @@ export type RegistryPendingActionRequest =
 
 export type EntityResolutionStatus = "resolved" | "created" | "ignored";
 export type EntityReviewBatchStatus = "applied" | "reverted" | "failed";
+export type EntityResolutionAction = "resolve_existing" | "create_entity" | "add_alias" | "ignore_candidate";
 
 /** A candidate name detected in a session, with evidence and possible matches. */
 export type EntityCandidateDto = {
@@ -119,6 +120,8 @@ export type EntityResolutionDto = {
   id: string;
   candidateName: string;
   resolution: EntityResolutionStatus;
+  action: EntityResolutionAction;
+  summary: string;
   entityId: string | null;
   entityCategory: RegistryCategoryKey | null;
   batchId?: string | null;

@@ -35,6 +35,7 @@ import { scanNamesCore } from "../../../../src/registry/scanNamesCore";
 import type { ScanSourceRow } from "../../../../src/registry/scanNamesCore";
 import type {
   EntityCandidateDto,
+  EntityResolutionAction,
   EntityResolutionDto,
   EntityResolutionStatus,
   EntityReviewBatchDto,
@@ -60,6 +61,8 @@ type ResolutionRow = {
   campaign_slug: string;
   candidate_name: string;
   resolution: EntityResolutionStatus;
+  action_type: EntityResolutionAction;
+  summary_text: string;
   entity_id: string | null;
   entity_category: string | null;
   batch_id: string | null;
@@ -157,11 +160,44 @@ function toDto(row: ResolutionRow): EntityResolutionDto {
     id: row.id,
     candidateName: row.candidate_name,
     resolution: row.resolution,
+    action: row.action_type,
+    summary: row.summary_text,
     entityId: row.entity_id,
     entityCategory: (row.entity_category as RegistryCategoryKey) ?? null,
     batchId: row.batch_id,
     resolvedAt: new Date(row.resolved_at_ms).toISOString(),
   };
+}
+
+function buildResolutionSummary(args: {
+  action: EntityResolutionAction;
+  candidateName: string;
+  category?: RegistryCategoryKey | null;
+  targetName?: string | null;
+}): string {
+  const categoryLabel = args.category
+    ? {
+        pcs: "PC",
+        npcs: "NPC",
+        locations: "Location",
+        factions: "Faction",
+        misc: "Misc",
+      }[args.category]
+    : null;
+
+  switch (args.action) {
+    case "resolve_existing":
+      return `Linked ${args.candidateName} to ${categoryLabel ? `${categoryLabel} ` : ""}${args.targetName ?? "entity"}.`;
+    case "add_alias":
+      return `Aliased ${args.candidateName} into ${categoryLabel ? `${categoryLabel} ` : ""}${args.targetName ?? "entity"}.`;
+    case "create_entity":
+      if (!args.targetName || args.targetName === args.candidateName) {
+        return `Created ${categoryLabel ? `${categoryLabel} ` : ""}${args.candidateName}.`;
+      }
+      return `Created ${categoryLabel ? `${categoryLabel} ` : ""}${args.targetName} from ${args.candidateName}.`;
+    case "ignore_candidate":
+      return `Ignored ${args.candidateName}.`;
+  }
 }
 
 function toBatchDto(row: ReviewBatchRow): EntityReviewBatchDto {
@@ -217,6 +253,8 @@ function insertResolution(
     campaignSlug: string;
     candidateName: string;
     resolution: EntityResolutionStatus;
+    action: EntityResolutionAction;
+    summary: string;
     entityId: string | null;
     entityCategory: RegistryCategoryKey | null;
     batchId?: string | null;
@@ -233,12 +271,14 @@ function insertResolution(
       campaign_slug,
       candidate_name,
       resolution,
+      action_type,
+      summary_text,
       entity_id,
       entity_category,
       batch_id,
       resolved_at_ms,
       updated_at_ms
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     args.sessionId,
@@ -246,6 +286,8 @@ function insertResolution(
     args.campaignSlug,
     args.candidateName,
     args.resolution,
+    args.action,
+    args.summary,
     args.entityId,
     args.entityCategory,
     args.batchId ?? null,
@@ -624,6 +666,13 @@ async function resolveEntityCore(args: {
     campaignSlug: args.campaignSlug,
     candidateName: args.candidateName,
     resolution: "resolved",
+    action: "resolve_existing",
+    summary: buildResolutionSummary({
+      action: "resolve_existing",
+      candidateName: args.candidateName,
+      category: targetEntity.category,
+      targetName: targetEntity.canonicalName,
+    }),
     entityId: targetEntity.id,
     entityCategory: targetEntity.category,
     batchId: args.batchId,
@@ -692,6 +741,13 @@ async function addAliasToEntityCore(args: {
     campaignSlug: args.campaignSlug,
     candidateName: args.candidateName,
     resolution: "resolved",
+    action: "add_alias",
+    summary: buildResolutionSummary({
+      action: "add_alias",
+      candidateName: args.candidateName,
+      category: targetEntity.category,
+      targetName: targetEntity.canonicalName,
+    }),
     entityId: targetEntity.id,
     entityCategory: targetEntity.category,
     batchId: args.batchId,
@@ -804,6 +860,13 @@ async function createEntityFromCandidateCore(args: {
     campaignSlug: args.campaignSlug,
     candidateName: args.candidateName,
     resolution: "created",
+    action: "create_entity",
+    summary: buildResolutionSummary({
+      action: "create_entity",
+      candidateName: args.candidateName,
+      category: targetEntity.category,
+      targetName: targetEntity.canonicalName,
+    }),
     entityId: targetEntity.id,
     entityCategory: targetEntity.category,
     batchId: args.batchId,
@@ -844,6 +907,11 @@ async function ignoreEntityCandidateCore(args: CoreMutationContext & {
     campaignSlug: args.campaignSlug,
     candidateName: args.candidateName,
     resolution: "ignored",
+    action: "ignore_candidate",
+    summary: buildResolutionSummary({
+      action: "ignore_candidate",
+      candidateName: args.candidateName,
+    }),
     entityId: null,
     entityCategory: null,
     batchId: args.batchId,
