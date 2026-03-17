@@ -1,7 +1,7 @@
-import { APP_VERSION } from "@/lib/version";
+import { DISPLAY_APP_VERSION } from "@/lib/version";
 
 export default function VersionBadge() {
-  if (!APP_VERSION) return null;
+  if (!DISPLAY_APP_VERSION) return null;
 
   return (
     <div
@@ -23,7 +23,7 @@ export default function VersionBadge() {
       }}
       aria-label="app-version"
     >
-        v{APP_VERSION}
+        {DISPLAY_APP_VERSION}
     </div>
   );
 }
