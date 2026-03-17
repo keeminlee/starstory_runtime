@@ -12,6 +12,7 @@
  */
 
 import { chat } from "../llm/client.js";
+import { resolveDefaultLlmModel, resolveRuntimeLlmProvider } from "../config/providerSelection.js";
 import { normalizeEventType, isValidEventType } from "./scaffoldBatchTypes.js";
 import type {
   EventScaffoldBatch,
@@ -41,7 +42,7 @@ export interface LabelBatchResult {
  */
 export async function labelScaffoldBatch(
   batch: EventScaffoldBatch,
-  model: string = "gpt-4o-mini",
+  model: string = resolveDefaultLlmModel(resolveRuntimeLlmProvider()),
   maxRetries: number = 1
 ): Promise<LabelBatchResult> {
   // Validate prompt budget first

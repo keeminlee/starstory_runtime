@@ -1,8 +1,33 @@
-import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
-import type { BargeInMode, Config, LogFormat, LogLevel, MeepoMode, SttProvider, TtsProvider } from "./types.js";
+import { fileURLToPath } from "node:url";
+import { config as loadDotenv } from "dotenv";
+import type { BargeInMode, Config, LlmProvider, LogFormat, LogLevel, MeepoMode, SttProvider, TtsProvider } from "./types.js";
 import { redactConfigSnapshot } from "./redact.js";
+
+function preloadEnvFiles(): void {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const repoRoot = path.resolve(moduleDir, "..", "..");
+  const cwd = process.cwd();
+  const candidates = [
+    path.join(repoRoot, ".env"),
+    path.join(repoRoot, ".env.local"),
+    path.join(cwd, ".env"),
+    path.join(cwd, ".env.local"),
+  ];
+
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const normalized = path.normalize(candidate);
+    if (seen.has(normalized) || !fs.existsSync(candidate)) {
+      continue;
+    }
+    seen.add(normalized);
+    loadDotenv({ path: candidate, override: false });
+  }
+}
+
+preloadEnvFiles();
 
 function req(name: string): string {
   const v = process.env[name];
@@ -140,7 +165,19 @@ export function loadConfig(): Config {
     },
 
     openai: {
-      apiKey: req("OPENAI_API_KEY"),
+      apiKey: opt("OPENAI_API_KEY"),
+    },
+
+    deepgram: {
+      apiKey: opt("DEEPGRAM_API_KEY"),
+    },
+
+    anthropic: {
+      apiKey: opt("ANTHROPIC_API_KEY"),
+    },
+
+    google: {
+      apiKey: opt("GOOGLE_API_KEY"),
     },
 
     db: {
@@ -161,7 +198,10 @@ export function loadConfig(): Config {
 
     llm: {
       enabled: optBool("LLM_ENABLED", true),
-      model: opt("LLM_MODEL") ?? "gpt-4o-mini",
+      provider: enumOf<LlmProvider>("LLM_PROVIDER", ["openai", "anthropic", "google"] as const, "openai"),
+      openaiModel: opt("OPENAI_MODEL") ?? opt("LLM_MODEL") ?? "gpt-4o-mini",
+      anthropicModel: opt("ANTHROPIC_MODEL") ?? "claude-haiku-4-5",
+      googleModel: opt("GOOGLE_MODEL") ?? "gemini-2.0-flash",
       temperature: optFloat("LLM_TEMPERATURE", 0.3),
       maxTokens: optInt("LLM_MAX_TOKENS", 200),
       voiceContextMs: optInt("LLM_VOICE_CONTEXT_MS", 120000),
@@ -187,9 +227,10 @@ export function loadConfig(): Config {
     },
 
     stt: {
-      provider: enumOf<SttProvider>("STT_PROVIDER", ["openai", "noop", "debug"] as const, "openai"),
+      provider: enumOf<SttProvider>("STT_PROVIDER", ["whisper", "deepgram", "noop", "debug"] as const, "whisper"),
       saveAudio: optBool("STT_SAVE_AUDIO", false),
       model: opt("STT_OPENAI_MODEL") ?? "gpt-4o-mini-transcribe",
+      deepgramModel: opt("STT_DEEPGRAM_MODEL") ?? "nova-3",
       language: opt("STT_LANGUAGE") ?? "en",
       prompt: opt("STT_PROMPT"),
       minAudioMs: optInt("STT_MIN_AUDIO_MS", 300),
@@ -272,6 +313,9 @@ export function printConfigSnapshot(cfg: Config): void {
     GUILD_ID: cfg.discord.guildId,
     BOT_PREFIX: cfg.discord.botPrefix,
     OPENAI_API_KEY: "<redacted>",
+    DEEPGRAM_API_KEY: "<redacted>",
+    ANTHROPIC_API_KEY: "<redacted>",
+    GOOGLE_API_KEY: "<redacted>",
     DATA_DB_PATH: cfg.db.path,
     DATA_DB_FILENAME: cfg.db.filename,
     DATA_ROOT: cfg.data.root,
@@ -280,7 +324,10 @@ export function printConfigSnapshot(cfg: Config): void {
     ANNOUNCEMENT_CHANNEL_ID: cfg.session.announcementChannelId,
     MEECAP_MODE: cfg.session.meecapMode,
     LLM_ENABLED: cfg.llm.enabled,
-    LLM_MODEL: cfg.llm.model,
+    LLM_PROVIDER: cfg.llm.provider,
+    OPENAI_MODEL: cfg.llm.openaiModel,
+    ANTHROPIC_MODEL: cfg.llm.anthropicModel,
+    GOOGLE_MODEL: cfg.llm.googleModel,
     LLM_TEMPERATURE: cfg.llm.temperature,
     LLM_MAX_TOKENS: cfg.llm.maxTokens,
     LLM_VOICE_CONTEXT_MS: cfg.llm.voiceContextMs,
@@ -300,6 +347,7 @@ export function printConfigSnapshot(cfg: Config): void {
     STT_PROVIDER: cfg.stt.provider,
     STT_SAVE_AUDIO: cfg.stt.saveAudio,
     STT_OPENAI_MODEL: cfg.stt.model,
+    STT_DEEPGRAM_MODEL: cfg.stt.deepgramModel,
     STT_LANGUAGE: cfg.stt.language,
     STT_PROMPT: cfg.stt.prompt,
     STT_MIN_AUDIO_MS: cfg.stt.minAudioMs,

@@ -4,6 +4,7 @@
  */
 
 import { getControlDb } from "../db.js";
+import type { GuildSttProvider, LlmProvider } from "../config/types.js";
 import { getDefaultCampaignSlug } from "./defaultCampaign.js";
 import { log } from "../utils/logger.js";
 import { slugifyCampaignScopeName } from "./campaignScopeSlug.js";
@@ -23,6 +24,8 @@ export type GuildConfigRow = {
   setup_version: number | null;
   home_text_channel_id: string | null;
   home_voice_channel_id: string | null;
+  stt_provider: GuildSttProvider | null;
+  llm_provider: LlmProvider | null;
   canon_persona_mode: "diegetic" | "meta" | null;
   canon_persona_id: string | null;
   default_recap_style: "balanced" | "concise" | "detailed" | null;
@@ -50,7 +53,7 @@ export function getGuildConfig(guildId: string): GuildConfigRow | null {
   try {
     const row = db
       .prepare(
-        "SELECT guild_id, campaign_slug, meta_campaign_slug, awakened, dm_user_id, dm_role_id, default_talk_mode, default_persona_id, setup_version, home_text_channel_id, home_voice_channel_id, canon_persona_mode, canon_persona_id, default_recap_style FROM guild_config WHERE guild_id = ? LIMIT 1"
+        "SELECT guild_id, campaign_slug, meta_campaign_slug, awakened, dm_user_id, dm_role_id, default_talk_mode, default_persona_id, setup_version, home_text_channel_id, home_voice_channel_id, stt_provider, llm_provider, canon_persona_mode, canon_persona_id, default_recap_style FROM guild_config WHERE guild_id = ? LIMIT 1"
       )
       .get(guildId) as GuildConfigRow | undefined;
     return row ?? null;
@@ -65,8 +68,10 @@ export function getGuildConfig(guildId: string): GuildConfigRow | null {
       .prepare(
         "SELECT guild_id, campaign_slug, awakened, dm_user_id, dm_role_id, default_persona_id, setup_version, home_text_channel_id, home_voice_channel_id, canon_persona_mode, canon_persona_id, default_recap_style FROM guild_config WHERE guild_id = ? LIMIT 1"
       )
-      .get(guildId) as Omit<GuildConfigRow, "default_talk_mode" | "meta_campaign_slug"> | undefined;
-    return legacyRow ? { ...legacyRow, default_talk_mode: null, meta_campaign_slug: null } : null;
+      .get(guildId) as Omit<GuildConfigRow, "default_talk_mode" | "meta_campaign_slug" | "stt_provider" | "llm_provider"> | undefined;
+    return legacyRow
+      ? { ...legacyRow, default_talk_mode: null, meta_campaign_slug: null, stt_provider: null, llm_provider: null }
+      : null;
   }
 }
 
@@ -93,15 +98,41 @@ export function ensureGuildConfig(guildId: string, guildName?: string | null): G
       setup_version,
       home_text_channel_id,
       home_voice_channel_id,
+      stt_provider,
+      llm_provider,
       canon_persona_mode,
       canon_persona_id,
       default_recap_style
     )
-        VALUES (?, ?, NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)`
+        VALUES (?, ?, NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)`
   ).run(guildId, slug);
   campaignLog.info(`Created guild_config for guild=${guildId} campaign_slug=${slug}`);
   row = getGuildConfig(guildId)!;
   return row;
+}
+
+export function getGuildSttProvider(guildId: string): GuildSttProvider | null {
+  const provider = getGuildConfig(guildId)?.stt_provider ?? null;
+  return provider === "whisper" || provider === "deepgram" ? provider : null;
+}
+
+export function setGuildSttProvider(guildId: string, provider: GuildSttProvider | null): void {
+  const db = getControlDb();
+  ensureGuildConfig(guildId, null);
+  db.prepare("UPDATE guild_config SET stt_provider = ? WHERE guild_id = ?").run(provider, guildId);
+  campaignLog.info(`Set stt_provider=${provider ?? "null"} for guild=${guildId}`);
+}
+
+export function getGuildLlmProvider(guildId: string): LlmProvider | null {
+  const provider = getGuildConfig(guildId)?.llm_provider ?? null;
+  return provider === "openai" || provider === "anthropic" || provider === "google" ? provider : null;
+}
+
+export function setGuildLlmProvider(guildId: string, provider: LlmProvider | null): void {
+  const db = getControlDb();
+  ensureGuildConfig(guildId, null);
+  db.prepare("UPDATE guild_config SET llm_provider = ? WHERE guild_id = ?").run(provider, guildId);
+  campaignLog.info(`Set llm_provider=${provider ?? "null"} for guild=${guildId}`);
 }
 
 /**

@@ -1,6 +1,7 @@
 import type {
   CampaignSummary,
   DashboardModel,
+  GuildProviderSettingsModel,
   SessionDetail,
   SessionRecap,
   SessionSpeakerAttributionState,
@@ -157,6 +158,18 @@ export type SessionAnnotatedRecapsResponse = {
   sessionId: string;
   annotations: SessionAnnotatedRecaps | null;
 };
+
+export type GuildProviderSettingsResponse = {
+  settings: GuildProviderSettingsModel;
+};
+
+export type UpdateGuildProviderSettingsRequest = {
+  guildId: string;
+  sttProvider?: "whisper" | "deepgram";
+  llmProvider?: "openai" | "anthropic" | "google";
+};
+
+export type UpdateGuildProviderSettingsResponse = GuildProviderSettingsResponse;
 
 export type SpeakerAttributionCreatePcRequest = {
   canonicalName: string;

@@ -1,6 +1,6 @@
 import { buildSessionDetail } from "@/lib/mappers/sessionMappers";
 import { mapToWebDataError, WebDataError } from "@/lib/mappers/errorMappers";
-import { assertOpenAiConfigured } from "@/lib/server/capabilityErrors";
+import { assertLlmConfigured } from "@/lib/server/capabilityErrors";
 import { resolveWebAuthContext, WebAuthError } from "@/lib/server/authContext";
 import { listWebCampaignsForGuilds } from "@/lib/server/campaignReaders";
 import { getDemoSessionDetail, isDemoSessionId } from "@/lib/server/demoCampaign";
@@ -522,8 +522,8 @@ export async function regenerateWebSessionRecap(args: {
       throw new WebDataError("recap_in_progress", 409, "A recap job is already running for this session.");
     }
 
-    // Recap generation requires OpenAI at execution time; read paths remain independent.
-    assertOpenAiConfigured();
+    // Recap generation requires the selected LLM provider at execution time; read paths remain independent.
+    assertLlmConfigured(guildId);
 
     const { regenerateSessionRecapContract } = await import("../../../../src/sessions/recapService");
     await regenerateSessionRecapContract({

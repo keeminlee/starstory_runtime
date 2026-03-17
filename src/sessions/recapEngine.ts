@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { cfg } from "../config/env.js";
+import { resolveDefaultLlmModel, resolveRuntimeLlmProvider } from "../config/providerSelection.js";
 import { chat } from "../llm/client.js";
 import { buildTranscript } from "../ledger/transcripts.js";
 import type { TranscriptEntry } from "../ledger/transcripts.js";
@@ -109,6 +110,42 @@ export type FinalFromBaseResult = {
   outputPathMetaJson: string;
   cacheHit: boolean;
 };
+
+function detectModelProviderFamily(model: string): "openai" | "anthropic" | "google" | null {
+  const normalized = model.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized.startsWith("claude")) return "anthropic";
+  if (normalized.startsWith("gemini")) return "google";
+  if (
+    normalized.startsWith("gpt-") ||
+    normalized.startsWith("chatgpt-") ||
+    normalized.startsWith("o1") ||
+    normalized.startsWith("o3") ||
+    normalized.startsWith("o4")
+  ) {
+    return "openai";
+  }
+  return null;
+}
+
+export function assertModelMatchesProvider(
+  provider: "openai" | "anthropic" | "google",
+  model: string,
+  context: {
+    guild_id: string;
+    campaign_slug: string;
+    session_id: string;
+  }
+): void {
+  const detectedFamily = detectModelProviderFamily(model);
+  if (!detectedFamily || detectedFamily === provider) {
+    return;
+  }
+
+  throw new Error(
+    `Recap LLM provider/model mismatch: resolved provider '${provider}' but model '${model}' looks like '${detectedFamily}'. guild_id=${context.guild_id} campaign_slug=${context.campaign_slug} session_id=${context.session_id}`
+  );
+}
 
 function hashTranscript(lines: TranscriptLine[]): string {
   const stablePayload = lines.map((line) => ({
@@ -249,6 +286,9 @@ async function generateSessionRecapInternal(
         userMessage: input.userPrompt,
         model: input.model,
         maxTokens: input.maxTokens ?? RECAP_LLM_MAX_TOKENS,
+        guild_id: args.guildId,
+        campaign_slug: campaignSlug,
+        session_id: args.sessionId,
       }));
 
   const now = deps?.now ?? Date.now;
@@ -353,6 +393,13 @@ export async function ensureMegameecapBase(
   }
 ): Promise<BaseEnsureResult> {
   const sourceHash = hashTranscript(deps.lines);
+  const resolvedProvider = resolveRuntimeLlmProvider(args.guildId);
+  const resolvedModel = resolveDefaultLlmModel(resolvedProvider);
+  assertModelMatchesProvider(resolvedProvider, resolvedModel, {
+    guild_id: args.guildId,
+    campaign_slug: deps.campaignSlug,
+    session_id: args.sessionId,
+  });
   const paths = resolveMegameecapBasePaths(args.guildId, deps.campaignSlug, args.sessionId, deps.sessionLabel);
   const baseStatus = getBaseStatus(args.guildId, deps.campaignSlug, args.sessionId, deps.sessionLabel);
   const hashMatches = baseStatus.sourceHash === sourceHash;
@@ -416,7 +463,7 @@ export async function ensureMegameecapBase(
       },
       style: "balanced",
       noFinalPass: true,
-      model: cfg.llm.model,
+      model: resolvedModel,
       lines: deps.lines,
     },
     { callLlm: deps.callLlm }
@@ -480,6 +527,13 @@ export async function generateFinalRecapFromBase(
     now: () => number;
   }
 ): Promise<FinalFromBaseResult> {
+  const resolvedProvider = resolveRuntimeLlmProvider(args.guildId);
+  const resolvedModel = resolveDefaultLlmModel(resolvedProvider);
+  assertModelMatchesProvider(resolvedProvider, resolvedModel, {
+    guild_id: args.guildId,
+    campaign_slug: deps.campaignSlug,
+    session_id: args.sessionId,
+  });
   const existingFinal = getSessionArtifact(args.guildId, args.sessionId, "recap_final", undefined, deps.campaignSlug);
   const expectedPaths = resolveMegameecapFinalPaths(
     args.guildId,
@@ -526,7 +580,7 @@ export async function generateFinalRecapFromBase(
   const final = await runFinalPassOnly({
     baselineMarkdown: deps.baselineMarkdown,
     style: args.style as FinalStyle,
-    model: cfg.llm.model,
+    model: resolvedModel,
     callLlm: deps.callLlm,
   });
 
@@ -541,7 +595,7 @@ export async function generateFinalRecapFromBase(
         "",
         "Write ONLY the continuation text, starting immediately after the final words above.",
       ].join("\n"),
-      model: cfg.llm.model,
+      model: resolvedModel,
       maxTokens: RECAP_CONTINUATION_MAX_TOKENS,
     });
     const continuationTrimmed = continuation.trim();

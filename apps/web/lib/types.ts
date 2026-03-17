@@ -87,6 +87,29 @@ export type DashboardEmptyGuild = {
   guildIconUrl?: string | null;
 };
 
+export type GuildProviderSettingsOption = {
+  guildId: string;
+  guildName: string;
+  guildIconUrl?: string | null;
+  canWrite: boolean;
+};
+
+export type GuildProviderSettingsModel = {
+  selectedGuildId: string;
+  selectedGuildName: string;
+  selectedGuildIconUrl?: string | null;
+  canWriteSelectedGuild: boolean;
+  guildOptions: GuildProviderSettingsOption[];
+  sttProvider: "whisper" | "deepgram" | null;
+  llmProvider: "openai" | "anthropic" | "google" | null;
+  effectiveSttProvider: "whisper" | "deepgram" | "noop" | "debug";
+  effectiveLlmProvider: "openai" | "anthropic" | "google";
+  sttCredentialConfigured: boolean;
+  llmCredentialConfigured: boolean;
+  sttCredentialEnvKey: string | null;
+  llmCredentialEnvKey: string;
+};
+
 export type TranscriptEntry = {
   id: string;
   speaker: string;
@@ -100,6 +123,7 @@ export type SessionRecap = {
   detailed: string;
   generatedAt: string;
   modelVersion: string;
+  displayModel?: string | null;
   source?: "canonical" | "legacy_artifact" | "legacy_meecap";
   engine?: string | null;
   sourceHash?: string | null;

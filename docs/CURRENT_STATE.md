@@ -501,7 +501,7 @@ Recap      Emotion Beats         LLM Response
 ### Core Systems ✅
 
 #### Voice & Speech
-- **STT (Speech-to-Text):** OpenAI Whisper + domain normalization
+- **STT (Speech-to-Text):** Guild-selectable `whisper|deepgram`, with `whisper` remaining the current OpenAI-backed default path plus domain normalization
 - **TTS (Text-to-Speech):** OpenAI gpt-4o-mini-tts with chunking
 - **Voice Loop:** Closed STT → LLM → TTS with feedback loop protection
 - **Anti-noise Gating:** Configurable threshold to filter background noise
@@ -519,7 +519,7 @@ Recap      Emotion Beats         LLM Response
 - **StyleSpec system**: Per-persona customizable traits + system prompts
 
 #### LLM Integration
-- OpenAI API with graceful fallbacks
+- Guild-selectable `openai|anthropic|google`, with OpenAI remaining the current default path
 - Kill-switch support (disables responses, logs errors)
 - Token-limited prompts with safeguards (3000-16000 max tokens depending on task)
 - Persona-driven system prompts with registry validation

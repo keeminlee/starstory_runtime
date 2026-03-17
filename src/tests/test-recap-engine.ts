@@ -3,6 +3,37 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
+type MockChatCall = {
+  guild_id?: string;
+  campaign_slug?: string;
+  session_id?: string;
+  model?: string;
+  executedProvider: string;
+};
+
+const mockChatCalls: MockChatCall[] = [];
+
+vi.mock("../llm/client.js", async () => {
+  return {
+    chat: vi.fn(async (opts: {
+      guild_id?: string;
+      campaign_slug?: string;
+      session_id?: string;
+      model?: string;
+    }) => {
+      const { resolveRuntimeLlmProvider } = await import("../config/providerSelection.js");
+      mockChatCalls.push({
+        guild_id: opts.guild_id,
+        campaign_slug: opts.campaign_slug,
+        session_id: opts.session_id,
+        model: opts.model,
+        executedProvider: resolveRuntimeLlmProvider(opts.guild_id),
+      });
+      return "mocked-chat-output";
+    }),
+  };
+});
+
 const tempDirs: string[] = [];
 
 function configureHermeticEnv(tempDir: string): void {
@@ -11,11 +42,18 @@ function configureHermeticEnv(tempDir: string): void {
   vi.stubEnv("DATA_DB_FILENAME", "db.sqlite");
   vi.stubEnv("DISCORD_TOKEN", "test-token");
   vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
+  vi.stubEnv("ANTHROPIC_API_KEY", "test-anthropic-key");
+  vi.stubEnv("GOOGLE_API_KEY", "test-google-key");
+  vi.stubEnv("LLM_PROVIDER", "openai");
+  vi.stubEnv("OPENAI_MODEL", "gpt-4o-mini");
+  vi.stubEnv("ANTHROPIC_MODEL", "claude-haiku-4-5");
+  vi.stubEnv("GOOGLE_MODEL", "gemini-2.0-flash");
 }
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.resetModules();
+  mockChatCalls.length = 0;
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
     if (dir) {
@@ -28,9 +66,11 @@ afterEach(() => {
   }
 });
 
-async function seedSessionFixture(guildId: string, sessionId: string): Promise<void> {
+async function seedSessionFixture(guildId: string, sessionId: string): Promise<string> {
   const { getDbForCampaign } = await import("../db.js");
-  const db = getDbForCampaign("default");
+  const { resolveCampaignSlug } = await import("../campaign/guildConfig.js");
+  const campaignSlug = resolveCampaignSlug({ guildId });
+  const db = getDbForCampaign(campaignSlug);
 
   db.prepare(
     `
@@ -102,6 +142,8 @@ async function seedSessionFixture(guildId: string, sessionId: string): Promise<v
     "voice",
     "primary"
   );
+
+  return campaignSlug;
 }
 
 test("generateSessionRecap returns non-empty text and stable metadata fields", async () => {
@@ -118,7 +160,7 @@ test("generateSessionRecap returns non-empty text and stable metadata fields", a
 
   const guildId = "guild-recap-test";
   const sessionId = "session-recap-1";
-  await seedSessionFixture(guildId, sessionId);
+  const campaignSlug = await seedSessionFixture(guildId, sessionId);
 
   const result = await generateSessionRecap(
     {
@@ -140,13 +182,13 @@ test("generateSessionRecap returns non-empty text and stable metadata fields", a
   expect(result.sourceRange?.lineCount).toBeGreaterThan(0);
   expect(result.cacheHit).toBe(false);
 
-  const basePathsByLabel = resolveMegameecapBasePaths(guildId, "default", sessionId, "Arc Test");
+  const basePathsByLabel = resolveMegameecapBasePaths(guildId, campaignSlug, sessionId, "Arc Test");
   expect(fs.existsSync(basePathsByLabel.basePath)).toBe(true);
   expect(fs.existsSync(basePathsByLabel.metaPath)).toBe(true);
 
   const finalPathsByLabel = resolveMegameecapFinalPaths(
     guildId,
-    "default",
+    campaignSlug,
     sessionId,
     "balanced",
     "Arc Test"
@@ -219,10 +261,11 @@ test("base hash mismatch triggers base regeneration", async () => {
 
   const { getDbForCampaign } = await import("../db.js");
   const { generateSessionRecap } = await import("../sessions/recapEngine.js");
+  const { resolveCampaignSlug } = await import("../campaign/guildConfig.js");
 
   const guildId = "guild-recap-mismatch";
   const sessionId = "session-recap-mismatch";
-  await seedSessionFixture(guildId, sessionId);
+  const campaignSlug = await seedSessionFixture(guildId, sessionId);
 
   const llmCall = vi.fn(async () => "llm-output");
 
@@ -232,7 +275,7 @@ test("base hash mismatch triggers base regeneration", async () => {
   );
   const callsAfterFirst = llmCall.mock.calls.length;
 
-  const db = getDbForCampaign("default");
+  const db = getDbForCampaign(resolveCampaignSlug({ guildId }) || campaignSlug);
   db.prepare(
     `
       INSERT INTO ledger_entries (
@@ -275,6 +318,7 @@ test("final overwrite semantics keep one recap_final row (most recent style)", a
   const { getSessionArtifact } = await import("../sessions/sessions.js");
   const { getDbForCampaign } = await import("../db.js");
   const { generateSessionRecap } = await import("../sessions/recapEngine.js");
+  const { resolveCampaignSlug } = await import("../campaign/guildConfig.js");
 
   const guildId = "guild-recap-single-final";
   const sessionId = "session-recap-single-final";
@@ -294,7 +338,7 @@ test("final overwrite semantics keep one recap_final row (most recent style)", a
   expect(recapFinal).toBeTruthy();
   expect(recapFinal?.strategy).toBe("concise");
 
-  const db = getDbForCampaign("default");
+  const db = getDbForCampaign(resolveCampaignSlug({ guildId }));
   const countRow = db
     .prepare(
       `
@@ -306,4 +350,97 @@ test("final overwrite semantics keep one recap_final row (most recent style)", a
     .get(sessionId) as { c: number };
 
   expect(countRow.c).toBe(1);
+});
+
+test("recap path preserves anthropic guild provider context even when env default is openai", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-recap-anthropic-context-"));
+  tempDirs.push(tempDir);
+  configureHermeticEnv(tempDir);
+  vi.resetModules();
+
+  const { setGuildLlmProvider } = await import("../campaign/guildConfig.js");
+  const { resolveDefaultLlmModel, resolveRuntimeLlmProvider } = await import("../config/providerSelection.js");
+  const { generateSessionRecap } = await import("../sessions/recapEngine.js");
+
+  const guildId = "guild-recap-anthropic-context";
+  const sessionId = "session-recap-anthropic-context";
+  const campaignSlug = await seedSessionFixture(guildId, sessionId);
+  setGuildLlmProvider(guildId, "anthropic");
+
+  const resolvedProvider = resolveRuntimeLlmProvider(guildId);
+  const resolvedModel = resolveDefaultLlmModel(resolvedProvider);
+
+  await generateSessionRecap({ guildId, sessionId, strategy: "balanced" });
+
+  expect(resolvedProvider).toBe("anthropic");
+  expect(resolvedModel).toBe("claude-haiku-4-5");
+  expect(mockChatCalls.length).toBeGreaterThanOrEqual(2);
+  for (const call of mockChatCalls) {
+    expect(call.guild_id).toBe(guildId);
+    expect(call.campaign_slug).toBe(campaignSlug);
+    expect(call.session_id).toBe(sessionId);
+    expect(call.executedProvider).toBe("anthropic");
+    expect(call.model).toBe(resolvedModel);
+  }
+  expect(mockChatCalls.some((call) => call.executedProvider === "openai")).toBe(false);
+});
+
+test("recap path preserves google guild provider context", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-recap-google-context-"));
+  tempDirs.push(tempDir);
+  configureHermeticEnv(tempDir);
+  vi.resetModules();
+
+  const { setGuildLlmProvider } = await import("../campaign/guildConfig.js");
+  const { resolveDefaultLlmModel, resolveRuntimeLlmProvider } = await import("../config/providerSelection.js");
+  const { generateSessionRecap } = await import("../sessions/recapEngine.js");
+
+  const guildId = "guild-recap-google-context";
+  const sessionId = "session-recap-google-context";
+  const campaignSlug = await seedSessionFixture(guildId, sessionId);
+  setGuildLlmProvider(guildId, "google");
+
+  const resolvedProvider = resolveRuntimeLlmProvider(guildId);
+  const resolvedModel = resolveDefaultLlmModel(resolvedProvider);
+
+  await generateSessionRecap({ guildId, sessionId, strategy: "balanced" });
+
+  expect(resolvedProvider).toBe("google");
+  expect(resolvedModel).toBe("gemini-2.0-flash");
+  expect(mockChatCalls.length).toBeGreaterThanOrEqual(2);
+  for (const call of mockChatCalls) {
+    expect(call.guild_id).toBe(guildId);
+    expect(call.campaign_slug).toBe(campaignSlug);
+    expect(call.session_id).toBe(sessionId);
+    expect(call.executedProvider).toBe("google");
+    expect(call.model).toBe(resolvedModel);
+  }
+});
+
+test("assertModelMatchesProvider fails loudly on obvious recap provider-model drift", async () => {
+  const { assertModelMatchesProvider } = await import("../sessions/recapEngine.js");
+
+  expect(() =>
+    assertModelMatchesProvider("anthropic", "gpt-4o-mini", {
+      guild_id: "guild-a",
+      campaign_slug: "campaign-a",
+      session_id: "session-a",
+    })
+  ).toThrow(/resolved provider 'anthropic'.*model 'gpt-4o-mini'.*looks like 'openai'.*guild_id=guild-a.*campaign_slug=campaign-a.*session_id=session-a/i);
+
+  expect(() =>
+    assertModelMatchesProvider("google", "claude-haiku-4-5", {
+      guild_id: "guild-b",
+      campaign_slug: "campaign-b",
+      session_id: "session-b",
+    })
+  ).toThrow(/resolved provider 'google'.*looks like 'anthropic'/i);
+
+  expect(() =>
+    assertModelMatchesProvider("openai", "gemini-2.0-flash", {
+      guild_id: "guild-c",
+      campaign_slug: "campaign-c",
+      session_id: "session-c",
+    })
+  ).toThrow(/resolved provider 'openai'.*looks like 'google'/i);
 });

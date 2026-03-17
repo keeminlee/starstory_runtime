@@ -37,7 +37,7 @@ Closed Alpha Phase 5 deploy/runtime versioning (in-repo deploy hook + systemd un
 
 - Node.js **18+**
 - Discord bot token *(Message Content intent enabled)*
-- OpenAI API key
+- At least one provider credential for the runtime paths you plan to use
 
 ### Install
 
@@ -50,7 +50,39 @@ npm install
 Create a `.env` file and set the required values:
 
 - `DISCORD_TOKEN`
-- `OPENAI_API_KEY`
+
+Current shipped defaults:
+
+- STT defaults to `whisper`, which maps to the existing OpenAI-backed Whisper path
+- LLM defaults to `openai`
+
+Canonical provider settings:
+
+- `STT_PROVIDER=whisper|deepgram`
+- `LLM_PROVIDER=openai|anthropic|google`
+
+Provider credentials:
+
+- `OPENAI_API_KEY` for `whisper` STT and `openai` LLM
+- `DEEPGRAM_API_KEY` for `deepgram` STT
+- `ANTHROPIC_API_KEY` for `anthropic` LLM
+- `GOOGLE_API_KEY` for `google` LLM
+
+Provider-specific model defaults:
+
+- `OPENAI_MODEL` for `openai` LLM
+- `ANTHROPIC_MODEL` for `anthropic` LLM
+- `GOOGLE_MODEL` for `google` LLM
+
+Effective provider resolution:
+
+- guild-config override
+- env default
+- centralized parser fallback
+
+Recap execution note:
+
+- Recap execution must pass guild context through to `chat()` so provider resolution, model resolution, and execution remain coherent.
 
 Useful runtime toggles:
 
@@ -58,6 +90,8 @@ Useful runtime toggles:
 - `LATCH_SECONDS` (default: `90`)
 - `LOG_LEVEL`, `LOG_SCOPES`, `LOG_FORMAT`
 - `OVERLAY_PORT` (if using the OBS overlay)
+
+Provider-specific model selection remains centralized in config defaults and is not a guild-level UI feature in V1.
 
 ### Run
 

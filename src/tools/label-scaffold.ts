@@ -33,7 +33,7 @@ import { MetricsCollector } from "../ledger/scaffoldMetrics.js";
 import { persistLabeledEvents } from "./ledger/scaffoldPersist.js";
 import type { EventScaffoldBatch } from "../ledger/scaffoldBatchTypes.js";
 import { getEnv } from "../config/rawEnv.js";
-const defaultLlmModel = getEnv("LLM_MODEL", "gpt-4o-mini") ?? "gpt-4o-mini";
+const defaultLlmModel = getEnv("OPENAI_MODEL", getEnv("LLM_MODEL", "gpt-4o-mini")) ?? "gpt-4o-mini";
 
 
 // ── CLI ───────────────────────────────────────────────────────────────────

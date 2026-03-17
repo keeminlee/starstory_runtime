@@ -41,7 +41,7 @@ function parseArgs(): Args {
   let maxCarryChars = 12000;
   let maxCarrySegments = 3;
   let style: FinalStyle = "balanced";
-  let model = getEnv("LLM_MODEL", "gpt-4o-mini") ?? "gpt-4o-mini";
+  let model = getEnv("OPENAI_MODEL", getEnv("LLM_MODEL", "gpt-4o-mini")) ?? "gpt-4o-mini";
   let noFinalPass = false;
   let finalOnly = false;
   let inputPath: string | null = null;

@@ -17,7 +17,7 @@ import { validateEventSpans } from "../../events/compileEvents/validateEventSpan
 import { shapeEventsArtifact } from "../../events/compileEvents/shapeEventsArtifact.js";
 import type { CompileEventsLlm, CompiledEvent, TranscriptEventLine } from "../../events/compileEvents/types.js";
 
-const defaultLlmModel = getEnv("LLM_MODEL", "gpt-4o-mini") ?? "gpt-4o-mini";
+const defaultLlmModel = getEnv("OPENAI_MODEL", getEnv("LLM_MODEL", "gpt-4o-mini")) ?? "gpt-4o-mini";
 
 function parseArgs(): {
   sessionLabel: string;

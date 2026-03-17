@@ -194,7 +194,7 @@ Session recap regenerate is an action capability with explicit environment gatin
 
 Requirements:
 
-- `OPENAI_API_KEY` must be configured in the web runtime environment (`apps/web/.env.local` for local development).
+- Provider API keys can be supplied from the shared repo-root env for local development; `apps/web/.env.local` is not required for `OPENAI_API_KEY` specifically.
 - Missing key maps to typed capability-unavailable behavior (`openai_unconfigured`, HTTP `503`).
 
 What regenerate rebuilds:

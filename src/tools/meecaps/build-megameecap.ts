@@ -49,7 +49,7 @@ function parseArgs(): Args {
   let contextSegments = 3;
   let contextChars = 12000;
   let targetLines = 250;
-  let model = getEnv("LLM_MODEL", "gpt-4o-mini") ?? "gpt-4o-mini";
+  let model = getEnv("OPENAI_MODEL", getEnv("LLM_MODEL", "gpt-4o-mini")) ?? "gpt-4o-mini";
   let dryRun = false;
 
   for (let i = 0; i < argv.length; i++) {

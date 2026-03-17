@@ -15,6 +15,7 @@ import type {
   SessionStatus,
   TranscriptEntry,
 } from "@/lib/types";
+import { resolveDefaultLlmModel, resolveRuntimeLlmProvider } from "../../../../src/config/providerSelection.js";
 
 function toIsoDate(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
@@ -48,8 +49,14 @@ export function mapCanonicalTranscriptToWebTranscript(transcript: SessionTranscr
   }));
 }
 
-export function mapCanonicalRecapToWebRecap(recap: CanonicalSessionRecap | null): SessionRecap | null {
+export function mapCanonicalRecapToWebRecap(args: {
+  recap: CanonicalSessionRecap | null;
+  guildId: string;
+}): SessionRecap | null {
+  const { recap, guildId } = args;
   if (!recap) return null;
+
+  const displayModel = resolveDefaultLlmModel(resolveRuntimeLlmProvider(guildId));
 
   return {
     concise: recap.views.concise,
@@ -57,6 +64,7 @@ export function mapCanonicalRecapToWebRecap(recap: CanonicalSessionRecap | null)
     detailed: recap.views.detailed,
     generatedAt: new Date(recap.generatedAt).toISOString(),
     modelVersion: recap.modelVersion,
+    displayModel,
     source: recap.source,
     engine: recap.engine,
     sourceHash: recap.sourceHash,
@@ -97,7 +105,10 @@ export function buildSessionDetail(args: {
     source,
     sessionOrigin: mapCanonicalSessionOrigin(args.session),
     transcript: mapCanonicalTranscriptToWebTranscript(args.transcript),
-    recap: mapCanonicalRecapToWebRecap(args.recap),
+    recap: mapCanonicalRecapToWebRecap({
+      recap: args.recap,
+      guildId: args.guildId,
+    }),
     recapReadiness: args.recapReadiness,
     recapPhase: args.recapPhase,
     speakerAttribution: args.speakerAttribution,
