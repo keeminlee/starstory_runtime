@@ -305,6 +305,46 @@ describe("showtime lifecycle hardening", () => {
     db.close();
   });
 
+  test("/lab sleep refuses to detach an active showtime session", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-lab-sleep-showtime-guard-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const { meepo } = await import("../commands/meepo.js");
+    const { executeLabSleep } = await import("../commands/starstory.js");
+    const { getDbForCampaign } = await import("../db.js");
+    const { getActiveSession } = await import("../sessions/sessions.js");
+    const db = getDbForCampaign("default");
+
+    const execCtx = {
+      guildId: "guild-1",
+      campaignSlug: "default",
+      dbPath: "test.sqlite",
+      db,
+      trace_id: "trace-lab-sleep-showtime-guard",
+      interaction_id: "interaction-lab-sleep-showtime-guard",
+    } as any;
+
+    await meepo.execute(buildInteraction({ subcommand: "awaken" }), execCtx);
+    await meepo.execute(buildInteraction({
+      subcommand: "start",
+      subcommandGroup: "showtime",
+      strings: { campaign_name: "Echoes of Avernus" },
+    }), execCtx);
+
+    voiceConnected = true;
+    const sleepInteraction = buildInteraction({ subcommand: "sleep" });
+    await executeLabSleep(sleepInteraction);
+
+    expect(getActiveSession("guild-1")).toBeTruthy();
+    expect(stopReceiverMock).not.toHaveBeenCalled();
+    expect(leaveVoiceMock).not.toHaveBeenCalled();
+    const content = String(sleepInteraction.reply.mock.calls[0]?.[0]?.content ?? "");
+    expect(content).toContain("/meepo showtime end");
+
+    db.close();
+  });
+
   test("emits showtime lifecycle and artifact kickoff payloads with canonical fields", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-showtime-events-"));
     tempDirs.push(tempDir);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Download } from "lucide-react";
 import { EmptyState } from "@/components/shared/empty-state";
 import { StatusChip } from "@/components/shared/status-chip";
@@ -67,6 +68,7 @@ export function TranscriptViewer({
   searchParams,
   emptyDescription = "No transcript has been recorded for this session yet.",
 }: TranscriptViewerProps) {
+  const router = useRouter();
   const scopedSearchParams = useMemo(
     () => ({
       ...searchParams,
@@ -82,6 +84,8 @@ export function TranscriptViewer({
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(entries.length === 0);
   const latestEntriesRef = useRef(entries);
+  const latestSessionStatusRef = useRef(sessionStatus);
+  const terminalRefreshTriggeredRef = useRef(false);
 
   useEffect(() => {
     const previousLength = latestEntriesRef.current.length;
@@ -94,11 +98,19 @@ export function TranscriptViewer({
       return current >= previousLength ? nextBase : Math.min(current, entries.length);
     });
     latestEntriesRef.current = entries;
+    latestSessionStatusRef.current = sessionStatus;
+    if (sessionStatus === "in_progress") {
+      terminalRefreshTriggeredRef.current = false;
+    }
   }, [entries, sessionStatus, status, warnings]);
 
   useEffect(() => {
     latestEntriesRef.current = transcriptEntries;
   }, [transcriptEntries]);
+
+  useEffect(() => {
+    latestSessionStatusRef.current = liveSessionStatus;
+  }, [liveSessionStatus]);
 
   useEffect(() => {
     if (liveSessionStatus !== "in_progress") {
@@ -118,10 +130,13 @@ export function TranscriptViewer({
           return;
         }
 
+        const previousSessionStatus = latestSessionStatusRef.current;
+
         setTranscriptEntries(result.transcript);
         setTranscriptStatus(result.status);
         setTranscriptWarnings(result.warnings);
         setLiveSessionStatus(result.sessionStatus);
+        latestSessionStatusRef.current = result.sessionStatus;
         setVisibleCount((current) => {
           const previousLength = latestEntriesRef.current.length;
           const wasShowingAll = current >= previousLength;
@@ -131,6 +146,16 @@ export function TranscriptViewer({
           return Math.min(current, result.transcript.length);
         });
         stickToBottomRef.current = shouldStick;
+
+        if (
+          previousSessionStatus === "in_progress"
+          && result.sessionStatus !== "in_progress"
+          && !terminalRefreshTriggeredRef.current
+        ) {
+          terminalRefreshTriggeredRef.current = true;
+          router.refresh();
+          return;
+        }
 
         if (result.sessionStatus !== "in_progress") {
           return;
@@ -152,7 +177,7 @@ export function TranscriptViewer({
         window.clearTimeout(timeoutId);
       }
     };
-  }, [liveSessionStatus, scopedSearchParams, sessionId]);
+  }, [liveSessionStatus, router, scopedSearchParams, sessionId]);
 
   useEffect(() => {
     if (!stickToBottomRef.current) {

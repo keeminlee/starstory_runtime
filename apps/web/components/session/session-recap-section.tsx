@@ -37,16 +37,19 @@ export function SessionRecapSection({
   warnings,
 }: Props) {
   const [annotationVersion, setAnnotationVersion] = useState(0);
+  const showEntityResolution = recapPhase === "complete" && recap !== null;
 
   return (
     <div className="space-y-4">
-      <EntityResolutionPanel
-        sessionId={sessionId}
-        campaignSlug={campaignSlug}
-        searchParams={searchParams}
-        canWrite={canWrite}
-        onResolutionChange={() => setAnnotationVersion((current) => current + 1)}
-      />
+      {showEntityResolution ? (
+        <EntityResolutionPanel
+          sessionId={sessionId}
+          campaignSlug={campaignSlug}
+          searchParams={searchParams}
+          canWrite={canWrite}
+          onResolutionChange={() => setAnnotationVersion((current) => current + 1)}
+        />
+      ) : null}
       <RecapTabs
         recap={recap}
         recapPhase={recapPhase}

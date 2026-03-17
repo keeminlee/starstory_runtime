@@ -45,6 +45,36 @@ import type { CommandCtx } from "./index.js";
 
 const meepoLog = log.withScope("meepo");
 
+function getShowtimeExitBlockMessage(): string {
+  return "A showtime session is active. Use /meepo showtime end to finish it.";
+}
+
+function endLegacyLabSession(args: {
+  guildId: string;
+  channelId: string;
+  authorId: string;
+  authorName: string;
+  reason: string;
+}): ReturnType<typeof getActiveSession> {
+  const activeSession = getActiveSession(args.guildId);
+  if (!activeSession || activeSession.mode_at_start !== "lab") {
+    return null;
+  }
+
+  endSession(args.guildId, args.reason);
+  logSystemEvent({
+    guildId: args.guildId,
+    channelId: args.channelId,
+    eventType: "SESSION_ENDED",
+    content: JSON.stringify({ id: activeSession.session_id }),
+    authorId: args.authorId,
+    authorName: args.authorName,
+    narrativeWeight: "secondary",
+  });
+
+  return activeSession;
+}
+
 function getSessionLabelMap(sessionIds: string[], db: any): Map<string, string | null> {
   const stmt = db.prepare("SELECT label FROM sessions WHERE session_id = ? LIMIT 1");
   const out = new Map<string, string | null>();
@@ -721,6 +751,12 @@ export const meepo = {
     }
 
     if (sub === "sleep") {
+      const activeSession = getActiveSession(guildId);
+      if (activeSession && activeSession.mode_at_start !== "lab") {
+        await interaction.reply({ content: getShowtimeExitBlockMessage(), ephemeral: true });
+        return;
+      }
+
       const active = getActiveMeepo(guildId);
       if (active) {
         // Log system event (narrative secondary - state change)
@@ -735,10 +771,22 @@ export const meepo = {
         });
       }
 
+      const endedLabSession = endLegacyLabSession({
+        guildId,
+        channelId: active?.channel_id ?? interaction.channelId,
+        authorId: interaction.user.id,
+        authorName: interaction.user.username,
+        reason: "sleep",
+      });
+
       const changes = sleepMeepo(guildId);
 
       await interaction.reply({
-        content: changes > 0 ? "Meepo goes dormant." : "Meepo is already asleep.",
+        content: endedLabSession
+          ? "Meepo goes dormant and closes the active lab session."
+          : changes > 0
+            ? "Meepo goes dormant."
+            : "Meepo is already asleep.",
         ephemeral: true,
       });
 
@@ -1119,8 +1167,22 @@ export const meepo = {
     }
 
     if (sub === "leave") {
+      const activeSession = getActiveSession(guildId);
+      if (activeSession && activeSession.mode_at_start !== "lab") {
+        await interaction.reply({ content: getShowtimeExitBlockMessage(), ephemeral: true });
+        return;
+      }
+
       const currentState = getVoiceState(guildId);
-      if (!currentState) {
+      const endedLabSession = endLegacyLabSession({
+        guildId,
+        channelId: getActiveMeepo(guildId)?.channel_id ?? interaction.channelId,
+        authorId: interaction.user.id,
+        authorName: interaction.user.username,
+        reason: "leave",
+      });
+
+      if (!currentState && !endedLabSession) {
         await interaction.reply({
           content: "Meep? Meepo isn't in voice right now!",
           ephemeral: true,
@@ -1128,16 +1190,18 @@ export const meepo = {
         return;
       }
 
-      const channelId = currentState.channelId;
-      
-      // Stop receiver if active
-      stopReceiver(guildId);
-      
-      leaveVoice(guildId);
+      const channelId = currentState?.channelId ?? null;
+
+      if (currentState) {
+        // Stop receiver if active
+        stopReceiver(guildId);
+
+        leaveVoice(guildId);
+      }
 
       // Log system event (narrative secondary - state change)
       const active = getActiveMeepo(guildId);
-      if (active) {
+      if (active && currentState) {
         logSystemEvent({
           guildId,
           channelId: active.channel_id,
@@ -1150,7 +1214,11 @@ export const meepo = {
       }
 
       await interaction.reply({
-        content: `*poof!* Meepo leaves <#${channelId}>. Bye bye! Meep!`,
+        content: currentState
+          ? endedLabSession
+            ? `*poof!* Meepo leaves <#${channelId}> and closes the lab session. Bye bye! Meep!`
+            : `*poof!* Meepo leaves <#${channelId}>. Bye bye! Meep!`
+          : "Meepo isn't in voice right now, but the active lab session has been closed.",
         ephemeral: true,
       });
       return;

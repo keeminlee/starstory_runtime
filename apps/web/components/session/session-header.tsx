@@ -25,18 +25,6 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const statusTone = session.status === "in_progress" ? "warning" : session.status === "interrupted" ? "danger" : "success";
   type StatusChipModel = { label: string; tone: StatusChipTone };
-  const recapPhaseLabel =
-    session.recapPhase === "live"
-      ? "Recap live"
-      : session.recapPhase === "ended_pending_attribution"
-        ? "Recap awaiting attribution"
-        : session.recapPhase === "ended_ready"
-          ? "Recap ready"
-          : session.recapPhase === "generating"
-            ? "Recap generating"
-            : session.recapPhase === "failed"
-              ? "Recap failed"
-              : "Recap complete";
   const sessionLabel = useMemo(
     () => formatSessionDisplayTitle({ label, sessionId: session.id }),
     [label, session.id]
@@ -57,50 +45,35 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
         tone: "info" as const,
       },
       {
-        label: recapPhaseLabel,
-        tone:
-          session.recapPhase === "complete" || session.recapPhase === "ended_ready"
-            ? "success"
-            : session.recapPhase === "failed"
-              ? "danger"
-              : "warning",
+        label: session.sessionOrigin === "lab_legacy" ? "Origin lab legacy" : "Origin showtime",
+        tone: session.sessionOrigin === "lab_legacy" ? ("info" as const) : ("neutral" as const),
       },
       {
-        label: session.sessionOrigin === "lab_legacy" ? "Origin lab legacy" : "Origin showtime",
-        tone: session.sessionOrigin === "lab_legacy" ? ("warning" as const) : ("info" as const),
+        label:
+          session.status === "in_progress"
+            ? "Transcript live"
+            : session.artifacts.transcript === "available"
+              ? "Transcript ready"
+              : session.artifacts.transcript === "unavailable"
+                ? "Transcript unavailable"
+                : "Transcript missing",
+        tone:
+          session.status === "in_progress"
+            ? "warning"
+            : session.artifacts.transcript === "available"
+              ? "success"
+              : session.artifacts.transcript === "unavailable"
+                ? "danger"
+                : "warning",
       },
-      ...(session.speakerAttribution?.required
+      ...(session.status !== "in_progress" && session.speakerAttribution?.required && !session.speakerAttribution.ready
         ? [
             {
-              label: session.speakerAttribution.ready ? "Speaker attribution ready" : "Speaker attribution required",
-              tone: session.speakerAttribution.ready ? ("success" as const) : ("warning" as const),
+              label: "Attribution needed",
+              tone: "warning" as const,
             },
           ]
         : []),
-      {
-        label:
-          session.artifacts.recap === "available"
-            ? "Recap ready"
-            : `Recap ${session.artifacts.recap}`,
-        tone:
-          session.artifacts.recap === "available"
-            ? "success"
-            : session.artifacts.recap === "unavailable"
-              ? "danger"
-              : "warning",
-      },
-      {
-        label:
-          session.artifacts.transcript === "available"
-            ? "Transcript ready"
-            : `Transcript ${session.artifacts.transcript}`,
-        tone:
-          session.artifacts.transcript === "available"
-            ? "success"
-            : session.artifacts.transcript === "unavailable"
-              ? "danger"
-              : "warning",
-      },
     ];
 
     const seen = new Set<string>();
@@ -112,7 +85,7 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
       seen.add(key);
       return true;
     });
-  }, [recapPhaseLabel, session.artifacts.recap, session.artifacts.transcript, session.recapPhase, session.sessionOrigin, session.source, session.speakerAttribution, session.status, statusTone]);
+  }, [session.artifacts.transcript, session.sessionOrigin, session.source, session.speakerAttribution, session.status, statusTone]);
   const reportBugHref = useMemo(
     () =>
       buildBugReportHref({

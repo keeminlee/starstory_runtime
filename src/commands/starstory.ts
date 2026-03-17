@@ -2461,6 +2461,14 @@ async function handleSleep(interaction: any): Promise<void> {
   const guildId = interaction.guildId as string;
   const activeSession = getActiveSession(guildId) as SessionRow | null;
 
+  if (activeSession && activeSession.mode_at_start !== "lab") {
+    await interaction.reply({
+      content: "A showtime session is active. Use /meepo showtime end to finish it.",
+      ephemeral: true,
+    });
+    return;
+  }
+
   if (activeSession) {
     endSession(guildId, "sleep");
     logSystemEvent({

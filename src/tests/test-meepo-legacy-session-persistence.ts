@@ -14,6 +14,8 @@ const startReceiverMock = vi.fn();
 const stopReceiverMock = vi.fn();
 const overlayEmitPresenceMock = vi.fn();
 
+let currentVoiceState: { channelId: string } | null = null;
+
 const activeMeepoState = {
   current: {
     guild_id: "guild-1",
@@ -39,6 +41,18 @@ vi.mock("../voice/receiver.js", () => ({
   stopReceiver: stopReceiverMock,
 }));
 
+vi.mock("../voice/state.js", () => ({
+  getVoiceState: vi.fn(() => currentVoiceState),
+  setVoiceState: vi.fn((_guildId: string, nextState: { channelId: string }) => {
+    currentVoiceState = nextState;
+  }),
+  clearVoiceState: vi.fn(() => {
+    currentVoiceState = null;
+  }),
+  isVoiceHushEnabled: vi.fn(() => true),
+  setVoiceHushEnabled: vi.fn(),
+}));
+
 vi.mock("../overlay/server.js", () => ({
   overlayEmitPresence: overlayEmitPresenceMock,
 }));
@@ -51,7 +65,7 @@ function configureHermeticEnv(tempDir: string): void {
   vi.stubEnv("DEFAULT_CAMPAIGN_SLUG", "default");
 }
 
-function buildInteraction() {
+function buildInteraction(args?: { subcommand?: string }) {
   return {
     type: InteractionType.ApplicationCommand,
     guildId: "guild-1",
@@ -81,7 +95,7 @@ function buildInteraction() {
     deferReply: vi.fn(async () => undefined),
     options: {
       getSubcommandGroup: () => null,
-      getSubcommand: () => "join",
+      getSubcommand: () => args?.subcommand ?? "join",
       getString: () => null,
       getBoolean: () => null,
     },
@@ -94,6 +108,7 @@ afterEach(() => {
   startReceiverMock.mockReset();
   stopReceiverMock.mockReset();
   overlayEmitPresenceMock.mockReset();
+  currentVoiceState = null;
   activeMeepoState.current = {
     guild_id: "guild-1",
     channel_id: "text-1",
@@ -154,6 +169,139 @@ describe("legacy lab session persistence", () => {
     expect(interaction.editReply).toHaveBeenCalledWith({
       content: "*poof!* Meepo is here! Listening in <#voice-1>! Meep meep! 🎧",
     });
+
+    db.close();
+  });
+
+  test("legacy sleep closes an active lab session even after voice detaches", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-legacy-sleep-end-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const { meepo } = await import("../commands/meepoLegacy.js");
+    const { getDbForCampaign } = await import("../db.js");
+    const { getActiveSession, getMostRecentSession, startSession } = await import("../sessions/sessions.js");
+
+    const db = getDbForCampaign("default");
+    startSession("guild-1", "dm-user", "DM", { source: "live", modeAtStart: "lab" });
+
+    const execCtx = {
+      guildId: "guild-1",
+      campaignSlug: "default",
+      dbPath: "test.sqlite",
+      db,
+      trace_id: "trace-legacy-sleep-end",
+      interaction_id: "interaction-legacy-sleep-end",
+    } as any;
+
+    const interaction = buildInteraction({ subcommand: "sleep" });
+    await meepo.execute(interaction, execCtx);
+
+    expect(getActiveSession("guild-1")).toBeNull();
+    expect(getMostRecentSession("guild-1")?.status).toBe("completed");
+    expect(leaveVoiceMock).not.toHaveBeenCalled();
+    const content = String(interaction.reply.mock.calls[0]?.[0]?.content ?? "");
+    expect(content).toContain("closes the active lab session");
+
+    db.close();
+  });
+
+  test("legacy leave closes an active lab session even when voice is already gone", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-legacy-leave-end-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const { meepo } = await import("../commands/meepoLegacy.js");
+    const { getDbForCampaign } = await import("../db.js");
+    const { getActiveSession, getMostRecentSession, startSession } = await import("../sessions/sessions.js");
+
+    const db = getDbForCampaign("default");
+    startSession("guild-1", "dm-user", "DM", { source: "live", modeAtStart: "lab" });
+
+    const execCtx = {
+      guildId: "guild-1",
+      campaignSlug: "default",
+      dbPath: "test.sqlite",
+      db,
+      trace_id: "trace-legacy-leave-end",
+      interaction_id: "interaction-legacy-leave-end",
+    } as any;
+
+    const interaction = buildInteraction({ subcommand: "leave" });
+    await meepo.execute(interaction, execCtx);
+
+    expect(getActiveSession("guild-1")).toBeNull();
+    expect(getMostRecentSession("guild-1")?.status).toBe("completed");
+    expect(leaveVoiceMock).not.toHaveBeenCalled();
+    const content = String(interaction.reply.mock.calls[0]?.[0]?.content ?? "");
+    expect(content).toContain("lab session has been closed");
+
+    db.close();
+  });
+
+  test("legacy leave is blocked while a showtime session is active", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-legacy-leave-showtime-guard-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const { meepo } = await import("../commands/meepoLegacy.js");
+    const { getDbForCampaign } = await import("../db.js");
+    const { getActiveSession, startSession } = await import("../sessions/sessions.js");
+
+    const db = getDbForCampaign("default");
+    startSession("guild-1", "dm-user", "DM", { source: "live", kind: "canon", modeAtStart: "canon" });
+    currentVoiceState = { channelId: "voice-1" };
+
+    const execCtx = {
+      guildId: "guild-1",
+      campaignSlug: "default",
+      dbPath: "test.sqlite",
+      db,
+      trace_id: "trace-legacy-leave-showtime-guard",
+      interaction_id: "interaction-legacy-leave-showtime-guard",
+    } as any;
+
+    const interaction = buildInteraction({ subcommand: "leave" });
+    await meepo.execute(interaction, execCtx);
+
+    expect(getActiveSession("guild-1")).toBeTruthy();
+    expect(stopReceiverMock).not.toHaveBeenCalled();
+    expect(leaveVoiceMock).not.toHaveBeenCalled();
+    const content = String(interaction.reply.mock.calls[0]?.[0]?.content ?? "");
+    expect(content).toContain("/meepo showtime end");
+
+    db.close();
+  });
+
+  test("legacy sleep is blocked while a showtime session is active", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-legacy-sleep-showtime-guard-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const { meepo } = await import("../commands/meepoLegacy.js");
+    const { getDbForCampaign } = await import("../db.js");
+    const { getActiveSession, startSession } = await import("../sessions/sessions.js");
+
+    const db = getDbForCampaign("default");
+    startSession("guild-1", "dm-user", "DM", { source: "live", kind: "canon", modeAtStart: "canon" });
+
+    const execCtx = {
+      guildId: "guild-1",
+      campaignSlug: "default",
+      dbPath: "test.sqlite",
+      db,
+      trace_id: "trace-legacy-sleep-showtime-guard",
+      interaction_id: "interaction-legacy-sleep-showtime-guard",
+    } as any;
+
+    const interaction = buildInteraction({ subcommand: "sleep" });
+    await meepo.execute(interaction, execCtx);
+
+    expect(getActiveSession("guild-1")).toBeTruthy();
+    expect(stopReceiverMock).not.toHaveBeenCalled();
+    expect(leaveVoiceMock).not.toHaveBeenCalled();
+    const content = String(interaction.reply.mock.calls[0]?.[0]?.content ?? "");
+    expect(content).toContain("/meepo showtime end");
 
     db.close();
   });
