@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Calendar, ChevronRight } from "lucide-react";
+import { InlineEditableText } from "@/components/shared/inline-editable-text";
 import { StatusChip } from "@/components/shared/status-chip";
 import type { CampaignSummary } from "@/lib/types";
 import { formatSessionDisplayTitle } from "@/lib/campaigns/display";
@@ -19,19 +20,10 @@ type CampaignOverviewProps = {
 export function CampaignOverview({ campaign, searchParams }: CampaignOverviewProps) {
   const router = useRouter();
   const [campaignName, setCampaignName] = useState(campaign.name);
-  const [campaignNameDraft, setCampaignNameDraft] = useState(campaign.name);
-  const [isEditingCampaignName, setIsEditingCampaignName] = useState(false);
-  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [archivingSessionId, setArchivingSessionId] = useState<string | null>(null);
   const [endingSessionId, setEndingSessionId] = useState<string | null>(null);
-  const [sessionLabelDraft, setSessionLabelDraft] = useState("");
   const [localSessions, setLocalSessions] = useState(campaign.sessions);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const sessionById = useMemo(
-    () => new Map(localSessions.map((session) => [session.id, session])),
-    [localSessions]
-  );
 
   const scopedSearchParams = useMemo(
     () => ({
@@ -54,7 +46,6 @@ export function CampaignOverview({ campaign, searchParams }: CampaignOverviewPro
 
   useEffect(() => {
     setCampaignName(campaign.name);
-    setCampaignNameDraft(campaign.name);
   }, [campaign.name]);
 
   useEffect(() => {
@@ -70,90 +61,45 @@ export function CampaignOverview({ campaign, searchParams }: CampaignOverviewPro
   return (
     <div className="space-y-8">
       <header>
-        <div className="flex flex-wrap items-center gap-3">
-          {!isEditingCampaignName ? (
-            <>
-              <h1 className="text-4xl font-serif">{campaignName}</h1>
-              {campaign.canWrite ? (
+        <InlineEditableText
+          value={campaignName}
+          canEdit={Boolean(campaign.canWrite)}
+          ariaLabel="Campaign title"
+          maxLength={100}
+          emptyValueMessage="Campaign name cannot be empty."
+          maxLengthMessage="Campaign name must be 100 characters or fewer."
+          inputClassName="min-w-[16rem] border-b border-primary/30 bg-transparent px-0 py-0 text-4xl font-serif text-foreground outline-none transition-colors focus:border-primary"
+          onSave={async (nextName) => {
+            try {
+              const result = await updateCampaignNameApi(campaign.slug, { campaignName: nextName }, scopedSearchParams);
+              setCampaignName(result.campaign.name);
+              router.refresh();
+              return result.campaign.name;
+            } catch (error) {
+              if (error instanceof WebApiError) {
+                throw new Error(error.message);
+              }
+
+              throw new Error("Unable to rename campaign right now.");
+            }
+          }}
+          renderDisplay={({ displayValue, canEdit, isSaving, startEditing }) => (
+            <h1 className="text-4xl font-serif">
+              {canEdit ? (
                 <button
                   type="button"
-                  className="rounded-full border border-border px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
-                  onClick={() => {
-                    setCampaignNameDraft(campaignName);
-                    setErrorMessage(null);
-                    setIsEditingCampaignName(true);
-                  }}
+                  onClick={startEditing}
+                  disabled={isSaving}
+                  className="cursor-text text-left text-foreground decoration-primary/40 underline-offset-4 transition hover:text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Edit name
+                  {displayValue}
                 </button>
-              ) : null}
-            </>
-          ) : (
-            <form
-              className="flex flex-wrap items-center gap-2"
-              onSubmit={async (event) => {
-                event.preventDefault();
-                const previousName = campaignName;
-                const nextName = campaignNameDraft.trim();
-
-                if (!nextName) {
-                  setErrorMessage("Campaign name cannot be empty.");
-                  return;
-                }
-
-                if (nextName.length > 100) {
-                  setErrorMessage("Campaign name must be 100 characters or fewer.");
-                  return;
-                }
-
-                setErrorMessage(null);
-                setCampaignName(nextName);
-                setIsEditingCampaignName(false);
-
-                try {
-                  const result = await updateCampaignNameApi(campaign.slug, { campaignName: nextName }, scopedSearchParams);
-                  setCampaignName(result.campaign.name);
-                } catch (error) {
-                  setCampaignName(previousName);
-                  setCampaignNameDraft(previousName);
-                  if (error instanceof WebApiError) {
-                    setErrorMessage(error.message);
-                  } else {
-                    setErrorMessage("Unable to rename campaign right now.");
-                  }
-                  router.refresh();
-                  return;
-                }
-
-                router.refresh();
-              }}
-            >
-              <input
-                value={campaignNameDraft}
-                maxLength={100}
-                onChange={(event) => setCampaignNameDraft(event.currentTarget.value)}
-                className="rounded-md border border-border bg-background px-3 py-2 text-sm"
-              />
-              <button
-                type="submit"
-                className="rounded-full border border-primary/40 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary"
-              >
-                Save
-              </button>
-              <button
-                type="button"
-                className="rounded-full border border-border px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                onClick={() => {
-                  setCampaignNameDraft(campaignName);
-                  setIsEditingCampaignName(false);
-                  setErrorMessage(null);
-                }}
-              >
-                Cancel
-              </button>
-            </form>
+              ) : (
+                displayValue
+              )}
+            </h1>
           )}
-        </div>
+        />
         <p className="mt-1 font-mono text-xs uppercase tracking-wider text-muted-foreground">{campaign.slug}</p>
         <p className="mt-2 max-w-3xl text-muted-foreground">{campaign.description}</p>
         {errorMessage ? <p className="mt-2 text-sm text-rose-400">{errorMessage}</p> : null}
@@ -174,87 +120,58 @@ export function CampaignOverview({ campaign, searchParams }: CampaignOverviewPro
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <Link
-                      href={{
-                        pathname: `/campaigns/${campaign.slug}/sessions/${session.id}`,
-                        ...(campaign.guildId ? { query: { guild_id: campaign.guildId } } : {}),
-                      }}
-                      className="text-2xl font-serif group-hover:text-primary"
-                    >
-                      {displayTitle}
-                    </Link>
-                    {campaign.canWrite && editingSessionId === session.id ? (
-                      <form
-                        className="inline-flex items-center gap-2"
-                        onSubmit={async (event) => {
-                          event.preventDefault();
-                          const previous = sessionById.get(session.id);
-                          if (!previous) return;
+                    <InlineEditableText
+                      value={session.label ?? ""}
+                      displayValue={displayTitle}
+                      canEdit={Boolean(campaign.canWrite)}
+                      ariaLabel="Session title"
+                      allowEmpty
+                      maxLength={80}
+                      maxLengthMessage="Session title must be 80 characters or fewer."
+                      inputClassName="min-w-[12rem] border-b border-primary/30 bg-transparent px-0 py-0 text-2xl font-serif text-foreground outline-none transition-colors focus:border-primary"
+                      onSave={async (nextValue) => {
+                        const nextLabel = nextValue.length > 0 ? nextValue : null;
 
-                          const normalized = sessionLabelDraft.trim();
-                          if (normalized.length > 80) {
-                            setErrorMessage("Session label must be 80 characters or fewer.");
-                            return;
-                          }
-
-                          setErrorMessage(null);
-                          const optimisticLabel = normalized.length > 0 ? normalized : null;
+                        try {
+                          const result = await updateSessionLabelApi(session.id, { label: nextLabel }, scopedSearchParams);
                           setLocalSessions((current) =>
                             current.map((entry) =>
                               entry.id === session.id
                                 ? {
                                     ...entry,
-                                    label: optimisticLabel,
-                                    title: formatSessionDisplayTitle({
-                                      label: optimisticLabel,
-                                      sessionId: entry.id,
-                                    }),
+                                    label: result.session.label,
+                                    title: result.session.title,
                                   }
                                 : entry
                             )
                           );
-                          setEditingSessionId(null);
-
-                          try {
-                            await updateSessionLabelApi(session.id, { label: optimisticLabel }, scopedSearchParams);
-                          } catch (error) {
-                            setLocalSessions((current) =>
-                              current.map((entry) => (entry.id === session.id ? previous : entry))
-                            );
-                            if (error instanceof WebApiError) {
-                              setErrorMessage(error.message);
-                            } else {
-                              setErrorMessage("Unable to update session label right now.");
-                            }
-                            router.refresh();
-                            return;
+                          router.refresh();
+                          return result.session.label ?? "";
+                        } catch (error) {
+                          if (error instanceof WebApiError) {
+                            throw new Error(error.message);
                           }
 
-                          router.refresh();
-                        }}
-                      >
-                        <input
-                          value={sessionLabelDraft}
-                          maxLength={80}
-                          onChange={(event) => setSessionLabelDraft(event.currentTarget.value)}
-                          className="rounded-md border border-border bg-background px-2 py-1 text-sm"
-                        />
-                        <button type="submit" className="rounded-full border border-primary/40 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-primary">Save</button>
-                        <button type="button" className="rounded-full border border-border px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground" onClick={() => setEditingSessionId(null)}>Cancel</button>
-                      </form>
-                    ) : campaign.canWrite ? (
+                          throw new Error("Unable to update the session title right now.");
+                        }
+                      }}
+                      renderDisplay={({ displayValue, canEdit, isSaving, startEditing }) =>
+                        canEdit ? (
+                          <button
+                            type="button"
+                            onClick={startEditing}
+                            disabled={isSaving}
+                            className="cursor-text text-left text-2xl font-serif text-foreground decoration-primary/40 underline-offset-4 transition hover:text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {displayValue}
+                          </button>
+                        ) : (
+                          <span className="text-2xl font-serif text-foreground">{displayValue}</span>
+                        )
+                      }
+                    />
+                    {campaign.canWrite ? (
                       <>
-                        <button
-                          type="button"
-                          className="rounded-full border border-border px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
-                          onClick={() => {
-                            setSessionLabelDraft(session.label ?? "");
-                            setEditingSessionId(session.id);
-                            setErrorMessage(null);
-                          }}
-                        >
-                          Edit label
-                        </button>
                         {session.status === "in_progress" ? (
                           <button
                             type="button"

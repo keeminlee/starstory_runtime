@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import type { EntityAppearanceDto, RegistryCategoryKey } from "@/lib/registry/types";
 import { getEntityAppearancesApi } from "@/lib/api/registry";
+import { formatSessionDisplayTitle } from "@/lib/campaigns/display";
 
 type AnchorRect = {
   top: number;
@@ -183,7 +184,10 @@ export function EntityPreviewPanel({
                   >
                     <div className="flex items-center justify-between gap-2 text-xs">
                       <span className="min-w-0 truncate font-semibold text-foreground">
-                        {a.sessionLabel ?? a.sessionId.slice(0, 8)}
+                        {formatSessionDisplayTitle({
+                          label: a.sessionLabel,
+                          sessionId: a.sessionId,
+                        })}
                       </span>
                       <span className="shrink-0 text-muted-foreground">{a.sessionDate}</span>
                     </div>

@@ -595,11 +595,15 @@ export async function getWebCampaignDetail(args: {
 
 export async function updateWebCampaignName(args: {
   campaignSlug: string;
-  campaignName: string;
+  campaignName: string | null | undefined;
   searchParams?: QueryInput;
 }): Promise<CampaignSummary> {
   const auth = await resolveWebAuthContext(args.searchParams);
   const campaignSlug = args.campaignSlug.trim();
+  if (typeof args.campaignName !== "string") {
+    throw new WebDataError("invalid_request", 422, "campaignName must be a string.");
+  }
+
   const campaignName = args.campaignName.trim();
 
   if (!campaignSlug) {
@@ -607,11 +611,11 @@ export async function updateWebCampaignName(args: {
   }
 
   if (!campaignName) {
-    throw new Error("campaignName cannot be empty.");
+     throw new WebDataError("invalid_request", 422, "campaignName cannot be empty.");
   }
 
   if (campaignName.length > 100) {
-    throw new Error("campaignName exceeds max length (100).");
+     throw new WebDataError("invalid_request", 422, "campaignName exceeds max length (100).");
   }
 
   const resolvedScope = resolveGuildScopeForSlug({

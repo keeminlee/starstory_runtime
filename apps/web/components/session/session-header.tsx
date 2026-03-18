@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronRight, Clock } from "lucide-react";
+import { InlineEditableText } from "@/components/shared/inline-editable-text";
 import { StatusChip } from "@/components/shared/status-chip";
 import type { StatusChipTone } from "@/components/shared/status-chip";
 import type { SessionDetail } from "@/lib/types";
@@ -19,16 +20,14 @@ type SessionHeaderProps = {
 
 export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
   const router = useRouter();
-  const [label, setLabel] = useState(session.label);
-  const [draftLabel, setDraftLabel] = useState(session.label ?? "");
-  const [isEditing, setIsEditing] = useState(false);
+  const [label, setLabel] = useState(session.label ?? "");
   const [isArchiving, setIsArchiving] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const statusTone = session.status === "in_progress" ? "warning" : session.status === "interrupted" ? "danger" : "success";
   type StatusChipModel = { label: string; tone: StatusChipTone };
   const sessionLabel = useMemo(
-    () => formatSessionDisplayTitle({ label, sessionId: session.id }),
+    () => formatSessionDisplayTitle({ label: label.trim().length > 0 ? label.trim() : null, sessionId: session.id }),
     [label, session.id]
   );
   const statusChips = useMemo(() => {
@@ -120,135 +119,111 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-5xl font-serif italic">{sessionLabel}</h1>
+            <InlineEditableText
+              value={label}
+              displayValue={sessionLabel}
+              canEdit={Boolean(session.canWrite)}
+              ariaLabel="Session title"
+              allowEmpty
+              maxLength={80}
+              maxLengthMessage="Session title must be 80 characters or fewer."
+              inputClassName="min-w-[16rem] border-b border-primary/30 bg-transparent px-0 py-0 text-5xl font-serif italic text-foreground outline-none transition-colors focus:border-primary"
+              onSave={async (nextValue) => {
+                const nextLabel = nextValue.length > 0 ? nextValue : null;
+
+                try {
+                  const result = await updateSessionLabelApi(session.id, { label: nextLabel }, searchParams);
+                  setLabel(result.session.label ?? "");
+                  router.refresh();
+                  return result.session.label ?? "";
+                } catch (error) {
+                  if (error instanceof WebApiError) {
+                    throw new Error(error.message);
+                  }
+
+                  throw new Error("Unable to update the session title right now.");
+                }
+              }}
+              renderDisplay={({ displayValue, canEdit, isSaving, startEditing }) => (
+                <h1 className="text-5xl font-serif italic">
+                  {canEdit ? (
+                    <button
+                      type="button"
+                      onClick={startEditing}
+                      disabled={isSaving}
+                      className="cursor-text text-left text-foreground decoration-primary/40 underline-offset-4 transition hover:text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {displayValue}
+                    </button>
+                  ) : (
+                    displayValue
+                  )}
+                </h1>
+              )}
+            />
             {session.canWrite ? (
-              !isEditing ? (
-                <>
+              <>
+                {session.status === "in_progress" ? (
                   <button
                     type="button"
-                    className="rounded-full border border-border px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
-                    onClick={() => {
-                      setDraftLabel(label ?? "");
-                      setIsEditing(true);
-                      setErrorMessage(null);
-                    }}
-                  >
-                    Edit label
-                  </button>
-                  {session.status === "in_progress" ? (
-                    <button
-                      type="button"
-                      disabled={isEnding}
-                      title="End session"
-                      className="rounded-full border border-border px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-rose-400/40 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-50"
-                      onClick={async () => {
-                        if (!window.confirm("End this session now? This uses the same closure path as showtime end.")) {
-                          return;
-                        }
-
-                        setIsEnding(true);
-                        setErrorMessage(null);
-                        try {
-                          await endSessionApi(session.id, searchParams);
-                          router.refresh();
-                        } catch (error) {
-                          if (error instanceof WebApiError) {
-                            setErrorMessage(error.message);
-                          } else {
-                            setErrorMessage("Unable to end this session right now.");
-                          }
-                        } finally {
-                          setIsEnding(false);
-                        }
-                      }}
-                    >
-                      {isEnding ? "Ending" : "End session"}
-                    </button>
-                  ) : null}
-                  {!session.isArchived ? (
-                    <button
-                      type="button"
-                      disabled={isArchiving || session.status === "in_progress"}
-                      title={session.status === "in_progress" ? "Active sessions cannot be archived." : "Archive session"}
-                      className="rounded-full border border-border px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-amber-400/40 hover:text-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
-                      onClick={async () => {
-                        if (!window.confirm("Archive this session? It will be hidden from default lists but remain readable by direct link.")) {
-                          return;
-                        }
-
-                        setIsArchiving(true);
-                        setErrorMessage(null);
-                        try {
-                          await archiveSessionApi(session.id, searchParams);
-                          router.refresh();
-                        } catch (error) {
-                          if (error instanceof WebApiError) {
-                            setErrorMessage(error.message);
-                          } else {
-                            setErrorMessage("Unable to archive this session right now.");
-                          }
-                        } finally {
-                          setIsArchiving(false);
-                        }
-                      }}
-                    >
-                      {isArchiving ? "Archiving" : session.status === "in_progress" ? "Archive blocked" : "Archive session"}
-                    </button>
-                  ) : null}
-                </>
-              ) : (
-                <form
-                  className="inline-flex items-center gap-2"
-                  onSubmit={async (event) => {
-                    event.preventDefault();
-                    const previous = label;
-                    const normalized = draftLabel.trim();
-                    if (normalized.length > 80) {
-                      setErrorMessage("Session label must be 80 characters or fewer.");
-                      return;
-                    }
-
-                    const nextLabel = normalized.length > 0 ? normalized : null;
-                    setErrorMessage(null);
-                    setLabel(nextLabel);
-                    setIsEditing(false);
-
-                    try {
-                      await updateSessionLabelApi(session.id, { label: nextLabel }, searchParams);
-                    } catch (error) {
-                      setLabel(previous);
-                      if (error instanceof WebApiError) {
-                        setErrorMessage(error.message);
-                      } else {
-                        setErrorMessage("Unable to update session label right now.");
+                    disabled={isEnding}
+                    title="End session"
+                    className="rounded-full border border-border px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-rose-400/40 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={async () => {
+                      if (!window.confirm("End this session now? This uses the same closure path as showtime end.")) {
+                        return;
                       }
-                      router.refresh();
-                      return;
-                    }
 
-                    router.refresh();
-                  }}
-                >
-                  <input
-                    value={draftLabel}
-                    maxLength={80}
-                    onChange={(event) => setDraftLabel(event.currentTarget.value)}
-                    className="rounded-md border border-border bg-background px-2 py-1 text-sm"
-                  />
-                  <button type="submit" className="rounded-full border border-primary/40 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-primary">Save</button>
-                  <button
-                    type="button"
-                    className="rounded-full border border-border px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-                    onClick={() => {
-                      setDraftLabel(label ?? "");
-                      setIsEditing(false);
+                      setIsEnding(true);
                       setErrorMessage(null);
+                      try {
+                        await endSessionApi(session.id, searchParams);
+                        router.refresh();
+                      } catch (error) {
+                        if (error instanceof WebApiError) {
+                          setErrorMessage(error.message);
+                        } else {
+                          setErrorMessage("Unable to end this session right now.");
+                        }
+                      } finally {
+                        setIsEnding(false);
+                      }
                     }}
                   >
-                    Cancel
+                    {isEnding ? "Ending" : "End session"}
                   </button>
-                </form>
-              )
+                ) : null}
+                {!session.isArchived ? (
+                  <button
+                    type="button"
+                    disabled={isArchiving || session.status === "in_progress"}
+                    title={session.status === "in_progress" ? "Active sessions cannot be archived." : "Archive session"}
+                    className="rounded-full border border-border px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-amber-400/40 hover:text-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={async () => {
+                      if (!window.confirm("Archive this session? It will be hidden from default lists but remain readable by direct link.")) {
+                        return;
+                      }
+
+                      setIsArchiving(true);
+                      setErrorMessage(null);
+                      try {
+                        await archiveSessionApi(session.id, searchParams);
+                        router.refresh();
+                      } catch (error) {
+                        if (error instanceof WebApiError) {
+                          setErrorMessage(error.message);
+                        } else {
+                          setErrorMessage("Unable to archive this session right now.");
+                        }
+                      } finally {
+                        setIsArchiving(false);
+                      }
+                    }}
+                  >
+                    {isArchiving ? "Archiving" : session.status === "in_progress" ? "Archive blocked" : "Archive session"}
+                  </button>
+                ) : null}
+              </>
             ) : null}
           </div>
           <p className="mt-2 text-sm uppercase tracking-widest text-primary/70">{session.campaignName}</p>

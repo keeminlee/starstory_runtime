@@ -10,34 +10,39 @@ export function CampaignSelector() {
     if (activeScopeKey && campaigns.some((campaign) => campaign.scopeKey === activeScopeKey)) {
       return activeScopeKey;
     }
-    return "";
+    return campaigns[0]?.scopeKey ?? "";
   }, [activeScopeKey, campaigns]);
 
   const hasRealCampaigns = realCampaigns.length > 0;
-  const disabled = campaigns.length === 0;
+
+  if (!hasRealCampaigns) {
+    return (
+      <div className="inline-flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
+        <span>Campaign</span>
+        <span className="text-[11px] normal-case tracking-normal text-muted-foreground/90">
+          Start a session from Discord to surface a campaign here.
+        </span>
+      </div>
+    );
+  }
 
   return (
     <label className="inline-flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
       <span>Campaign</span>
       <select
-        aria-label="Select campaign"
+        aria-label="Switch campaign"
         value={currentValue}
-        disabled={disabled}
         onChange={(event) => {
           const nextCampaignScopeKey = event.currentTarget.value;
-          if (!nextCampaignScopeKey) return;
-          if (nextCampaignScopeKey === "__new__") return;
           selectCampaign(nextCampaignScopeKey);
         }}
         className="control-select min-w-48 rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-wider"
       >
-        <option value="">{campaigns.length === 0 ? "No campaigns" : "Select campaign"}</option>
         {campaigns.map((campaign) => (
           <option key={campaign.scopeKey} value={campaign.scopeKey}>
             {campaign.type === "system" ? campaign.name : `${campaign.name} · ${campaign.guildName}`}
           </option>
         ))}
-        {hasRealCampaigns ? <option value="__new__">+ New Campaign</option> : null}
       </select>
     </label>
   );
