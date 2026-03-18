@@ -275,3 +275,37 @@ test("speaker attribution stores validated PC mappings and rejects invalid PC cl
     }),
   ]);
 });
+
+test("speaker attribution state treats missing registry PCs as unresolved before recap", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-session-speaker-stale-pc-"));
+  tempDirs.push(tempDir);
+  configureHermeticEnv(tempDir);
+
+  const guildId = "guild-speaker-stale-pc";
+  const sessionId = "session-speaker-stale-pc";
+  const campaignSlug = "default";
+  await seedSessionFixture(guildId, sessionId);
+  seedPcRegistry(guildId, campaignSlug);
+
+  const { setGuildDmUserId } = await import("../campaign/guildConfig.js");
+  const {
+    getSessionSpeakerAttributionState,
+    setSessionSpeakerClassifications,
+  } = await import("../sessions/sessionSpeakerAttribution.js");
+
+  setGuildDmUserId(guildId, "dm-1");
+  setSessionSpeakerClassifications({
+    guildId,
+    campaignSlug,
+    sessionId,
+    entries: [{ discordUserId: "player-1", classificationType: "pc", pcEntityId: "pc_jamison" }],
+  });
+
+  const registryDir = getRegistryDirForScope({ guildId, campaignSlug });
+  fs.writeFileSync(path.join(registryDir, "pcs.yml"), "version: 1\ncharacters: []\n", "utf8");
+
+  const state = getSessionSpeakerAttributionState({ guildId, campaignSlug, sessionId });
+  expect(state.ready).toBe(false);
+  expect(state.pendingCount).toBe(1);
+  expect(state.speakers.find((speaker) => speaker.discordUserId === "player-1")?.classification).toBeNull();
+});

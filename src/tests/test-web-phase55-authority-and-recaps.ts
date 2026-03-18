@@ -553,6 +553,57 @@ describe("Phase 5.5 recap source visibility", () => {
     );
   });
 
+  test("session detail returns to pending attribution when a stored PC mapping disappears from registry", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-phase55-speaker-stale-pc-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const guildId = "guild-1";
+    const dmUserId = "dm-1";
+    const playerUserId = "player-1";
+    const { campaignSlug, sessionId } = await setupGuildCampaignAndSession({ guildId, dmUserId, playerUserId });
+    await seedSessionTranscript({ guildId, campaignSlug, sessionId, playerUserId, dmUserId });
+
+    const { upsertGuildSeenDiscordUser } = await import("../campaign/guildSeenDiscordUsers.js");
+    upsertGuildSeenDiscordUser({
+      guildId,
+      discordUserId: playerUserId,
+      nickname: "Jamison",
+      username: "jamison",
+      seenAtMs: Date.now(),
+    });
+
+    await setAuth({ userId: dmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+    const { saveSessionSpeakerAttributionBatch } = await import("../../apps/web/lib/server/sessionSpeakerAttributionService");
+    await saveSessionSpeakerAttributionBatch({
+      guildId,
+      campaignSlug,
+      sessionId,
+      payload: {
+        entries: [
+          {
+            discordUserId: playerUserId,
+            classificationType: "pc",
+            createPc: {
+              canonicalName: "Jamison",
+            },
+          },
+        ],
+      },
+    });
+
+    const { getRegistryDirForScope } = await import("../registry/scaffold.js");
+    const registryDir = getRegistryDirForScope({ guildId, campaignSlug });
+    fs.writeFileSync(path.join(registryDir, "pcs.yml"), "version: 1\ncharacters: []\n", "utf8");
+
+    const { getWebSessionDetail } = await getSessionReaders();
+    const detail = await getWebSessionDetail({ sessionId, searchParams: { campaign_slug: campaignSlug } });
+
+    expect(detail.speakerAttribution?.ready).toBe(false);
+    expect(detail.speakerAttribution?.pendingCount).toBe(1);
+    expect(detail.recapPhase).toBe("ended_pending_attribution");
+  });
+
   test("session detail exposes canonical recap source", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-phase55-recap-"));
     tempDirs.push(tempDir);

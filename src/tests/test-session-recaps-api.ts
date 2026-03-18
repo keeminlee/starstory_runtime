@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import type { RecapStrategy } from "../sessions/recapEngine.js";
+import { ensureRegistryScaffold, getRegistryDirForScope } from "../registry/scaffold.js";
 
 const tempDirs: string[] = [];
 
@@ -123,6 +124,27 @@ async function markSpeakerAttributionReady(guildId: string, sessionId: string): 
       },
     ],
   });
+}
+
+function seedPcRegistry(guildId: string, campaignSlug: string, discordUserId = "user-1"): void {
+  const registryDir = getRegistryDirForScope({ guildId, campaignSlug });
+  ensureRegistryScaffold(registryDir);
+  fs.writeFileSync(
+    path.join(registryDir, "pcs.yml"),
+    [
+      "version: 1",
+      "",
+      "characters:",
+      "  - id: pc_test_user",
+      "    canonical_name: Test User",
+      "    aliases:",
+      "      - Tester",
+      `    discord_user_id: ${discordUserId}`,
+      "    notes: Test PC",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
 }
 
 function buildStyleRecapResult(args: {
@@ -568,6 +590,49 @@ test("generateSessionRecap returns explicit attribution-required domain error wh
             strategy,
             text: `${strategy}-ok`,
             sourceTranscriptHash: "hash-attribution",
+          }),
+      }
+    )
+  ).rejects.toMatchObject({
+    code: "RECAP_SPEAKER_ATTRIBUTION_REQUIRED",
+  });
+});
+
+test("generateSessionRecap blocks when stored PC attribution no longer resolves in registry", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-session-recaps-stale-pc-gate-"));
+  tempDirs.push(tempDir);
+  configureHermeticEnv(tempDir);
+
+  const guildId = "guild-recaps-stale-pc-gate";
+  const sessionId = "session-recaps-stale-pc-gate";
+  await seedSessionAndLedger(guildId, sessionId);
+  const { resolveCampaignSlug, setGuildDmUserId } = await import("../campaign/guildConfig.js");
+  const campaignSlug = resolveCampaignSlug({ guildId });
+  seedPcRegistry(guildId, campaignSlug, "user-1");
+
+  const { setSessionSpeakerClassifications } = await import("../sessions/sessionSpeakerAttribution.js");
+  const { generateSessionRecap } = await import("../sessions/sessionRecaps.js");
+
+  setGuildDmUserId(guildId, "user-2");
+  setSessionSpeakerClassifications({
+    guildId,
+    campaignSlug,
+    sessionId,
+    entries: [{ discordUserId: "user-1", classificationType: "pc", pcEntityId: "pc_test_user" }],
+  });
+
+  const registryDir = getRegistryDirForScope({ guildId, campaignSlug });
+  fs.writeFileSync(path.join(registryDir, "pcs.yml"), "version: 1\ncharacters: []\n", "utf8");
+
+  await expect(
+    generateSessionRecap(
+      { guildId, sessionId, campaignSlug },
+      {
+        generateStyleRecap: async ({ strategy }) =>
+          buildStyleRecapResult({
+            strategy,
+            text: `${strategy}-ok`,
+            sourceTranscriptHash: "hash-stale-pc",
           }),
       }
     )

@@ -170,6 +170,40 @@ function getPcEntityById(args: {
   return entity;
 }
 
+function validateStoredClassification(args: {
+  guildId: string;
+  campaignSlug: string;
+  classification: StoredSessionSpeakerClassification | null;
+}): StoredSessionSpeakerClassification | null {
+  const classification = args.classification;
+  if (!classification) {
+    return null;
+  }
+
+  if (classification.classificationType !== "pc") {
+    return classification;
+  }
+
+  const pcEntityId = classification.pcEntityId?.trim();
+  if (!pcEntityId) {
+    return null;
+  }
+
+  const pcEntity = getPcEntityById({
+    guildId: args.guildId,
+    campaignSlug: args.campaignSlug,
+    entityId: pcEntityId,
+  });
+  if (!pcEntity) {
+    return null;
+  }
+
+  return {
+    ...classification,
+    pcEntityId,
+  };
+}
+
 export function getSessionSpeakers(args: {
   guildId: string;
   sessionId: string;
@@ -252,7 +286,11 @@ export function getSessionSpeakerAttributionState(args: {
   const dmDiscordUserId = getGuildDmUserId(scope.guildId)?.trim() || null;
 
   const resolvedSpeakers = speakers.map<SessionSpeakerAttributionSpeaker>((speaker) => {
-    const storedClassification = storedBySpeaker.get(speaker.discordUserId) ?? null;
+    const storedClassification = validateStoredClassification({
+      guildId: scope.guildId,
+      campaignSlug: scope.campaignSlug,
+      classification: storedBySpeaker.get(speaker.discordUserId) ?? null,
+    });
     const classification =
       dmDiscordUserId && speaker.discordUserId === dmDiscordUserId
         ? toAutoDmClassification({
