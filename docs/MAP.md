@@ -1,15 +1,43 @@
-# Meepo System Map (v1.0.0)
+# StarStory System Map (v1.6.0)
 
 This map is system-first. It answers:
 
 1. Where do I go when X breaks?
 2. What is the authoritative live flow from Discord -> ledger -> recall -> response?
 
-## v1.0.0 Consolidation Note
+## Mental Model
+
+Think about StarStory in three layers:
+
+1. Runtime
+- Discord interaction, voice capture/playback, session lifecycle, and live authority.
+
+2. Processing
+- Transcript assembly, recall, recap generation, causal lanes, and offline artifact production.
+
+3. Surfaces
+- Public command surface, dev command surface, web archive, and overlay views.
+
+Cross-cutting rails:
+
+- config and env loading
+- guild/campaign scope and authorization
+- deploy, observability, and stoplines
+
+If a problem is live and user-visible, start in Runtime.
+If the live loop worked but outputs look wrong, move to Processing.
+If the data is correct but presentation or access is wrong, inspect Surfaces.
+
+## v1.6.0 Notes
 
 - Config is centralized under `src/config/*`.
 - `src/voice/**` is config-only (no direct `process.env` reads).
 - Canonical env contract now prefers centralized keys (for example `DATA_DB_PATH`, `TTS_CHUNK_SIZE_CHARS`) with deprecated aliases warned at boot.
+- Public Discord surface is `/starstory` with subcommands `awaken`, `showtime`, `settings`, `help`, `status`.
+- Dev/maintenance commands are behind `/lab` (gated by `DEV_USER_IDS`).
+- Namespace doctrine is centralized in `docs/COMMAND_NAMESPACE.md`.
+- Production text silence: conversational text replies are disabled for non-dev users when `NODE_ENV=production`; interaction is slash-command and voice/session first.
+- `/starstory status` is ephemeral with public/dev section split.
 
 ## 0. Golden Rules
 
@@ -346,7 +374,6 @@ Doc placement rule (current topology):
 
 Compatibility notes:
 
-- Some legacy paths still exist as redirect stubs to reduce link churn.
 - Root `NORTH_STAR.md` remains a deliberate philosophy exception in this pass.
 
 ## Appendix: Repo Skeleton

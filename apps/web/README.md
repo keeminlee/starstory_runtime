@@ -222,4 +222,4 @@ Behavior truth table:
 
 - B0 currently uses typed mock readers in `lib/server/readers.ts`.
 - B1+ will swap reader internals to canonical backend adapters (`src/sessions/*`, `src/ledger/transcripts.ts`) without changing page contracts.
-- Legacy Vite implementation is quarantined under `legacy-vite/` and is not part of the active runtime.
+- Legacy Vite implementation was removed in v1.6.0.

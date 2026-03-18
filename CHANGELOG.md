@@ -1,5 +1,39 @@
 # Changelog
 
+## Version Canon
+
+Public release version is **v1.6.0**.
+Milestone references v1.0 through v1.10.1 below are internal historical markers from the development timeline.
+They are preserved as-is for traceability; no renumbering is applied.
+The `package.json` version tracks the public release tag only.
+
+---
+
+## v1.6.0 - 2026-03-17
+
+### Doc Hardening & Repo Cleanup Sprint
+
+- Declared v1.6.0 as the canonical public release target.
+- Archived completed closed-alpha and track-closeout docs out of active runtime surfaces.
+- Removed `apps/web/legacy-vite/` quarantine subtree (15 files).
+- Cleaned stale analysis artifacts from `runs/` and relocated orphaned session notes.
+- Superseded REPO_HYGIENE_2026-02-25.md as historical.
+- Refreshed canonical doc router (INDEX.md) to remove completed-phase links.
+- Updated MAP.md version header from v1.0.0 to v1.6.0 and verified all system sections.
+- Refreshed CURRENT_STATE.md, README.md, START_HERE.md for namespace and surface accuracy.
+- Regenerated REPO_SKELETON.md from live repo after cleanup.
+- Added `.venv-whisperx` to skeleton exclude list in `write-repo-skeleton.ps1`.
+- Updated V1_RELEASE_CHECKLIST.md from v1.0.0-era to v1.6.0 release gate.
+- Re-validated doc link graph and fixed 9 broken cross-references across 4 files.
+- Bumped `package.json` version to `1.6.0`.
+
+### No Breaking Runtime Changes
+
+- No runtime, command surface, or database schema changes are included in this release.
+- All stoplines and CI gates pass unchanged.
+
+---
+
 ## v1.10.1 - 2026-03-09
 
 ### Changed

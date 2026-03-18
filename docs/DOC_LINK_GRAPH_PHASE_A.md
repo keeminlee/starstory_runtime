@@ -42,11 +42,9 @@ Method note:
 - Phase B implication:
   - Not currently unreferenced; requires link updates before archival.
 
-### apps/web/legacy-vite/README.md
-- inbound links from active docs:
-  - none detected.
-- Phase B implication:
-  - Candidate is low-risk for archive/move in Phase B.
+### ~~apps/web/legacy-vite/README.md~~ (removed in v1.6.0)
+- File deleted during v1.6.0 doc hardening sprint.
+- No inbound links existed; removal is clean.
 
 ### docs/archive/old/HANDOFF_MEECAP_FIXES.md
 ### docs/archive/old/HANDOFF_MEEP_MVP.md

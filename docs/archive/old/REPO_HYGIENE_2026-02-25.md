@@ -1,5 +1,8 @@
 # Repo Hygiene Notes (2026-02-25)
 
+> **Superseded** by the v1.6.0 doc hardening sprint (2026-03-17).
+> Retained as historical context only.
+
 This note captures hygiene actions taken to reduce dead/legacy tooling noise.
 
 ## Deleted

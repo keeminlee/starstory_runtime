@@ -3,7 +3,7 @@ param(
   [string]$Out = "docs/REPO_SKELETON.md"
 )
 
-$excludeDirs = @("node_modules", "out", "runs", "data", ".git", ".next", ".turbo", "dist", "build", "coverage")
+$excludeDirs = @("node_modules", "out", "runs", "data", ".git", ".next", ".turbo", "dist", "build", "coverage", ".venv-whisperx")
 $resolvedRoot = (Resolve-Path $Root).Path
 
 $files = Get-ChildItem -Path $resolvedRoot -Recurse -File | Where-Object {

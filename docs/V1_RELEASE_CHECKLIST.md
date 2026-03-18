@@ -1,13 +1,21 @@
-# V1 Release Checklist
+﻿# v1.6.0 Release Checklist
 
-This checklist is the source of truth for shipping `v1.0.0`.
+This checklist is the source of truth for shipping `v1.6.0`.
 
-## 0) Phase 0 Release Control (Closed Alpha)
+## What Success Means
 
-- Integration branch for closed-alpha finish-line work is `v1.5_finish_line_to_v2`.
-- Unrelated feature merges are frozen while launch-critical lanes are in progress.
-- Deferred lanes are explicitly documented in:
-  - `docs/runtime/ops/CLOSED_ALPHA_PHASE0_RELEASE_CONTROL.md`
+- This release is a documentation hardening and repo cleanup release.
+- Public runtime behavior remains stable: `/starstory` is still the public command surface and `/lab` remains dev-gated.
+- CI must prove the repo is internally consistent; manual checks confirm that live runtime behavior still matches the documented contract.
+- Recap validation is not asking "did every recap system converge"; it is asking whether canonical recap paths still work, compatibility lanes remain safe, and session end stays decoupled from recap failure.
+- Deploy validation is not asking for a new rollout path; it is asking whether the existing verify -> deploy flow remains aligned with the shipped code and command schema.
+
+## 0) Release Posture
+
+- Public release version is `v1.6.0`.
+- Internal milestone references (v1.0 through v1.10.1) are preserved in CHANGELOG as historical markers.
+- Doc hardening and repo cleanup sprint is the primary content of this release.
+- No breaking runtime changes.
 
 ## 1) Automated Ship Gate
 
@@ -43,6 +51,11 @@ Fixture root:
 
 ## 3) Manual Checks (Required)
 
+Read this section in two buckets:
+
+- Core release contract: lifecycle, voice interrupt, deploy, and repo integrity must remain stable.
+- Recap compatibility contract: recap generation/read paths may still include compatibility lanes, but they must remain understandable and non-blocking.
+
 - Voice interrupt sanity:
   - Active playback is interrupted by live user speech in immediate mode
   - Speaking state clears after interrupt
@@ -51,8 +64,8 @@ Fixture root:
 - MegaMeecap artifact sanity:
   - Baseline markdown + meta JSON always written
   - Final output written when final pass is enabled
-- Meepo sessions recap UX sanity (Phase 1D):
-  - `/meepo sessions list` shows kind + recap status (`✅` or `—`)
+- Legacy recap compatibility sanity:
+  - `/meepo sessions list` shows kind + recap status metadata for compatibility surfaces
   - `/meepo sessions view session:<id>` shows base cache status + most recent final recap metadata
   - `/meepo sessions recap session:<id> style:<pass>` generates recap only for canon/non-lab sessions
   - Base validity uses `source_hash + base_version`; final validity uses `source_hash + final_style + final_version`
@@ -64,9 +77,9 @@ Fixture root:
 
 ## 4) Release Metadata
 
-- `CHANGELOG.md` contains V1 scope and known gaps
-- Version in `package.json` is `1.0.0`
-- Tag readiness: `v1.0.0`
+- `CHANGELOG.md` contains v1.6.0 release entry with doc hardening scope
+- Version in `package.json` is `1.6.0`
+- Tag readiness: `v1.6.0`
 
 ## 5) Go / No-Go
 
@@ -86,10 +99,10 @@ Fixture root:
 ## 5.2) Awakening Logging Note
 
 - Current awaken runtime includes extensive structured diagnostics for interaction lifecycle hardening.
-- During active `/meepo awaken` testing, logs are expected to be chatty; verify key error markers are preserved.
+- During active `/starstory awaken` testing, logs are expected to be chatty; verify key error markers are preserved.
 - If terminal noise obscures signal, confirm noisy markers are at `debug` and stage/error signals remain visible.
 
-## 5.3) Lifecycle Contract Alignment (Run 3)
+## 5.3) Lifecycle Contract Alignment
 
 - Runtime contract terms are used consistently in docs and operator notes:
   - `Dormant`
@@ -97,10 +110,10 @@ Fixture root:
   - `Ambient` (behavior within awakened/no-session)
   - `Showtime`
 - Command contract checks:
-  - `/meepo awaken` is one-time initialization and does not start a showtime session
-  - repeat `/meepo awaken` is harmless guidance
-  - `/meepo showtime start` rejects duplicate active-session starts
-  - `/meepo showtime end` succeeds independently from async artifact generation failures
+  - `/starstory awaken` is one-time initialization and does not start a showtime session
+  - repeat `/starstory awaken` is harmless guidance
+  - `/starstory showtime start` rejects duplicate active-session starts
+  - `/starstory showtime end` succeeds independently from async artifact generation failures
 - Legacy wizard-flow checks:
   - old awaken component interactions are unreachable in production flow and return migration guidance
 
@@ -148,7 +161,7 @@ Fixture root:
   - `session_recaps` is canonical multi-view recap store
   - `session_artifacts` remains compatibility lane until a later production cutover
 
-## 5.7) Deploy/Runtime Asset Versioning (Closed Alpha Phase 5)
+## 5.7) Deploy/Runtime Asset Versioning
 
 - In-repo deploy hook exists and is referenced by CI deploy:
   - `deploy/ec2/deploy-meepo.sh`
@@ -161,80 +174,36 @@ Fixture root:
 - In-repo env templates exist:
   - `deploy/env/meepo-bot.env.example`
   - `deploy/env/meepo-web.env.example`
-- Host procedure and checks are documented in:
-  - `docs/runtime/ops/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md`
+- Host procedure and checks are documented in `docs/archive/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md` (archived).
 
-## 6) GitHub Release Draft (v1.0.0)
+## 6) GitHub Release Draft (v1.6.0)
 
-### Release Title (Primary)
+### Release Title
 
-`Meepo v1.0.0 — First Public Release: Voice-First Session Memory for D&D`
+`StarStory v1.6.0 - Doc Hardening & Repo Cleanup`
 
-### Alternate Titles
+### Release Notes
 
-- `Meepo v1.0.0 — Debut Release (Discord Voice, Ledger, Recaps, and Silver Lanes)`
-- `Meepo 1.0 — The First Stable Campaign Companion Release`
+StarStory `v1.6.0` is a documentation hardening and repository cleanup release.
+No runtime, command surface, or database schema changes are included.
 
-### Release Notes (Paste into GitHub)
+#### What's in v1.6.0
 
-Meepo `v1.0.0` is the first public GitHub release of Meepo: a diegetic Discord companion for D&D campaigns that listens in-session, preserves narrative continuity, and supports recap + memory workflows.
-
-This debut release stabilizes the core runtime loop, introduces deterministic offline lanes for transcript processing, and hardens the release gate for repeatable quality checks.
-
-#### What’s New in v1.0.0
-
-- Added deterministic Silver-Seq segmentation lane with artifact-producing tooling (`src/silver/seq/*`).
-- Added online events compile core reused by live events tooling (`src/events/compileEvents/*`).
-- Added MegaMeecap v1 modular orchestration with prompt, carry, and I/O modules (`src/tools/megameecap/*`).
-- Extracted registry scan/review core with focused tests (`src/registry/scanNamesCore.ts`, `src/registry/reviewNamesCore.ts`).
-- Added bronze transcript view contract + provenance handling in transcript builder.
-
-#### Core Runtime Capabilities
-
-- Discord text + voice integration with STT -> LLM -> TTS closed-loop response flow.
-- Session lifecycle and append-only ledger capture for campaign continuity and recap tooling.
-- Persona-aware behavior, command surfaces for Meepo/session control, and DM-oriented operational tools.
-- OBS overlay support for real-time speaking/presence indicators (`/overlay`, WebSocket updates, registry-driven token loading).
-- Campaign-scoped DB routing guardrails to reduce cross-campaign data leakage risk.
-
-#### Tooling and Developer Workflow
-
-- Release gate standardized behind `npm run ci:verify`:
-  - `npm run typecheck`
-  - `npm run lint`
-  - `npm run test:smoke`
-  - `npm run test`
-  - `npm run stopline:no-getdb-runtime`
-  - `npm run stopline:active-session-boundary`
-  - `npm run stopline:runtime-scope-fallbacks`
-  - `npm run stopline:observability-runtime`
-  - `npm run stopline:no-raw-env`
-  - `npm run stopline:repo-hygiene`
-- Added deterministic fixture-backed smoke coverage for MegaMeecap + Silver-Seq.
-- Added targeted voice interrupt test coverage.
-- CI workflow executes `npm run ci:verify` on push and PR.
+- Declared v1.6.0 as the canonical public release target; internal milestones (v1.0-v1.10.1) preserved as historical markers.
+- Archived completed closed-alpha and track-closeout docs out of active surfaces.
+- Removed `apps/web/legacy-vite/` quarantine subtree.
+- Cleaned stale analysis artifacts from `runs/`.
+- Refreshed canonical doc router (INDEX.md), system map (MAP.md), current state, release checklist, README, and START_HERE.
+- Regenerated REPO_SKELETON.md from live repo.
+- Re-validated doc link graph and removed safe redirect stubs.
+- All stoplines and CI gates pass unchanged.
 
 #### Install / Runtime Notes
 
-- Version: `1.0.0`
+- Version: `1.6.0`
 - Runtime: Node.js `22` recommended.
 - Required credentials: `DISCORD_TOKEN`, `OPENAI_API_KEY`.
 - Core startup:
   - `npm install`
   - `npm run dev:deploy`
   - `npm run dev:bot`
-
-#### Secondary Systems in v1
-
-- Missions and meeps command surfaces are available and usable in v1.
-- Economy/mission systems continue to evolve; expect incremental improvements in upcoming releases.
-
-#### Known Gaps (Explicit)
-
-- Some broader test coverage still depends on campaign DB snapshots and is not fully fixture-only.
-- Legacy and v1 tool paths still coexist in some areas; canonical paths are documented but not fully pruned.
-- Smoke tests validate deterministic contracts and artifact shape, not full behavioral/load characteristics.
-
-#### Thanks and Forward Path
-
-This release establishes Meepo’s baseline as a voice-first narrative companion with deterministic processing lanes and stronger release discipline. Next iterations focus on continued consolidation, deeper fixture-first coverage, and expanded memory/reasoning quality.
