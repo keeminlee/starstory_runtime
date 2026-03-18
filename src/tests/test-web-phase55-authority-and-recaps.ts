@@ -292,6 +292,24 @@ describe("Phase 5.5 write authority enforcement", () => {
     expect(updated.label).toBe("DM Label");
   });
 
+  test("DM can clear a session title back to the canonical fallback display", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-phase55-auth-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const guildId = "guild-1";
+    const dmUserId = "dm-1";
+    const playerUserId = "player-1";
+    const { sessionId } = await setupGuildCampaignAndSession({ guildId, dmUserId, playerUserId });
+
+    await setAuth({ userId: dmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+    const { updateWebSessionLabel } = await getSessionReaders();
+    const updated = await updateWebSessionLabel({ sessionId, label: "" });
+
+    expect(updated.label).toBeNull();
+    expect(updated.title).toBe(`Session ${sessionId.slice(0, 8)}`);
+  });
+
   test("guild DM cannot edit session labels when campaign owner differs", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-phase55-auth-"));
     tempDirs.push(tempDir);

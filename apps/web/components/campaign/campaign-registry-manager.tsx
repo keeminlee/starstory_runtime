@@ -21,6 +21,7 @@ import {
   NO_KNOWN_USERS_HELPER_TEXT,
   UNKNOWN_STORED_MAPPING_LABEL,
 } from "@/lib/registry/pcDiscordUserSelection";
+import { formatSessionDisplayTitle } from "@/lib/campaigns/display";
 
 const TABS: Array<{ key: RegistryCategoryKey | "pending" | "ignore"; label: string }> = [
   { key: "pcs", label: "PCs" },
@@ -665,7 +666,12 @@ export function CampaignRegistryManager({
                             {appearanceCache[entity.id]!.map((a) => (
                               <div key={a.sessionId} className="rounded-md border border-border/40 bg-background/25 px-3 py-2 text-xs">
                                 <div className="flex items-center justify-between gap-2">
-                                  <span className="font-medium">{a.sessionLabel || a.sessionId}</span>
+                                  <span className="font-medium">
+                                    {formatSessionDisplayTitle({
+                                      label: a.sessionLabel,
+                                      sessionId: a.sessionId,
+                                    })}
+                                  </span>
                                   <span className="text-muted-foreground">{a.mentionCount} mention{a.mentionCount === 1 ? "" : "s"}</span>
                                 </div>
                                 {a.sessionDate ? <p className="mt-0.5 text-muted-foreground">{a.sessionDate}</p> : null}

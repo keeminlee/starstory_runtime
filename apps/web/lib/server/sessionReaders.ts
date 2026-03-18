@@ -182,7 +182,7 @@ export async function resolveAuthorizedSessionOwnership(args: {
 
 export async function updateWebSessionLabel(args: {
   sessionId: string;
-  label: string | null;
+  label: string | null | undefined;
   searchParams?: Record<string, string | string[] | undefined>;
 }): Promise<SessionDetail> {
   try {
@@ -203,7 +203,11 @@ export async function updateWebSessionLabel(args: {
       userId: auth.user?.id ?? null,
     });
 
-    const normalizedLabel = args.label === null ? null : args.label.trim();
+    if (args.label !== null && args.label !== undefined && typeof args.label !== "string") {
+      throw new WebDataError("invalid_request", 422, "label must be a string or null.");
+    }
+
+    const normalizedLabel = args.label == null ? null : args.label.trim();
     if (normalizedLabel !== null && normalizedLabel.length > 80) {
       throw new WebDataError("invalid_request", 422, "session label exceeds max length (80).");
     }
