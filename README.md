@@ -27,12 +27,6 @@ The goal is simple:
 For first-time setup, start here:  
 ➡ **[docs/START_HERE.md](docs/START_HERE.md)**
 
-Closed Alpha release control (branch alignment + scope freeze):
-➡ **[docs/runtime/ops/CLOSED_ALPHA_PHASE0_RELEASE_CONTROL.md](docs/runtime/ops/CLOSED_ALPHA_PHASE0_RELEASE_CONTROL.md)**
-
-Closed Alpha Phase 5 deploy/runtime versioning (in-repo deploy hook + systemd units):
-➡ **[docs/runtime/ops/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md](docs/runtime/ops/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md)**
-
 ### Prerequisites
 
 - Node.js **18+**

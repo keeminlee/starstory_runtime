@@ -25,7 +25,7 @@ Freshness precedence used for conflicts:
 | NORTH_STAR.md | core docs | active | Canonical philosophy in Phase A location |
 | OAUTH_PROD_HARDENING.md | operational docs | active | Live production hardening doctrine |
 | apps/web/README.md | system documentation | active | Web archive surface |
-| apps/web/legacy-vite/README.md | obsolete docs | candidate-phaseB | Legacy implementation reference |
+| ~~apps/web/legacy-vite/README.md~~ | obsolete docs | removed-v1.6 | Removed in v1.6.0 doc hardening sprint |
 | docs/systems/CAUSAL_CORE_PHYSICS.md | system documentation | active | Canonical causal contract |
 | docs/CURRENT_STATE.md | core docs | active | Current operational truth |
 | docs/INDEX.md | core docs | active | Canonical LLM router |
@@ -65,18 +65,17 @@ Freshness precedence used for conflicts:
 | docs/archive/old/HANDOFF_V0.md | obsolete docs | archived-phaseB | Moved in Phase B (link-updated archival) |
 | docs/archive/old/README.md | obsolete docs | archived-phaseB | Moved in Phase B (link-updated archival index) |
 | docs/archive/old/REPO_HYGIENE_2026-02-25.md | obsolete docs | archived-phaseB | Moved in Phase B (unreferenced candidate) |
-| docs/runtime/ops/CLOSED_ALPHA_PHASE0_RELEASE_CONTROL.md | operational docs | active | Runtime release-control doctrine |
-| docs/runtime/ops/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md | operational docs | active | Deploy/runtime versioning contract |
+| docs/archive/CLOSED_ALPHA_PHASE0_RELEASE_CONTROL.md | operational docs | archived-v1.6 | Archived in v1.6.0 sprint |
+| docs/archive/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md | operational docs | archived-v1.6 | Archived in v1.6.0 sprint |
 | docs/runtime/ops/ENV.md | operational docs | active | Env contract |
-| docs/runtime/ops/TRACK_C_RUN5_CLOSEOUT.md | operational docs | historical-active | Completed track evidence still referenced by ops context |
-| docs/runtime/ops/V1_5_CLOSED_ALPHA_REALIGNMENT_KNOWLEDGE_PASS.md | operational docs | active | Surface alignment audit |
+| docs/archive/TRACK_C_RUN5_CLOSEOUT.md | operational docs | archived-v1.6 | Archived in v1.6.0 sprint |
+| docs/archive/V1_5_CLOSED_ALPHA_REALIGNMENT_KNOWLEDGE_PASS.md | operational docs | archived-v1.6 | Archived in v1.6.0 sprint |
 | src/causal/CAUSAL_LEVER_MATH.md | system documentation | active | Causal math reference |
 | src/causal/INDEX.md | system documentation | active | Causal subsystem index |
 | src/causal/SILVER_LANE_OVERVIEW.md | system documentation | active | Silver lane architecture |
 
 ## Phase B Candidates (Do Not Move Yet)
 
-- `apps/web/legacy-vite/README.md`
 - `docs/notes/causal/causal-debug.md`
 
 Phase B gating rule:

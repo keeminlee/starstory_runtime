@@ -21,6 +21,27 @@ Lifecycle note (closed-alpha protection):
 - A path may intentionally keep session-end success decoupled from async recap/artifact outcomes.
 - Reference behavior: showtime end should succeed independently from async artifact failures ([V1_RELEASE_CHECKLIST.md](V1_RELEASE_CHECKLIST.md#L103)).
 
+## Current operator truth
+
+Use this section as the stable recap summary for non-recap docs.
+
+- Canonical recap truth lives in `session_recaps` behind `src/sessions/sessionRecaps.ts`.
+- Compatibility recap lanes still exist in `session_artifacts.recap_final` and `meecaps`.
+- Session end must remain successful even if recap or artifact generation fails asynchronously.
+- Bot and web fallback semantics are not fully aligned yet; this doc tracks that drift explicitly.
+- Until convergence is complete, docs outside the recap track should avoid detailed fallback claims and should link here instead.
+
+## Current recap entropy note
+
+Recap is currently the highest-entropy subsystem in the documentation set because it spans:
+
+- lifecycle-triggered generation
+- command-triggered generation
+- web regenerate paths
+- canonical and compatibility persistence lanes
+
+Treat code as authoritative, this document as the convergence map, and other docs as consumers of only the stable summary above.
+
 ## Inventory schema and frozen taxonomies
 
 Inventory schema used in this document:
@@ -197,7 +218,7 @@ Reconciliation rule:
 - [CURRENT_STATE.md](CURRENT_STATE.md)
 - [MEGAMEECAP_CANONIZATION_BLUEPRINT.md](MEGAMEECAP_CANONIZATION_BLUEPRINT.md)
 - [archive/old/HANDOFF.md](archive/old/HANDOFF.md)
-- [runtime/ops/V1_5_CLOSED_ALPHA_REALIGNMENT_KNOWLEDGE_PASS.md](runtime/ops/V1_5_CLOSED_ALPHA_REALIGNMENT_KNOWLEDGE_PASS.md)
+- [archive/V1_5_CLOSED_ALPHA_REALIGNMENT_KNOWLEDGE_PASS.md](archive/V1_5_CLOSED_ALPHA_REALIGNMENT_KNOWLEDGE_PASS.md)
 - Rationale: evidence inputs; not authoritative runtime path definitions.
 
 3. Type/API declarations only

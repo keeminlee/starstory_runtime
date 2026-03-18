@@ -1,6 +1,9 @@
-# Start Here (Closed Alpha P0)
+# Start Here
 
-This is the single source of truth for P0 onboarding and acceptance.
+This is the single source of truth for onboarding and acceptance.
+
+> **v1.6.0 note** — The public command namespace is now `/starstory`.
+> `/meepo` legacy redirects still work but are not documented here.
 
 ## Doctrine Statement
 
@@ -15,22 +18,22 @@ Architecture doctrine:
 ## P0 Constitution
 
 1. Session visibility, not recap visibility, is the P0 success gate.
-2. Public `/meepo awaken` is optional, minimal, and idempotent.
-3. Public `/meepo showtime start` must succeed with zero arguments.
+2. Public `/starstory awaken` is optional, minimal, and idempotent.
+3. Public `/starstory showtime start` must succeed with zero arguments.
 4. Web gives setup/archive guidance; Discord keeps setup guidance minimal and command-first.
 5. No cross-guild data leakage is acceptable.
 6. Meta campaign exists for runtime continuity and is hidden from the web archive.
-7. Closed Alpha lifecycle is listen-only voice: `/meepo showtime start` joins the invoker voice channel to listen, with no awaken prerequisite.
-8. `/meepo showtime end` fully completes lifecycle: session finalized, receiver stopped, runtime returned to non-showtime, and voice disconnected if connected.
+7. Lifecycle is listen-only voice: `/starstory showtime start` joins the invoker voice channel to listen, with no awaken prerequisite.
+8. `/starstory showtime end` fully completes lifecycle: session finalized, receiver stopped, runtime returned to non-showtime, and voice disconnected if connected.
 
 ## Success Criteria
 
 A new DM can do this in `<=10 minutes`:
 
 1. Invite the bot.
-2. Run `/meepo showtime start`.
+2. Run `/starstory showtime start`.
 3. See the session in the web dashboard.
-4. Optional: run `/meepo awaken` later to seed minimal guild bootstrap metadata.
+4. Optional: run `/starstory awaken` later to seed minimal guild bootstrap metadata.
 
 Canonical loop:
 `invite -> showtime start -> dashboard session visibility`
@@ -52,7 +55,7 @@ Target time:
 ### Step 2 - Start session
 
 Action:
-- Run `/meepo showtime start`.
+- Run `/starstory showtime start`.
 
 Expected result:
 - Command never blocks on missing campaign input.
@@ -80,7 +83,7 @@ Target time:
 ### Step 4 - Optional awaken bootstrap
 
 Action:
-- Run `/meepo awaken` in a guild text channel.
+- Run `/starstory awaken` in a guild text channel.
 
 Expected result:
 - Guild config exists.
@@ -142,8 +145,8 @@ This translation is semantic only; it does not imply separate source-of-truth fi
 
 1. Not logged in: Discord login prompt.
 2. Logged in, bot not installed: invite prompt.
-3. Bot installed, dormant: `/meepo awaken` guidance.
-4. Awakened, no sessions: `/meepo showtime start` guidance.
+3. Bot installed, dormant: `/starstory awaken` guidance.
+4. Awakened, no sessions: `/starstory showtime start` guidance.
 5. Sessions exist: normal dashboard.
 
 ## Required Runtime Setup (Operators)

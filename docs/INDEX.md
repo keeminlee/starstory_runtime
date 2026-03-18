@@ -10,7 +10,8 @@ This is the single router for active documentation. Start here, then follow only
 
 - [MAP.md](MAP.md) - Conceptual architecture and subsystem boundaries.
 - [REPO_SKELETON.md](REPO_SKELETON.md) - Repository layout and where systems live.
-- [CURRENT_STATE.md](CURRENT_STATE.md) - Current release posture, health, and in-flight work.
+- [CURRENT_STATE.md](CURRENT_STATE.md) - Pure present-tense operational truth.
+- [COMMAND_NAMESPACE.md](COMMAND_NAMESPACE.md) - Canonical public vs internal naming rules.
 - [../NORTH_STAR.md](../NORTH_STAR.md) - Product philosophy and long-term direction (Phase B target path: `docs/NORTH_STAR.md`).
 
 ## Operational Onboarding
@@ -23,9 +24,10 @@ This is the single router for active documentation. Start here, then follow only
 
 - [runtime/OPS_RUNBOOK.md](runtime/OPS_RUNBOOK.md) - Runtime operations playbook.
 - [runtime/ops/ENV.md](runtime/ops/ENV.md) - Runtime and deploy environment contract.
-- [runtime/ops/CLOSED_ALPHA_PHASE0_RELEASE_CONTROL.md](runtime/ops/CLOSED_ALPHA_PHASE0_RELEASE_CONTROL.md) - Scope freeze and release control.
-- [runtime/ops/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md](runtime/ops/CLOSED_ALPHA_PHASE5_DEPLOY_RUNTIME_VERSIONING.md) - Deploy/runtime versioning.
-- [runtime/ops/V1_5_CLOSED_ALPHA_REALIGNMENT_KNOWLEDGE_PASS.md](runtime/ops/V1_5_CLOSED_ALPHA_REALIGNMENT_KNOWLEDGE_PASS.md) - Surface audit and realignment notes.
+- [runtime/ops/DEPLOY_FLOW.md](runtime/ops/DEPLOY_FLOW.md) - Deploy pipeline reference.
+- [runtime/ops/PRODUCTION_RUNBOOK.md](runtime/ops/PRODUCTION_RUNBOOK.md) - Production operations.
+- [runtime/ops/KNOWN_DEPLOY_FAILURES.md](runtime/ops/KNOWN_DEPLOY_FAILURES.md) - Known deploy failure modes.
+- [runtime/ops/PROD_COMMAND_AUTODEPLOY_HANDOFF.md](runtime/ops/PROD_COMMAND_AUTODEPLOY_HANDOFF.md) - Command autodeploy handoff.
 
 ## Systems
 
@@ -35,12 +37,13 @@ This is the single router for active documentation. Start here, then follow only
 - [systems/CAUSAL_CORE_PHYSICS.md](systems/CAUSAL_CORE_PHYSICS.md) - Causal model contract.
 - [OVERLAY.md](OVERLAY.md) - OBS overlay architecture.
 - [MISSIONS_V0.md](MISSIONS_V0.md) - Mission economy surface.
+- [LAB_COMMANDS.md](LAB_COMMANDS.md) - `/lab` dev command surface and gating rules.
 - [MEGAMEECAP_CANONIZATION_BLUEPRINT.md](MEGAMEECAP_CANONIZATION_BLUEPRINT.md) - Canonical recap convergence plan.
 - [MEGAMEECAP_WORKER.md](MEGAMEECAP_WORKER.md) - MegaMeecap worker contract.
 
 ## Recap Convergence Track
 
-- [RECAP_SURFACE_MAP.md](RECAP_SURFACE_MAP.md)
+- [RECAP_SURFACE_MAP.md](RECAP_SURFACE_MAP.md) - Current recap truth, compatibility lanes, and drift risks.
 - [RECAP_API_CONTRACT_C1.md](RECAP_API_CONTRACT_C1.md)
 - [RECAP_COMPAT_FREEZE_B1.md](RECAP_COMPAT_FREEZE_B1.md)
 - [RECAP_RUNTIME_CONVERGENCE_A1.md](RECAP_RUNTIME_CONVERGENCE_A1.md)
@@ -57,3 +60,4 @@ This is the single router for active documentation. Start here, then follow only
 
 - [notes/](notes/) - Research and implementation notes (not canonical contracts).
 - [archive/old/README.md](archive/old/README.md) - Historical handoff index.
+- Completed closed-alpha phase docs (CLOSED_ALPHA_PHASE0, PHASE5, TRACK_C_RUN5, V1_5_REALIGNMENT) are archived under [archive/](archive/).
