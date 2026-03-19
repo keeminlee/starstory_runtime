@@ -141,8 +141,8 @@ Useful local web env toggles:
 
 Production auth requirements:
 
-- Runtime canonical-origin cutover is still pending external ops work.
-- Current production auth/runtime expects `https://meepo.online` until that cutover is completed.
+- Canonical production auth/runtime origin is `https://starstory.online`.
+- `https://meepo.online` remains a legacy ingress that should redirect to `https://starstory.online`.
 - See [docs/product/external-cutover-handoff.md](docs/product/external-cutover-handoff.md) for the required out-of-repo follow-up.
 - Run `deploy/ec2/auth-runtime-preflight.sh` before production auth troubleshooting.
 

@@ -1,4 +1,5 @@
 import type { ApiErrorResponse } from "@/lib/api/types";
+import { CANONICAL_ORIGIN } from "@/lib/canonicalOrigin";
 
 type QueryValue = string | number | boolean | null | undefined;
 
@@ -37,8 +38,6 @@ function appendQuery(url: URL, query?: FetchJsonOptions["query"]): void {
   }
 }
 
-const CANONICAL_PROD_ORIGIN = "https://meepo.online";
-
 function normalizeOrigin(value: string): string {
   return value.trim().replace(/\/+$/, "").toLowerCase();
 }
@@ -66,7 +65,7 @@ async function resolveApiBaseUrl(): Promise<string> {
     const proto = headerStore.get("x-forwarded-proto") ?? (isProduction ? "https" : "http");
     if (host) {
       if (isProduction && proto !== "https") {
-        return CANONICAL_PROD_ORIGIN;
+        return CANONICAL_ORIGIN;
       }
       return `${proto}://${host}`;
     }
@@ -75,7 +74,7 @@ async function resolveApiBaseUrl(): Promise<string> {
   }
 
   if (isProduction) {
-    return CANONICAL_PROD_ORIGIN;
+    return CANONICAL_ORIGIN;
   }
 
   return "http://localhost:3000";

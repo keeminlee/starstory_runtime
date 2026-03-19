@@ -10,6 +10,8 @@ For command naming rules, read [COMMAND_NAMESPACE.md](COMMAND_NAMESPACE.md).
 
 - Public platform name: StarStory.
 - Web archive name: Chronicle.
+- Canonical public web origin: `https://starstory.online`.
+- Legacy public web origin: `https://meepo.online` redirects to `https://starstory.online`.
 - Public Discord root command: `/starstory`.
 - Dev-only command root: `/lab`.
 - Primary product surfaces are Discord runtime plus the web archive under `apps/web`.

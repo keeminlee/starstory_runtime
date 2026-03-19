@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Playfair_Display } from "next/font/google";
 import type { ReactNode } from "react";
 import { RootChrome } from "@/components/layout/root-chrome";
+import { siteMetadata } from "@/lib/siteMetadata";
 import "@/app/globals.css";
 
 const inter = Inter({
@@ -16,10 +17,7 @@ const playfairDisplay = Playfair_Display({
   display: "swap",
 });
 
-export const metadata: Metadata = {
-  title: "Starstory Archive",
-  description: "The Starstory archive for campaign sessions, chronicles, and recaps.",
-};
+export const metadata: Metadata = siteMetadata;
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (

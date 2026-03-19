@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "apps/web"),
+      "next-auth/providers/discord": path.resolve(__dirname, "src/tests/stubs/next-auth-discord.ts"),
       "next/headers": path.resolve(__dirname, "src/tests/stubs/next-headers.ts"),
       "next/link": path.resolve(__dirname, "src/tests/stubs/next-link.ts"),
       "next/server": path.resolve(__dirname, "src/tests/stubs/next-server.ts"),
@@ -56,6 +57,9 @@ export default defineConfig({
       "apps/web/lib/starstory/__tests__/discordInstallAdapter.test.ts",
       "apps/web/lib/starstory/__tests__/transcriptAdapter.test.ts",
       "apps/web/lib/starstory/__tests__/validationAdapter.test.ts",
+      "apps/web/lib/__tests__/canonicalOrigin.test.ts",
+      "apps/web/lib/__tests__/canonicalMiddleware.test.ts",
+      "apps/web/lib/__tests__/authOriginGuard.test.ts",
       "src/tests/test-meepo-wake-response-gating.ts",
       "src/tests/test-meepo-auto-sleep.ts",
       "src/tests/test-showtime-lifecycle-authority.ts",
