@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "apps/web"),
+      "next-auth/providers/discord": path.resolve(__dirname, "src/tests/stubs/next-auth-discord.ts"),
       "next/headers": path.resolve(__dirname, "src/tests/stubs/next-headers.ts"),
       "next/link": path.resolve(__dirname, "src/tests/stubs/next-link.ts"),
       "next/server": path.resolve(__dirname, "src/tests/stubs/next-server.ts"),
