@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { serializeRawLines, type ContextRawLine } from "../ledger/meepoContextRepo.js";
 
 let db: any;
@@ -68,6 +68,10 @@ afterEach(() => {
     db.close();
     db = null;
   }
+});
+
+beforeEach(() => {
+  vi.resetModules();
 });
 
 describe("loadMeepoContextSnapshot", () => {

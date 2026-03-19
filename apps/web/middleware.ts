@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-
-const CANONICAL_HOST = "meepo.online";
-const CANONICAL_ORIGIN = `https://${CANONICAL_HOST}`;
+import { CANONICAL_HOST, CANONICAL_ORIGIN } from "@/lib/canonicalOrigin";
 
 function normalizeHost(value: string): string {
   return value.trim().toLowerCase();

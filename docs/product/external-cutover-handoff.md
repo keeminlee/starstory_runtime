@@ -1,6 +1,6 @@
 # External Cutover Handoff
 
-This note covers out-of-repo follow-up work required to complete the public StarStory cutover. It is intentionally a handoff document only and does not imply any in-repo implementation change.
+This note covers the remaining out-of-repo follow-up work for the public StarStory cutover. The in-repo canonical host decision is resolved: `starstory.online` is the canonical public origin and `meepo.online` is the compatibility redirect host.
 
 ## Scope
 
@@ -8,20 +8,20 @@ The following work should be handled in infrastructure, hosting, proxy, OAuth pr
 
 ## Canonical Host Decision
 
-- Confirm the long-term canonical public host for the platform.
-- Decide whether `starstory.online` becomes the canonical origin or remains a marketing/redirect host.
-- Confirm the fallback/legacy handling strategy for `meepo.online`.
+- Canonical public host is `starstory.online`.
+- `www.starstory.online` should resolve to production and redirect to the apex host.
+- Legacy public host `meepo.online` should redirect to the matching `starstory.online` route.
 
 ## Redirect Direction
 
-- Configure the reverse proxy or edge layer so legacy public traffic redirects in the intended direction.
+- Configure the reverse proxy or edge layer so legacy public traffic redirects to `starstory.online`.
 - Ensure redirects are consistent for root routes, auth routes, and app deep links.
 - Verify redirect status codes and cache behavior are appropriate for a public cutover.
 
 ## OAuth Callback And Origin Alignment
 
-- Update the Discord OAuth application settings so the approved redirect URIs match the chosen canonical host.
-- Align `NEXTAUTH_URL`, `AUTH_URL`, and any other origin-sensitive runtime settings with the final canonical decision.
+- Update the Discord OAuth application settings so the approved redirect URIs include `https://starstory.online/api/auth/callback/discord`.
+- Align `NEXTAUTH_URL`, `AUTH_URL`, and any other origin-sensitive runtime settings with `https://starstory.online`.
 - Verify sign-in, sign-out, callback, and session refresh behavior after the host change.
 
 ## API Canonical-Origin Alignment
@@ -41,5 +41,5 @@ The following work should be handled in infrastructure, hosting, proxy, OAuth pr
 
 ## Notes
 
-- Do not treat this file as approval to change auth config, middleware, API origin enforcement, or runtime plumbing inside the repo.
-- Any in-repo config changes needed after the host decision should be handled as a separate, explicitly scoped pass.
+- This file does not grant break-glass approval for protected deploy/env files.
+- Any protected-path edits should still follow the runtime hotfix protocol in `.github/copilot-instructions.md`.

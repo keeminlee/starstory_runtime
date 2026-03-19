@@ -1,12 +1,24 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ArchiveShell } from "@/components/layout/archive-shell";
 import { EmptyState } from "@/components/shared/empty-state";
 import { StatusChip } from "@/components/shared/status-chip";
 import { getCampaignsApi } from "@/lib/api/campaigns";
 import { WebApiError } from "@/lib/api/http";
+import { SITE_TITLE } from "@/lib/siteMetadata";
 import { getAuthSession } from "@/lib/server/getAuthSession";
 
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = {
+  title: `Dashboard | ${SITE_TITLE}`,
+  alternates: {
+    canonical: "/dashboard",
+  },
+  openGraph: {
+    title: `Dashboard | ${SITE_TITLE}`,
+    url: "/dashboard",
+  },
+};
 
 const DISCORD_SIGN_IN_URL = "/api/auth/signin/discord";
 const DISCORD_INVITE_URL = "https://discord.com/oauth2/authorize?client_id=1470521616747200524&permissions=3214336&integration_type=0&scope=bot+applications.commands";

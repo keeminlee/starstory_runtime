@@ -4,7 +4,7 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/home/meepo/meepo-bot}"
 WEB_ENV_FILE="${WEB_ENV_FILE:-/etc/meepo/meepo-web.env}"
 WEB_UNIT="${WEB_UNIT:-meepo-web}"
-CANONICAL_ORIGIN="https://meepo.online"
+CANONICAL_ORIGIN="https://starstory.online"
 
 echo "[preflight] app dir: $APP_DIR"
 echo "[preflight] env file: $WEB_ENV_FILE"

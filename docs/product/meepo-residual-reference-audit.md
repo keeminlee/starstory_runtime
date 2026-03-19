@@ -13,7 +13,7 @@ This document records the categories of `Meepo` references that remain acceptabl
 ## Acceptable Debt
 
 - Historical sections of long-form architecture docs may still mention `/meepo` when describing older phases or compatibility-era behavior.
-- Runtime/auth/docs may still mention `meepo.online` where the canonical-origin cutover has not yet been completed out of repo.
+- Legacy compatibility and redirect documentation may still mention `meepo.online` when describing the redirect path to `https://starstory.online`.
 - Internal logging scopes, error types, and worker names may still contain `meepo` until a separate internal cleanup is justified.
 
 ## What Should Be Cleaned When Touched

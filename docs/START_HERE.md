@@ -70,7 +70,7 @@ Target time:
 ### Step 3 - Verify dashboard visibility
 
 Action:
-- Open `https://meepo.online/dashboard`.
+- Open `https://starstory.online/dashboard`.
 
 Expected result:
 - The new session is visible under `Guild -> Campaign -> Sessions`.

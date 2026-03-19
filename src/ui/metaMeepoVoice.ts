@@ -524,7 +524,7 @@ export const metaMeepoVoice = {
         "`/meepo showtime start`",
         "",
         "View your sessions:",
-        "`https://meepo.online/dashboard`",
+        "`https://starstory.online/dashboard`",
         "",
         "`/meepo awaken` — Awaken Meepo and run setup checks.",
         "`/meepo sleep` — Put Meepo to sleep and end the active session.",

@@ -1,12 +1,12 @@
 # OAuth Production Hardening (NextAuth + Nginx + Discord)
 
-This document records the production failure modes we hit on `meepo.online` and the safeguards to prevent regressions.
+This document records the production failure modes we hit during public-domain auth rollout and the safeguards to prevent regressions.
 
 Canonical production auth policy:
 
-- Canonical auth origin is `https://meepo.online`.
-- `https://starstory.online` is redirect-only and must not serve an independent OAuth flow.
-- Discord OAuth redirect URI must remain exact and canonical: `https://meepo.online/api/auth/callback/discord`.
+- Canonical auth origin is `https://starstory.online`.
+- `https://meepo.online` is redirect-only and must not serve an independent OAuth flow.
+- Discord OAuth redirect URI must remain exact and canonical: `https://starstory.online/api/auth/callback/discord`.
 
 ## Incident Summary
 
@@ -66,8 +66,8 @@ sudo tail -n 120 /var/log/nginx/error.log
 
 Systemd environment should include:
 
-- `NEXTAUTH_URL=https://meepo.online`
-- `AUTH_URL=https://meepo.online`
+- `NEXTAUTH_URL=https://starstory.online`
+- `AUTH_URL=https://starstory.online`
 - `AUTH_TRUST_HOST=true`
 - `AUTH_SECRET=<strong-secret>`
 - `DISCORD_CLIENT_ID=<discord-app-client-id>`
@@ -83,7 +83,7 @@ Nginx should forward:
 
 Discord application OAuth redirect must exactly match:
 
-- `https://meepo.online/api/auth/callback/discord`
+- `https://starstory.online/api/auth/callback/discord`
 
 ## Fast Triage Matrix
 
@@ -92,7 +92,7 @@ If callback fails, use this mapping:
 - `State cookie was missing`:
   - Check for custom NextAuth cookie overrides.
   - Check `AUTH_TRUST_HOST=true` and forwarded headers.
-  - Check scheme/domain consistency (`https://meepo.online`).
+  - Check scheme/domain consistency (`https://starstory.online`).
 
 - `upstream sent too big header` in nginx:
   - Inspect auth token/session size growth (JWT payload bloat).
@@ -123,11 +123,11 @@ When editing auth callbacks:
 
 ## Stability Acceptance Gates
 
-1. `5/5` logged-out Discord sign-ins succeed on `https://meepo.online`.
+1. `5/5` logged-out Discord sign-ins succeed on `https://starstory.online`.
 2. Callback path has no `502` and no `State cookie was missing`.
 3. Nginx error log has no `upstream sent too big header` during callback runs.
 4. Session cookies remain secure and origin-consistent across refresh/navigation.
-5. `https://starstory.online` always redirects and never serves independent auth pages.
+5. `https://meepo.online` always redirects and never serves independent auth pages.
 6. Browser does not show unsafe/certificate warnings on either public domain.
 
 ## Notes

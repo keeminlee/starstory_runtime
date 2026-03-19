@@ -1,5 +1,6 @@
 import type { NextAuthOptions } from "next-auth";
 import DiscordProvider from "next-auth/providers/discord";
+import { CANONICAL_ORIGIN } from "@/lib/canonicalOrigin";
 import {
   isGuildSnapshotStale,
   resolveGuildSnapshotTtlMs,
@@ -79,7 +80,6 @@ type NextAuthOptionsWithTrustHost = NextAuthOptions & {
 };
 
 const isProduction = process.env.NODE_ENV === "production";
-const CANONICAL_PROD_ORIGIN = "https://meepo.online";
 
 function normalizeOrigin(value: string): string {
   return value.trim().replace(/\/+$/, "").toLowerCase();
@@ -99,14 +99,14 @@ export function assertProductionAuthEnvironment(): void {
 
   const nextAuthUrl = process.env.NEXTAUTH_URL?.trim() ?? "";
   const authUrl = process.env.AUTH_URL?.trim() ?? "";
-  const expected = normalizeOrigin(CANONICAL_PROD_ORIGIN);
+  const expected = normalizeOrigin(CANONICAL_ORIGIN);
 
   if (nextAuthUrl.length === 0 || normalizeOrigin(nextAuthUrl) !== expected) {
-    throw new Error(`NEXTAUTH_URL must be ${CANONICAL_PROD_ORIGIN} in production.`);
+    throw new Error(`NEXTAUTH_URL must be ${CANONICAL_ORIGIN} in production.`);
   }
 
   if (authUrl.length === 0 || normalizeOrigin(authUrl) !== expected) {
-    throw new Error(`AUTH_URL must be ${CANONICAL_PROD_ORIGIN} in production.`);
+    throw new Error(`AUTH_URL must be ${CANONICAL_ORIGIN} in production.`);
   }
 
   if (process.env.DEV_WEB_BYPASS === "1") {
