@@ -1739,7 +1739,7 @@ async function ensureVoiceConnection(interaction: any, guildId: string): Promise
     // Fresh showtime start must not inherit prior receiver or playback residue.
     stopReceiver(guildId);
     cleanupSpeaker(guildId);
-    voicePlaybackController.resetGuild(guildId);
+    voicePlaybackController.resetGuild?.(guildId);
 
     const receiverResult = startReceiver(guildId);
     meepoCommandLog.info("Showtime voice connection reused", {

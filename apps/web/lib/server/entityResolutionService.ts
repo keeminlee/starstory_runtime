@@ -12,7 +12,7 @@
  */
 
 import Database from "better-sqlite3";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "node:crypto";
 import { resolveWebAuthContext } from "@/lib/server/authContext";
 import { assertUserCanWriteCampaignArchive } from "@/lib/server/writeAuthority";
 import { WebDataError, mapToWebDataError } from "@/lib/mappers/errorMappers";
@@ -261,7 +261,7 @@ function insertResolution(
   }
 ): EntityResolutionDto {
   const now = Date.now();
-  const id = uuidv4();
+  const id = randomUUID();
 
   db.prepare(
     `INSERT INTO entity_resolutions (
@@ -309,7 +309,7 @@ function insertReviewBatch(
     status?: EntityReviewBatchStatus;
   }
 ): ReviewBatchRow {
-  const id = uuidv4();
+  const id = randomUUID();
   const now = Date.now();
   db.prepare(
     `INSERT INTO entity_review_batches (
@@ -371,7 +371,7 @@ function logRegistryMutation(
       created_at_ms
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    uuidv4(),
+    randomUUID(),
     batchId,
     mutation.mutationType,
     mutation.entityId,

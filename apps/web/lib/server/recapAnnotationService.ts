@@ -10,7 +10,7 @@
  * - Appearance history stores excerpt snapshots, treated as derived and replaceable on refresh.
  */
 
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "node:crypto";
 import {
   readSessionRecap,
   findSessionByGuildAndId,
@@ -263,7 +263,7 @@ export async function refreshAnnotationsForSession(args: AnnotationInput): Promi
         }
 
         insertAnnotation.run(
-          uuidv4(),
+          randomUUID(),
           sessionId,
           recapUpdatedAtMs,
           tab,
@@ -308,7 +308,7 @@ export async function refreshAnnotationsForSession(args: AnnotationInput): Promi
 
     for (const [entityId, { count, excerpts }] of entityMentions) {
       insertAppearance.run(
-        uuidv4(),
+        randomUUID(),
         entityId,
         sessionId,
         guildId,
