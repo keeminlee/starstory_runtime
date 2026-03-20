@@ -25,7 +25,7 @@ describe("web canonical origin", () => {
     expect(siteMetadata.manifest).toBe("/site.webmanifest");
     expect(icons.icon).toEqual([
       { url: "/favicon.ico", type: "image/x-icon" },
-      { url: "/icon-v1.png", sizes: "64x64", type: "image/png" },
+      { url: "/icon.png", sizes: "64x64", type: "image/png" },
     ]);
     expect(icons.apple).toEqual([
       { url: "/apple-icon.png", sizes: "180x180", type: "image/png" },

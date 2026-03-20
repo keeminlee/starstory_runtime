@@ -30,12 +30,12 @@ function configureHermeticEnv(tempDir: string): void {
   vi.stubEnv("DEFAULT_CAMPAIGN_SLUG", "default");
 }
 
-async function setAuthGuilds(guildIds: string[]): Promise<void> {
+async function setAuthGuilds(guildIds: string[], userId: string = "user-1"): Promise<void> {
   const mocked = vi.mocked(resolveWebAuthContext);
   mocked.mockResolvedValue({
     kind: "authenticated",
     source: "session_snapshot",
-    user: { id: "user-1", name: "Tester", globalName: "Tester" },
+    user: { id: userId, name: "Tester", globalName: "Tester" },
     authorizedGuildIds: guildIds,
     authorizedGuilds: guildIds.map((id) => ({ id, name: `Guild ${id}` })),
     primaryGuildId: guildIds[0] ?? null,
@@ -71,6 +71,65 @@ async function upsertSessionInCampaignDb(args: {
     args.startedAtMs,
     `dm-${args.guildId}`,
     args.startedAtMs
+  );
+}
+
+async function seedTranscript(args: {
+  guildId: string;
+  campaignSlug: string;
+  sessionId: string;
+  playerUserId: string;
+  dmUserId: string;
+  candidateName?: string;
+}): Promise<void> {
+  const { getDbForCampaign } = await import("../db.js");
+  const db = getDbForCampaign(args.campaignSlug);
+  const now = Date.now();
+
+  db.prepare(
+    `INSERT INTO ledger_entries (
+      id, guild_id, channel_id, message_id, author_id, author_name,
+      timestamp_ms, content, content_norm, session_id, tags,
+      source, narrative_weight, speaker_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    `${args.sessionId}-player`,
+    args.guildId,
+    "channel-1",
+    `${args.sessionId}-player-msg`,
+    args.playerUserId,
+    "Jamison",
+    now - 2_000,
+    args.candidateName ? `${args.candidateName} scouts ahead.` : "I check the archway.",
+    args.candidateName ? `${args.candidateName} scouts ahead.` : "I check the archway.",
+    args.sessionId,
+    "human",
+    "text",
+    "primary",
+    null
+  );
+
+  db.prepare(
+    `INSERT INTO ledger_entries (
+      id, guild_id, channel_id, message_id, author_id, author_name,
+      timestamp_ms, content, content_norm, session_id, tags,
+      source, narrative_weight, speaker_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    `${args.sessionId}-dm`,
+    args.guildId,
+    "channel-1",
+    `${args.sessionId}-dm-msg`,
+    "stt-bot",
+    "Caterson",
+    now - 1_000,
+    "The door grinds open.",
+    "The door grinds open.",
+    args.sessionId,
+    "human",
+    "voice",
+    "primary",
+    args.dmUserId
   );
 }
 
@@ -275,6 +334,164 @@ describe("web session scope disambiguation", () => {
         searchParams: { guild_id: "guild-1", campaign_slug: beta.campaign_slug },
       })
     ).rejects.toMatchObject({ code: "not_found", status: 404 } satisfies Partial<WebDataError>);
+  });
+
+  test("speaker attribution inline PC creation uses resolved session scope even when campaign slug is shared across guilds", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-web-scope-attribution-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const guildId = "guild-1";
+    const otherGuildId = "guild-2";
+    const dmUserId = "dm-1";
+    const playerUserId = "player-1";
+    const sessionId = "session-scope-attribution-1";
+
+    const { ensureGuildConfig, setGuildCampaignSlug, setGuildMetaCampaignSlug, setGuildDmUserId } = await import("../campaign/guildConfig.js");
+    const { createShowtimeCampaign } = await import("../campaign/showtimeCampaigns.js");
+    const { upsertGuildSeenDiscordUser } = await import("../campaign/guildSeenDiscordUsers.js");
+    const { loadRegistryForScope } = await import("../registry/loadRegistry.js");
+    const { getDbForCampaign } = await import("../db.js");
+
+    getDbForCampaign("default");
+
+    ensureGuildConfig(guildId, "Guild One");
+    ensureGuildConfig(otherGuildId, "Guild Two");
+
+    const campaign1 = createShowtimeCampaign({ guildId, campaignName: "Shared Alpha", createdByUserId: dmUserId });
+    const campaign2 = createShowtimeCampaign({ guildId: otherGuildId, campaignName: "Shared Alpha", createdByUserId: dmUserId });
+
+    setGuildCampaignSlug(guildId, campaign1.campaign_slug);
+    setGuildMetaCampaignSlug(guildId, campaign1.campaign_slug);
+    setGuildCampaignSlug(otherGuildId, campaign2.campaign_slug);
+    setGuildMetaCampaignSlug(otherGuildId, campaign2.campaign_slug);
+    setGuildDmUserId(guildId, dmUserId);
+
+    await upsertSessionInCampaignDb({
+      guildId,
+      campaignSlug: campaign1.campaign_slug,
+      sessionId,
+      startedAtMs: Date.now() - 5_000,
+    });
+    await seedTranscript({
+      guildId,
+      campaignSlug: campaign1.campaign_slug,
+      sessionId,
+      playerUserId,
+      dmUserId,
+    });
+
+    upsertGuildSeenDiscordUser({
+      guildId,
+      discordUserId: playerUserId,
+      nickname: "Jamison",
+      username: "jamison",
+      seenAtMs: Date.now(),
+    });
+
+    await setAuthGuilds([guildId, otherGuildId], dmUserId);
+    const { saveSessionSpeakerAttributionBatch } = await import("../../apps/web/lib/server/sessionSpeakerAttributionService");
+
+    const saved = await saveSessionSpeakerAttributionBatch({
+      guildId,
+      campaignSlug: campaign1.campaign_slug,
+      sessionId,
+      payload: {
+        entries: [
+          {
+            discordUserId: playerUserId,
+            classificationType: "pc",
+            createPc: {
+              canonicalName: "Jamison",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(saved.ready).toBe(true);
+    expect(saved.availablePcs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ canonicalName: "Jamison", discordUserId: playerUserId }),
+      ])
+    );
+
+    const targetRegistry = loadRegistryForScope({ guildId, campaignSlug: campaign1.campaign_slug });
+    const otherRegistry = loadRegistryForScope({ guildId: otherGuildId, campaignSlug: campaign2.campaign_slug });
+
+    expect(targetRegistry.byDiscordUserId.get(playerUserId)?.canonical_name).toBe("Jamison");
+    expect(otherRegistry.byDiscordUserId.get(playerUserId)).toBeUndefined();
+  });
+
+  test("entity resolution uses canonical registry truth from the resolved session scope when campaign slug is shared across guilds", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-web-scope-candidates-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const guildId = "guild-1";
+    const otherGuildId = "guild-2";
+    const dmUserId = "dm-1";
+    const sessionId = "session-scope-candidates-1";
+    const candidateName = "Captain Rowan";
+
+    const { ensureGuildConfig, setGuildCampaignSlug, setGuildMetaCampaignSlug } = await import("../campaign/guildConfig.js");
+    const { createShowtimeCampaign } = await import("../campaign/showtimeCampaigns.js");
+    const { createRegistryEntryForResolvedScope } = await import("../../apps/web/lib/server/registryService");
+    const { getDbForCampaign } = await import("../db.js");
+
+    getDbForCampaign("default");
+
+    ensureGuildConfig(guildId, "Guild One");
+    ensureGuildConfig(otherGuildId, "Guild Two");
+
+    const campaign1 = createShowtimeCampaign({ guildId, campaignName: "Shared Alpha", createdByUserId: dmUserId });
+    const campaign2 = createShowtimeCampaign({ guildId: otherGuildId, campaignName: "Shared Alpha", createdByUserId: dmUserId });
+
+    setGuildCampaignSlug(guildId, campaign1.campaign_slug);
+    setGuildMetaCampaignSlug(guildId, campaign1.campaign_slug);
+    setGuildCampaignSlug(otherGuildId, campaign2.campaign_slug);
+    setGuildMetaCampaignSlug(otherGuildId, campaign2.campaign_slug);
+
+    await upsertSessionInCampaignDb({
+      guildId,
+      campaignSlug: campaign1.campaign_slug,
+      sessionId,
+      startedAtMs: Date.now() - 5_000,
+    });
+    await seedTranscript({
+      guildId,
+      campaignSlug: campaign1.campaign_slug,
+      sessionId,
+      playerUserId: "player-1",
+      dmUserId,
+      candidateName,
+    });
+
+    const registry = createRegistryEntryForResolvedScope({
+      guildId,
+      campaignSlug: campaign1.campaign_slug,
+      body: {
+        category: "npcs",
+        canonicalName: candidateName,
+        aliases: [],
+        notes: "Watch captain",
+      },
+    });
+    const captain = registry.categories.npcs.find((entity) => entity.canonicalName === candidateName);
+    expect(captain?.id).toBeTruthy();
+
+    await setAuthGuilds([guildId, otherGuildId], dmUserId);
+    const { resolveEntity } = await import("../../apps/web/lib/server/entityResolutionService");
+
+    const result = await resolveEntity({
+      sessionId,
+      candidateName,
+      entityId: captain!.id,
+    });
+
+    expect(result.entityId).toBe(captain!.id);
+    expect(result.entityCategory).toBe("npcs");
+    expect(result.summary).toContain(candidateName);
   });
 });
 

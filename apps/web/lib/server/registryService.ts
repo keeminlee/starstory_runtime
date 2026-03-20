@@ -29,6 +29,7 @@ import { ensureRegistryScaffold, getRegistryDirForCampaign, getRegistryDirForSco
 
 type QueryInput = Record<string, string | string[] | undefined> | undefined;
 type RegistryScope = { campaignSlug: string; guildId: string | null };
+export type ResolvedRegistryScope = { campaignSlug: string; guildId: string };
 
 type PendingCandidate = {
   key: string;
@@ -102,6 +103,13 @@ function toRegistryScope(campaign: { slug: string; guildId: string | null }): Re
   return {
     campaignSlug: campaign.slug,
     guildId: campaign.guildId,
+  };
+}
+
+function toResolvedRegistryScope(args: ResolvedRegistryScope): RegistryScope {
+  return {
+    campaignSlug: args.campaignSlug,
+    guildId: args.guildId,
   };
 }
 
@@ -436,7 +444,14 @@ export async function getWebRegistrySnapshot(args: {
   searchParams?: QueryInput;
 }): Promise<RegistrySnapshotDto> {
   const campaign = await assertAuthorizedCampaign(args.campaignSlug, args.searchParams);
-  return loadRegistrySnapshot(toRegistryScope(campaign));
+  return getRegistrySnapshotForResolvedScope({
+    campaignSlug: campaign.slug,
+    guildId: requireGuildScopedCampaign(toRegistryScope(campaign)),
+  });
+}
+
+export function getRegistrySnapshotForResolvedScope(args: ResolvedRegistryScope): RegistrySnapshotDto {
+  return loadRegistrySnapshot(toResolvedRegistryScope(args));
 }
 
 export async function listWebSeenDiscordUsers(args: {
@@ -461,8 +476,19 @@ export async function createWebRegistryEntry(args: {
   body: RegistryCreateEntryRequest;
 }): Promise<RegistrySnapshotDto> {
   const campaign = await assertCampaignEditable(args.campaignSlug, args.searchParams);
-  const scope = toRegistryScope(campaign);
-  const guildId = requireGuildScopedCampaign(scope);
+  return createRegistryEntryForResolvedScope({
+    campaignSlug: campaign.slug,
+    guildId: requireGuildScopedCampaign(toRegistryScope(campaign)),
+    body: args.body,
+  });
+}
+
+export function createRegistryEntryForResolvedScope(args: {
+  campaignSlug: string;
+  guildId: string;
+  body: RegistryCreateEntryRequest;
+}): RegistrySnapshotDto {
+  const scope = toResolvedRegistryScope({ campaignSlug: args.campaignSlug, guildId: args.guildId });
   ensureRegistryScopeScaffold(scope);
 
   const category = args.body.category;
@@ -482,7 +508,7 @@ export async function createWebRegistryEntry(args: {
 
   if (category === "pcs" || category === "npcs") {
     const pcDiscordUserId = category === "pcs"
-      ? resolveValidatedPcDiscordUserId({ guildId, submittedDiscordUserId: args.body.discordUserId })
+      ? resolveValidatedPcDiscordUserId({ guildId: args.guildId, submittedDiscordUserId: args.body.discordUserId })
       : undefined;
     const created = createRegistryEntry({
       prefix: category === "pcs" ? "pc" : "npc",
@@ -528,7 +554,19 @@ export async function addRegistryIgnoreToken(args: {
   token: string;
 }): Promise<{ changed: boolean; registry: RegistrySnapshotDto }> {
   const campaign = await assertCampaignEditable(args.campaignSlug, args.searchParams);
-  const scope = toRegistryScope(campaign);
+  return addRegistryIgnoreTokenForResolvedScope({
+    campaignSlug: campaign.slug,
+    guildId: requireGuildScopedCampaign(toRegistryScope(campaign)),
+    token: args.token,
+  });
+}
+
+export function addRegistryIgnoreTokenForResolvedScope(args: {
+  campaignSlug: string;
+  guildId: string;
+  token: string;
+}): { changed: boolean; registry: RegistrySnapshotDto } {
+  const scope = toResolvedRegistryScope({ campaignSlug: args.campaignSlug, guildId: args.guildId });
   ensureRegistryScopeScaffold(scope);
 
   const ignorePath = getIgnorePath(scope);
@@ -554,8 +592,21 @@ export async function updateWebRegistryEntry(args: {
   body: RegistryUpdateEntryRequest;
 }): Promise<RegistrySnapshotDto> {
   const campaign = await assertCampaignEditable(args.campaignSlug, args.searchParams);
-  const scope = toRegistryScope(campaign);
-  const guildId = requireGuildScopedCampaign(scope);
+  return updateRegistryEntryForResolvedScope({
+    campaignSlug: campaign.slug,
+    guildId: requireGuildScopedCampaign(toRegistryScope(campaign)),
+    entryId: args.entryId,
+    body: args.body,
+  });
+}
+
+export function updateRegistryEntryForResolvedScope(args: {
+  campaignSlug: string;
+  guildId: string;
+  entryId: string;
+  body: RegistryUpdateEntryRequest;
+}): RegistrySnapshotDto {
+  const scope = toResolvedRegistryScope({ campaignSlug: args.campaignSlug, guildId: args.guildId });
   ensureRegistryScopeScaffold(scope);
 
   const category = args.body.category;
@@ -573,7 +624,9 @@ export async function updateWebRegistryEntry(args: {
     throw new WebDataError("invalid_request", 422, "canonicalName cannot be empty.");
   }
 
-  const nextAliases = args.body.aliases ? normalizeAliases(args.body.aliases) : normalizeAliases(Array.isArray(current.aliases) ? (current.aliases as string[]) : []);
+  const nextAliases = args.body.aliases
+    ? normalizeAliases(args.body.aliases)
+    : normalizeAliases(Array.isArray(current.aliases) ? (current.aliases as string[]) : []);
 
   assertNameCollision(scope, {
     canonicalName: nextCanonicalName,
@@ -590,7 +643,7 @@ export async function updateWebRegistryEntry(args: {
 
   if (category === "pcs") {
     updated.discord_user_id = resolveValidatedPcDiscordUserId({
-      guildId,
+      guildId: args.guildId,
       submittedDiscordUserId: args.body.discordUserId,
       existingDiscordUserId: current.discord_user_id,
     });
@@ -610,7 +663,21 @@ export async function deleteWebRegistryEntry(args: {
   searchParams?: QueryInput;
 }): Promise<RegistrySnapshotDto> {
   const campaign = await assertCampaignEditable(args.campaignSlug, args.searchParams);
-  const scope = toRegistryScope(campaign);
+  return deleteRegistryEntryForResolvedScope({
+    campaignSlug: campaign.slug,
+    guildId: requireGuildScopedCampaign(toRegistryScope(campaign)),
+    entryId: args.entryId,
+    category: args.category,
+  });
+}
+
+export function deleteRegistryEntryForResolvedScope(args: {
+  campaignSlug: string;
+  guildId: string;
+  entryId: string;
+  category: RegistryCategoryKey;
+}): RegistrySnapshotDto {
+  const scope = toResolvedRegistryScope({ campaignSlug: args.campaignSlug, guildId: args.guildId });
   ensureRegistryScopeScaffold(scope);
 
   const doc = readCategoryDoc(scope, args.category);
@@ -634,7 +701,23 @@ export async function removeAliasFromWebRegistryEntry(args: {
   searchParams?: QueryInput;
 }): Promise<{ changed: boolean; registry: RegistrySnapshotDto }> {
   const campaign = await assertCampaignEditable(args.campaignSlug, args.searchParams);
-  const scope = toRegistryScope(campaign);
+  return removeAliasFromRegistryEntryForResolvedScope({
+    campaignSlug: campaign.slug,
+    guildId: requireGuildScopedCampaign(toRegistryScope(campaign)),
+    entryId: args.entryId,
+    category: args.category,
+    aliasText: args.aliasText,
+  });
+}
+
+export function removeAliasFromRegistryEntryForResolvedScope(args: {
+  campaignSlug: string;
+  guildId: string;
+  entryId: string;
+  category: RegistryCategoryKey;
+  aliasText: string;
+}): { changed: boolean; registry: RegistrySnapshotDto } {
+  const scope = toResolvedRegistryScope({ campaignSlug: args.campaignSlug, guildId: args.guildId });
   ensureRegistryScopeScaffold(scope);
 
   const doc = readCategoryDoc(scope, args.category);
@@ -671,7 +754,19 @@ export async function removeRegistryIgnoreToken(args: {
   token: string;
 }): Promise<{ changed: boolean; registry: RegistrySnapshotDto }> {
   const campaign = await assertCampaignEditable(args.campaignSlug, args.searchParams);
-  const scope = toRegistryScope(campaign);
+  return removeRegistryIgnoreTokenForResolvedScope({
+    campaignSlug: campaign.slug,
+    guildId: requireGuildScopedCampaign(toRegistryScope(campaign)),
+    token: args.token,
+  });
+}
+
+export function removeRegistryIgnoreTokenForResolvedScope(args: {
+  campaignSlug: string;
+  guildId: string;
+  token: string;
+}): { changed: boolean; registry: RegistrySnapshotDto } {
+  const scope = toResolvedRegistryScope({ campaignSlug: args.campaignSlug, guildId: args.guildId });
   ensureRegistryScopeScaffold(scope);
 
   const ignorePath = getIgnorePath(scope);

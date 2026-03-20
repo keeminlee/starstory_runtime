@@ -20,7 +20,7 @@ let httpServer: HttpServer | null = null;
 let wss: WebSocketServer | null = null;
 
 const overlayPort = cfg.overlay.port;
-const dmRoleId = cfg.discord.dmRoleId || '';
+const dmRoleId = cfg.discord?.dmRoleId ?? '';
 
 // In-memory broadcast queue (buffer messages if no active connections)
 const activeBroadcasters = new Set<WebSocket>();
@@ -82,7 +82,7 @@ function setupRoutes(router: Router) {
   // Serve tokens.json (dynamically loaded from registry)
   router.get('/tokens.json', (req: Request, res: Response) => {
     try {
-      const overlayGuildId = cfg.discord.guildId;
+      const overlayGuildId = cfg.discord?.guildId;
       if (!overlayGuildId) {
         throw new Error('OVERLAY runtime scope missing guildId (cfg.discord.guildId)');
       }

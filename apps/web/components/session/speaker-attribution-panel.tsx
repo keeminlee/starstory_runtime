@@ -242,9 +242,6 @@ export function SpeakerAttributionPanel({
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-semibold text-foreground">{speaker.displayName}</p>
-                    <span className="rounded-full border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                      {speaker.discordUserId}
-                    </span>
                   </div>
                   {locked ? (
                     <p className="mt-2 text-sm text-emerald-200">DM is auto-classified and locked.</p>

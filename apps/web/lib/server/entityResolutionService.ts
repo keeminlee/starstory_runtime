@@ -12,20 +12,20 @@
  */
 
 import Database from "better-sqlite3";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "node:crypto";
 import { resolveWebAuthContext } from "@/lib/server/authContext";
 import { assertUserCanWriteCampaignArchive } from "@/lib/server/writeAuthority";
 import { WebDataError, mapToWebDataError } from "@/lib/mappers/errorMappers";
 import { refreshAnnotationsForSession } from "@/lib/server/recapAnnotationService";
 import { readSessionTranscript } from "@/lib/server/readData/archiveReadStore";
 import {
-  addRegistryIgnoreToken,
-  createWebRegistryEntry,
-  deleteWebRegistryEntry,
-  getWebRegistrySnapshot,
-  removeAliasFromWebRegistryEntry,
-  removeRegistryIgnoreToken,
-  updateWebRegistryEntry,
+  addRegistryIgnoreTokenForResolvedScope,
+  createRegistryEntryForResolvedScope,
+  deleteRegistryEntryForResolvedScope,
+  getRegistrySnapshotForResolvedScope,
+  removeAliasFromRegistryEntryForResolvedScope,
+  removeRegistryIgnoreTokenForResolvedScope,
+  updateRegistryEntryForResolvedScope,
 } from "@/lib/server/registryService";
 import { resolveAuthorizedSessionOwnership } from "@/lib/server/sessionReaders";
 import { getDbForCampaignScope } from "../../../../src/db";
@@ -261,7 +261,7 @@ function insertResolution(
   }
 ): EntityResolutionDto {
   const now = Date.now();
-  const id = uuidv4();
+  const id = randomUUID();
 
   db.prepare(
     `INSERT INTO entity_resolutions (
@@ -309,7 +309,7 @@ function insertReviewBatch(
     status?: EntityReviewBatchStatus;
   }
 ): ReviewBatchRow {
-  const id = uuidv4();
+  const id = randomUUID();
   const now = Date.now();
   db.prepare(
     `INSERT INTO entity_review_batches (
@@ -371,7 +371,7 @@ function logRegistryMutation(
       created_at_ms
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    uuidv4(),
+    randomUUID(),
     batchId,
     mutation.mutationType,
     mutation.entityId,
@@ -397,13 +397,13 @@ function loadRegistryMutationsForBatch(
 }
 
 async function findRegistryEntityById(args: {
+  guildId: string;
   campaignSlug: string;
   entityId: string;
-  searchParams?: QueryInput;
 }): Promise<(RegistryEntityDto & { category: RegistryCategoryKey }) | null> {
-  const snapshot = await getWebRegistrySnapshot({
+  const snapshot = getRegistrySnapshotForResolvedScope({
+    guildId: args.guildId,
     campaignSlug: args.campaignSlug,
-    searchParams: args.searchParams,
   });
 
   for (const [category, entities] of Object.entries(snapshot.categories) as Array<
@@ -480,8 +480,8 @@ function aliasesMatch(leftInput: string[], rightInput: string[]): boolean {
 async function assertEntityDeletionAllowed(args: {
   db: Database.Database;
   batchId: string;
+  guildId: string;
   campaignSlug: string;
-  searchParams?: QueryInput;
   entityId: string;
   payload: {
     category: RegistryCategoryKey;
@@ -500,9 +500,9 @@ async function assertEntityDeletionAllowed(args: {
   }
 
   const entity = await findRegistryEntityById({
+    guildId: args.guildId,
     campaignSlug: args.campaignSlug,
     entityId: args.entityId,
-    searchParams: args.searchParams,
   });
   if (!entity) {
     throw new WebDataError("conflict", 409, `Cannot revert batch ${args.batchId}: entity ${args.entityId} is missing.`);
@@ -558,8 +558,8 @@ function shouldKeepIgnoreToken(args: {
 async function rollbackRegistryMutations(args: {
   db: Database.Database;
   batchId: string;
+  guildId: string;
   campaignSlug: string;
-  searchParams?: QueryInput;
   enforceGuards: boolean;
 }): Promise<void> {
   const mutations = loadRegistryMutationsForBatch(args.db, args.batchId, "DESC");
@@ -582,18 +582,18 @@ async function rollbackRegistryMutations(args: {
         await assertEntityDeletionAllowed({
           db: args.db,
           batchId: args.batchId,
+          guildId: args.guildId,
           campaignSlug: args.campaignSlug,
-          searchParams: args.searchParams,
           entityId: mutation.entity_id,
           payload,
         });
       }
 
-      await deleteWebRegistryEntry({
+      deleteRegistryEntryForResolvedScope({
         campaignSlug: args.campaignSlug,
+        guildId: args.guildId,
         entryId: mutation.entity_id,
         category: payload.category,
-        searchParams: args.searchParams,
       });
       continue;
     }
@@ -615,12 +615,12 @@ async function rollbackRegistryMutations(args: {
         });
       }
 
-      await removeAliasFromWebRegistryEntry({
+      removeAliasFromRegistryEntryForResolvedScope({
         campaignSlug: args.campaignSlug,
+        guildId: args.guildId,
         entryId: mutation.entity_id,
         category: payload.category,
         aliasText: mutation.alias_text,
-        searchParams: args.searchParams,
       });
       continue;
     }
@@ -633,10 +633,10 @@ async function rollbackRegistryMutations(args: {
       continue;
     }
 
-    await removeRegistryIgnoreToken({
+    removeRegistryIgnoreTokenForResolvedScope({
       campaignSlug: args.campaignSlug,
+      guildId: args.guildId,
       token: mutation.alias_text,
-      searchParams: args.searchParams,
     });
   }
 }
@@ -651,9 +651,9 @@ async function resolveEntityCore(args: {
   batchId?: string | null;
 }): Promise<CoreMutationResult> {
   const targetEntity = await findRegistryEntityById({
+    guildId: args.guildId,
     campaignSlug: args.campaignSlug,
     entityId: args.entityId,
-    searchParams: args.searchParams,
   });
   if (!targetEntity) {
     throw new WebDataError("not_found", 404, `Registry entity not found: ${args.entityId}`);
@@ -691,9 +691,9 @@ async function addAliasToEntityCore(args: {
   batchId?: string | null;
 }): Promise<CoreMutationResult> {
   const targetEntity = await findRegistryEntityById({
+    guildId: args.guildId,
     campaignSlug: args.campaignSlug,
     entityId: args.entityId,
-    searchParams: args.searchParams,
   });
   if (!targetEntity) {
     throw new WebDataError("not_found", 404, `Registry entity not found: ${args.entityId}`);
@@ -713,10 +713,10 @@ async function addAliasToEntityCore(args: {
   );
 
   if (aliasResult.changed) {
-    await updateWebRegistryEntry({
+    updateRegistryEntryForResolvedScope({
       campaignSlug: args.campaignSlug,
+      guildId: args.guildId,
       entryId: targetEntity.id,
-      searchParams: args.searchParams,
       body: targetEntity.category === "pcs"
         ? {
             category: "pcs",
@@ -787,9 +787,9 @@ async function createEntityFromCandidateCore(args: {
   const finalNameKey = normKey(finalName);
   const candidateNameKey = normKey(args.candidateName);
 
-  const registrySnapshot = await getWebRegistrySnapshot({
+  const registrySnapshot = getRegistrySnapshotForResolvedScope({
+    guildId: args.guildId,
     campaignSlug: args.campaignSlug,
-    searchParams: args.searchParams,
   });
 
   const allEntities = Object.entries(registrySnapshot.categories).flatMap(([category, entities]) =>
@@ -832,9 +832,9 @@ async function createEntityFromCandidateCore(args: {
     );
   }
 
-  const updatedRegistry = await createWebRegistryEntry({
+  const updatedRegistry = createRegistryEntryForResolvedScope({
     campaignSlug: args.campaignSlug,
-    searchParams: args.searchParams,
+    guildId: args.guildId,
     body: {
       category: args.category,
       canonicalName: finalName,
@@ -894,9 +894,9 @@ async function createEntityFromCandidateCore(args: {
 async function ignoreEntityCandidateCore(args: CoreMutationContext & {
   candidateName: string;
 }): Promise<CoreMutationResult> {
-  const ignoreResult = await addRegistryIgnoreToken({
+  const ignoreResult = addRegistryIgnoreTokenForResolvedScope({
     campaignSlug: args.campaignSlug,
-    searchParams: args.searchParams,
+    guildId: args.guildId,
     token: args.candidateName,
   });
 
@@ -952,17 +952,18 @@ function sortDecisions(decisions: EntityReviewDecision[]): EntityReviewDecision[
 
 async function validateBatchDecisions(args: {
   sessionId: string;
+  guildId: string;
   campaignSlug: string;
-  searchParams?: QueryInput;
   decisions: EntityReviewDecision[];
 }): Promise<void> {
   if (args.decisions.length === 0) {
     throw new WebDataError("invalid_request", 422, "At least one decision is required.");
   }
 
-  const candidateResponse = await getEntityCandidates({
+  const candidateResponse = await getEntityCandidatesForResolvedSession({
     sessionId: args.sessionId,
-    searchParams: args.searchParams,
+    guildId: args.guildId,
+    campaignSlug: args.campaignSlug,
   });
   const candidateByName = new Map(candidateResponse.candidates.map((candidate) => [candidate.candidateName, candidate]));
   const seenCandidates = new Set<string>();
@@ -998,9 +999,9 @@ async function validateBatchDecisions(args: {
     }
 
     const entity = await findRegistryEntityById({
+      guildId: args.guildId,
       campaignSlug: args.campaignSlug,
       entityId: decision.entityId,
-      searchParams: args.searchParams,
     });
     if (!entity) {
       throw new WebDataError("not_found", 404, `Registry entity not found: ${decision.entityId}`);
@@ -1062,95 +1063,107 @@ async function applyDecision(
   });
 }
 
+async function getEntityCandidatesForResolvedSession(args: {
+  sessionId: string;
+  guildId: string;
+  campaignSlug: string;
+}): Promise<{ sessionId: string; campaignSlug: string; candidates: EntityCandidateDto[] }> {
+  const transcript = readSessionTranscript({
+    guildId: args.guildId,
+    campaignSlug: args.campaignSlug,
+    sessionId: args.sessionId,
+  });
+  if (!transcript || transcript.lineCount === 0) {
+    return { sessionId: args.sessionId, campaignSlug: args.campaignSlug, candidates: [] };
+  }
+
+  const scanRows: ScanSourceRow[] = transcript.lines
+    .map((line) => line.text.trim())
+    .filter((content) => content.length > 0)
+    .map((content) => ({
+      content,
+      narrative_weight: "primary",
+    }));
+
+  const registrySnapshot = getRegistrySnapshotForResolvedScope({
+    guildId: args.guildId,
+    campaignSlug: args.campaignSlug,
+  });
+
+  const characters = Object.values(registrySnapshot.categories).flatMap((entities) =>
+    entities.map((entity) => ({
+      id: entity.id,
+      canonical_name: entity.canonicalName,
+      type: "npc" as const,
+      aliases: entity.aliases,
+      notes: entity.notes,
+    }))
+  );
+
+  const byName = new Map<string, { id: string; canonical_name: string; category: RegistryCategoryKey }>();
+  for (const [category, entities] of Object.entries(registrySnapshot.categories) as Array<
+    [RegistryCategoryKey, typeof registrySnapshot.categories.pcs]
+  >) {
+    for (const entity of entities) {
+      const canonicalKey = normKey(entity.canonicalName);
+      if (canonicalKey && !byName.has(canonicalKey)) {
+        byName.set(canonicalKey, { id: entity.id, canonical_name: entity.canonicalName, category });
+      }
+      for (const alias of entity.aliases) {
+        const aliasKey = normKey(alias);
+        if (aliasKey && !byName.has(aliasKey)) {
+          byName.set(aliasKey, { id: entity.id, canonical_name: entity.canonicalName, category });
+        }
+      }
+    }
+  }
+
+  const ignoreSet = new Set(registrySnapshot.ignoreTokens.map((token) => normKey(token)));
+  const scanResult = scanNamesCore({
+    rows: scanRows,
+    registry: { characters, ignore: ignoreSet, byName: byName as never },
+    minCount: 1,
+    maxExamples: 3,
+    includeKnown: false,
+  });
+
+  const db = getDbForCampaignScope({ campaignSlug: args.campaignSlug, guildId: args.guildId });
+  const resolutions = loadActiveResolutionRowsForSession(db, args.sessionId);
+  const resolutionByName = new Map(resolutions.map((row) => [normKey(row.candidate_name), row]));
+
+  const candidates: EntityCandidateDto[] = scanResult.pending.map((pending) => {
+    const existing = resolutionByName.get(normKey(pending.display));
+    const candidateKey = normKey(pending.display);
+    const possibleMatches: EntityCandidateDto["possibleMatches"] = [];
+    const exactMatch = byName.get(candidateKey);
+    if (exactMatch) {
+      possibleMatches.push({
+        entityId: exactMatch.id,
+        canonicalName: exactMatch.canonical_name,
+        category: exactMatch.category,
+        confidence: "exact",
+      });
+    }
+
+    return {
+      candidateName: pending.display,
+      mentions: pending.count,
+      examples: pending.examples,
+      possibleMatches,
+      resolution: existing ? toDto(existing) : null,
+    };
+  });
+
+  return { sessionId: args.sessionId, campaignSlug: args.campaignSlug, candidates };
+}
+
 export async function getEntityCandidates(args: {
   sessionId: string;
   searchParams?: QueryInput;
 }): Promise<{ sessionId: string; campaignSlug: string; candidates: EntityCandidateDto[] }> {
   try {
     const { guildId, campaignSlug, sessionId } = await resolveAuthorizedSession(args);
-    const transcript = readSessionTranscript({ guildId, campaignSlug, sessionId });
-    if (!transcript || transcript.lineCount === 0) {
-      return { sessionId, campaignSlug, candidates: [] };
-    }
-
-    const scanRows: ScanSourceRow[] = transcript.lines
-      .map((line) => line.text.trim())
-      .filter((content) => content.length > 0)
-      .map((content) => ({
-        content,
-        narrative_weight: "primary",
-      }));
-
-    const registrySnapshot = await getWebRegistrySnapshot({
-      campaignSlug,
-      searchParams: args.searchParams,
-    });
-
-    const characters = Object.values(registrySnapshot.categories).flatMap((entities) =>
-      entities.map((entity) => ({
-        id: entity.id,
-        canonical_name: entity.canonicalName,
-        type: "npc" as const,
-        aliases: entity.aliases,
-        notes: entity.notes,
-      }))
-    );
-
-    const byName = new Map<string, { id: string; canonical_name: string; category: RegistryCategoryKey }>();
-    for (const [category, entities] of Object.entries(registrySnapshot.categories) as Array<
-      [RegistryCategoryKey, typeof registrySnapshot.categories.pcs]
-    >) {
-      for (const entity of entities) {
-        const canonicalKey = normKey(entity.canonicalName);
-        if (canonicalKey && !byName.has(canonicalKey)) {
-          byName.set(canonicalKey, { id: entity.id, canonical_name: entity.canonicalName, category });
-        }
-        for (const alias of entity.aliases) {
-          const aliasKey = normKey(alias);
-          if (aliasKey && !byName.has(aliasKey)) {
-            byName.set(aliasKey, { id: entity.id, canonical_name: entity.canonicalName, category });
-          }
-        }
-      }
-    }
-
-    const ignoreSet = new Set(registrySnapshot.ignoreTokens.map((token) => normKey(token)));
-    const scanResult = scanNamesCore({
-      rows: scanRows,
-      registry: { characters, ignore: ignoreSet, byName: byName as never },
-      minCount: 1,
-      maxExamples: 3,
-      includeKnown: false,
-    });
-
-    const db = getDbForCampaignScope({ campaignSlug, guildId });
-    const resolutions = loadActiveResolutionRowsForSession(db, sessionId);
-    const resolutionByName = new Map(resolutions.map((row) => [normKey(row.candidate_name), row]));
-
-    const candidates: EntityCandidateDto[] = scanResult.pending.map((pending) => {
-      const existing = resolutionByName.get(normKey(pending.display));
-      const candidateKey = normKey(pending.display);
-      const possibleMatches: EntityCandidateDto["possibleMatches"] = [];
-      const exactMatch = byName.get(candidateKey);
-      if (exactMatch) {
-        possibleMatches.push({
-          entityId: exactMatch.id,
-          canonicalName: exactMatch.canonical_name,
-          category: exactMatch.category,
-          confidence: "exact",
-        });
-      }
-
-      return {
-        candidateName: pending.display,
-        mentions: pending.count,
-        examples: pending.examples,
-        possibleMatches,
-        resolution: existing ? toDto(existing) : null,
-      };
-    });
-
-    return { sessionId, campaignSlug, candidates };
+    return await getEntityCandidatesForResolvedSession({ guildId, campaignSlug, sessionId });
   } catch (error) {
     throw mapToWebDataError(error);
   }
@@ -1299,8 +1312,8 @@ export async function saveEntityReviewBatch(args: {
 
     await validateBatchDecisions({
       sessionId: auth.sessionId,
+      guildId: auth.guildId,
       campaignSlug: auth.campaignSlug,
-      searchParams: args.searchParams,
       decisions: args.decisions,
     });
 
@@ -1333,18 +1346,15 @@ export async function saveEntityReviewBatch(args: {
       await rollbackRegistryMutations({
         db,
         batchId: batch.id,
+        guildId: auth.guildId,
         campaignSlug: auth.campaignSlug,
-        searchParams: args.searchParams,
         enforceGuards: false,
       });
       updateReviewBatchStatus(db, batch.id, FAILED_BATCH_STATUS);
       throw error;
     }
 
-    const candidates = await getEntityCandidates({
-      sessionId: auth.sessionId,
-      searchParams: args.searchParams,
-    });
+    const candidates = await getEntityCandidatesForResolvedSession(auth);
 
     return {
       batch: toBatchDto(batch),
@@ -1380,8 +1390,8 @@ export async function revertEntityReviewBatch(args: {
     await rollbackRegistryMutations({
       db,
       batchId: batch.id,
+      guildId: auth.guildId,
       campaignSlug: auth.campaignSlug,
-      searchParams: args.searchParams,
       enforceGuards: true,
     });
 
@@ -1393,10 +1403,7 @@ export async function revertEntityReviewBatch(args: {
       searchParams: args.searchParams,
     });
 
-    const candidates = await getEntityCandidates({
-      sessionId: auth.sessionId,
-      searchParams: args.searchParams,
-    });
+    const candidates = await getEntityCandidatesForResolvedSession(auth);
 
     return {
       batch: toBatchDto(revertedBatch),
