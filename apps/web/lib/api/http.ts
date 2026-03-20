@@ -4,7 +4,7 @@ import { CANONICAL_ORIGIN } from "@/lib/canonicalOrigin";
 type QueryValue = string | number | boolean | null | undefined;
 
 type FetchJsonOptions = {
-  method?: "GET" | "POST" | "PATCH";
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
   query?: Record<string, QueryValue | QueryValue[]>;
   body?: unknown;
   headers?: Record<string, string>;
