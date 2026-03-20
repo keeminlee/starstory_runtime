@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { VoiceConnectionStatus } from "@discordjs/voice";
 import { AttachmentBuilder, GuildMember, SlashCommandBuilder } from "discord.js";
 import {
   ensureGuildConfig,
@@ -70,6 +71,7 @@ import {
 } from "../sessions/lifecycleState.js";
 import { joinVoice, leaveVoice } from "../voice/connection.js";
 import { startReceiver, stopReceiver } from "../voice/receiver.js";
+import { cleanupSpeaker } from "../voice/speaker.js";
 import {
   getVoiceState,
   isVoiceHushEnabled,
@@ -1699,9 +1701,46 @@ async function ensureVoiceConnection(interaction: any, guildId: string): Promise
     ? await guild.members.fetch(interaction.user.id)
     : null;
   const invokerVoiceChannelId = memberFromInteraction?.voice?.channelId ?? fetchedMember?.voice?.channelId ?? null;
-  const currentVoiceState = getVoiceState(guildId);
+  const initialVoiceState = getVoiceState(guildId);
+
+  const currentVoiceState = (() => {
+    if (!initialVoiceState) {
+      return null;
+    }
+
+    const connectionStatus = (initialVoiceState.connection as any)?.state?.status;
+    if (
+      connectionStatus === VoiceConnectionStatus.Destroyed
+      || connectionStatus === VoiceConnectionStatus.Disconnected
+    ) {
+      meepoCommandLog.warn("Showtime start detected stale voice runtime state; forcing reconnect", {
+        event_type: "SHOWTIME_VOICE_STALE_STATE",
+        guild_id: guildId,
+        channel_id: initialVoiceState.channelId,
+        voice_status: connectionStatus,
+      });
+      try {
+        leaveVoice(guildId);
+      } catch (error) {
+        meepoCommandLog.warn("Showtime start failed to clear stale voice state cleanly", {
+          event_type: "SHOWTIME_VOICE_STALE_CLEAR_FAILED",
+          guild_id: guildId,
+          channel_id: initialVoiceState.channelId,
+          error: String((error as any)?.message ?? error ?? "unknown_error"),
+        });
+      }
+      return null;
+    }
+
+    return initialVoiceState;
+  })();
 
   if (currentVoiceState) {
+    // Fresh showtime start must not inherit prior receiver or playback residue.
+    stopReceiver(guildId);
+    cleanupSpeaker(guildId);
+    voicePlaybackController.resetGuild(guildId);
+
     const receiverResult = startReceiver(guildId);
     meepoCommandLog.info("Showtime voice connection reused", {
       event_type: "SHOWTIME_VOICE_SETUP",

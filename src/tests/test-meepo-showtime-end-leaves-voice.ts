@@ -34,8 +34,10 @@ const joinVoiceMock = vi.fn();
 const leaveVoiceMock = vi.fn();
 const startReceiverMock = vi.fn();
 const stopReceiverMock = vi.fn();
+const voicePlaybackResetGuildMock = vi.fn();
 
 let voiceConnected = false;
+let voiceStateOverride: any | undefined;
 
 vi.mock("../security/isElevated.js", () => ({
   isElevated: vi.fn(() => true),
@@ -66,7 +68,7 @@ vi.mock("../voice/receiver.js", () => ({
 }));
 
 vi.mock("../voice/state.js", () => ({
-  getVoiceState: vi.fn(() => (voiceConnected ? ({ channelId: "voice-1" } as any) : null)),
+  getVoiceState: vi.fn(() => voiceStateOverride ?? (voiceConnected ? ({ channelId: "voice-1" } as any) : null)),
   setVoiceState: vi.fn(),
   setVoiceHushEnabled: vi.fn(),
   isVoiceHushEnabled: vi.fn(() => true),
@@ -79,7 +81,7 @@ vi.mock("../voice/voicePlaybackController.js", () => ({
     onUserSpeechStart: vi.fn(() => false),
     getIsSpeaking: vi.fn(() => false),
     setIsSpeaking: vi.fn(),
-    resetGuild: vi.fn(),
+    resetGuild: voicePlaybackResetGuildMock,
     registerAbortHandler: vi.fn(),
     unregisterAbortHandler: vi.fn(),
   },
@@ -132,11 +134,13 @@ function buildInteraction(args: {
 
 afterEach(() => {
   voiceConnected = false;
+  voiceStateOverride = undefined;
   leaveVoiceMock.mockReset();
   joinVoiceMock.mockReset();
   startReceiverMock.mockReset();
   voiceSpeakMock.mockReset();
   stopReceiverMock.mockReset();
+  voicePlaybackResetGuildMock.mockReset();
   ensureBronzeTranscriptExportCachedMock.mockReset();
   generateSessionRecapMock.mockReset();
   vi.unstubAllEnvs();
@@ -221,6 +225,81 @@ describe("showtime lifecycle hardening", () => {
     const content = String(startInteraction.reply.mock.calls[0]?.[0]?.content ?? "");
     expect(content).toContain("Unable to start showtime voice capture");
     expect(content).toContain("listener_registration_failed");
+
+    db.close();
+  });
+
+  test("/meepo showtime start resets residual runtime state before reusing an existing voice connection", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-showtime-start-reuse-reset-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    voiceConnected = true;
+    startReceiverMock.mockReturnValue({ ok: true, reason: "started", channelId: "voice-1" });
+
+    const { meepo } = await import("../commands/meepo.js");
+    const { getDbForCampaign } = await import("../db.js");
+    const { getActiveSession } = await import("../sessions/sessions.js");
+    const db = getDbForCampaign("default");
+
+    const execCtx = {
+      guildId: "guild-1",
+      campaignSlug: "default",
+      dbPath: "test.sqlite",
+      db,
+      trace_id: "trace-showtime-start-reuse-reset",
+      interaction_id: "interaction-showtime-start-reuse-reset",
+    } as any;
+
+    await meepo.execute(buildInteraction({ subcommand: "awaken" }), execCtx);
+    const startInteraction = buildInteraction({ subcommand: "start", subcommandGroup: "showtime", voiceChannelId: "voice-1" });
+    await meepo.execute(startInteraction, execCtx);
+
+    expect(stopReceiverMock).toHaveBeenCalledWith("guild-1");
+    expect(voicePlaybackResetGuildMock).toHaveBeenCalledWith("guild-1");
+    expect(startReceiverMock).toHaveBeenCalledWith("guild-1");
+    expect(joinVoiceMock).not.toHaveBeenCalled();
+    expect(getActiveSession("guild-1")).toBeTruthy();
+
+    db.close();
+  });
+
+  test("/meepo showtime start forces a fresh join when the stored voice state is stale", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-showtime-start-stale-voice-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    voiceStateOverride = {
+      channelId: "voice-1",
+      connection: {
+        state: {
+          status: "destroyed",
+        },
+      },
+    };
+    startReceiverMock.mockReturnValue({ ok: true, reason: "started", channelId: "voice-1" });
+
+    const { meepo } = await import("../commands/meepo.js");
+    const { getDbForCampaign } = await import("../db.js");
+    const db = getDbForCampaign("default");
+
+    const execCtx = {
+      guildId: "guild-1",
+      campaignSlug: "default",
+      dbPath: "test.sqlite",
+      db,
+      trace_id: "trace-showtime-start-stale-voice",
+      interaction_id: "interaction-showtime-start-stale-voice",
+    } as any;
+
+    await meepo.execute(buildInteraction({ subcommand: "awaken" }), execCtx);
+    const startInteraction = buildInteraction({ subcommand: "start", subcommandGroup: "showtime", voiceChannelId: "voice-1" });
+    await meepo.execute(startInteraction, execCtx);
+
+    expect(leaveVoiceMock).toHaveBeenCalledWith("guild-1");
+    expect(joinVoiceMock).toHaveBeenCalledTimes(1);
+    const content = String(startInteraction.reply.mock.calls[0]?.[0]?.content ?? "");
+    expect(content).toContain("Showtime begins");
 
     db.close();
   });

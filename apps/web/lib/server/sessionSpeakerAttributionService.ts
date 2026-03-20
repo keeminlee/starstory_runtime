@@ -8,9 +8,10 @@ import type {
   SessionSpeakerAttributionSpeaker,
   SessionSpeakerClassification,
 } from "@/lib/types";
-import { createWebRegistryEntry } from "@/lib/server/registryService";
-import { loadRegistryForScope } from "../../../../src/registry/loadRegistry";
-import type { Character } from "../../../../src/registry/types";
+import {
+  createRegistryEntryForResolvedScope,
+  getRegistrySnapshotForResolvedScope,
+} from "@/lib/server/registryService";
 import {
   getSessionSpeakerAttributionState,
   setSessionSpeakerClassifications,
@@ -23,17 +24,6 @@ type QueryInput = Record<string, string | string[] | undefined> | undefined;
 
 function toIso(value: number): string {
   return new Date(value).toISOString();
-}
-
-function mapPcEntity(entity: Character) {
-  return {
-    id: entity.id,
-    canonicalName: entity.canonical_name,
-    aliases: Array.isArray(entity.aliases) ? entity.aliases : [],
-    notes: entity.notes ?? "",
-    category: "pcs" as const,
-    discordUserId: entity.discord_user_id ?? null,
-  };
 }
 
 function mapClassification(
@@ -69,10 +59,8 @@ export function readSessionSpeakerAttributionSnapshot(args: {
 }): SessionSpeakerAttributionState {
   try {
     const state = getSessionSpeakerAttributionState(args);
-    const registry = loadRegistryForScope({ guildId: args.guildId, campaignSlug: args.campaignSlug });
-    const availablePcs = registry.characters
-      .filter((entity) => entity.type === "pc")
-      .map((entity) => mapPcEntity(entity))
+    const registry = getRegistrySnapshotForResolvedScope({ guildId: args.guildId, campaignSlug: args.campaignSlug });
+    const availablePcs = [...registry.categories.pcs]
       .sort((a, b) => a.canonicalName.localeCompare(b.canonicalName));
 
     return {
@@ -133,9 +121,9 @@ export async function saveSessionSpeakerAttributionBatch(args: {
             throw new WebDataError("invalid_request", 422, `canonicalName is required for speaker '${entry.discordUserId}'.`);
           }
 
-          const registry = await createWebRegistryEntry({
+          const registry = createRegistryEntryForResolvedScope({
             campaignSlug: args.campaignSlug,
-            searchParams: args.searchParams,
+            guildId: args.guildId,
             body: {
               category: "pcs",
               canonicalName,
