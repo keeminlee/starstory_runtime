@@ -32,6 +32,50 @@ afterEach(() => {
 });
 
 describe("provider adapters", () => {
+  test("OpenAI adapter uses max_completion_tokens for chat requests", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-provider-adapter-openai-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    vi.stubEnv("DISCORD_TOKEN", "discord-test-token");
+    vi.stubEnv("OPENAI_API_KEY", "openai-test-key");
+    vi.stubEnv("OPENAI_MODEL", "gpt-5-mini");
+
+    const createMock = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: "openai reply",
+          },
+        },
+      ],
+    });
+
+    vi.doMock("openai", () => ({
+      default: class OpenAI {
+        chat = {
+          completions: {
+            create: createMock,
+          },
+        };
+      },
+    }));
+
+    const { chat } = await import("../llm/client.js");
+    const reply = await chat({
+      systemPrompt: "You are concise.",
+      userMessage: "Hello",
+      maxTokens: 64,
+    });
+
+    expect(reply).toBe("openai reply");
+    expect(createMock).toHaveBeenCalledTimes(1);
+    const [payload] = createMock.mock.calls[0] as [Record<string, unknown>];
+    expect(payload.model).toBe("gpt-5-mini");
+    expect(payload.max_completion_tokens).toBe(64);
+    expect(payload).not.toHaveProperty("max_tokens");
+  });
+
   test("deepgram STT adapter posts wav audio and parses transcript", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-provider-adapter-stt-"));
     tempDirs.push(tempDir);

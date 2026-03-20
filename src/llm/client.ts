@@ -13,6 +13,10 @@ const llmLog = log.withScope("llm", {
 
 let openaiClient: OpenAI | null = null;
 
+function buildOpenAiTokenLimit(maxTokens: number): { max_completion_tokens: number } {
+  return { max_completion_tokens: maxTokens };
+}
+
 export function getOpenAIClient(): OpenAI {
   if (!openaiClient) {
     const apiKey = cfg.openai.apiKey;
@@ -78,7 +82,7 @@ export async function chat(opts: {
         const response = await client.chat.completions.create({
           model,
           temperature,
-          max_tokens: maxTokens,
+          ...buildOpenAiTokenLimit(maxTokens),
           ...(opts.responseFormat === "json_object"
             ? { response_format: { type: "json_object" as const } }
             : {}),
