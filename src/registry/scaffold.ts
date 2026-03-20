@@ -5,6 +5,7 @@
 
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "node:url";
 
 const DEFAULT_FILES: Array<{ name: string; content: string }> = [
   { name: "pcs.yml", content: "version: 1\n\ncharacters:\n" },
@@ -14,6 +15,8 @@ const DEFAULT_FILES: Array<{ name: string; content: string }> = [
   { name: "misc.yml", content: "version: 1\n\nmisc:\n" },
   { name: "ignore.yml", content: "version: 1\n\ntokens:\n" },
 ];
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 function resolveRegistryBaseDir(baseDir?: string): string {
   if (baseDir) {
@@ -25,7 +28,7 @@ function resolveRegistryBaseDir(baseDir?: string): string {
     return path.join(path.resolve(dataRoot), "registry");
   }
 
-  return path.join(process.cwd(), "data", "registry");
+  return path.join(REPO_ROOT, "data", "registry");
 }
 
 /**

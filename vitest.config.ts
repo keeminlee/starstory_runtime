@@ -100,6 +100,7 @@ export default defineConfig({
       "src/tests/test-session-status-invariants.ts",
       "src/tests/test-session-boot-reconcile.ts",
       "src/tests/test-session-recovery.ts",
+      "src/tests/test-session-speaker-attribution.ts",
       "src/tests/test-session-recaps-api.ts",
       "src/tests/test-recap-service-contract.ts",
       "src/tests/test-web-auth-context-guard.ts",

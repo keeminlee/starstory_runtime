@@ -28,9 +28,11 @@ afterEach(() => {
   }
 });
 
-async function seedSessionFixture(guildId: string, sessionId: string): Promise<void> {
-  const { getDbForCampaign } = await import("../db.js");
-  const db = getDbForCampaign("default");
+async function seedSessionFixture(guildId: string, sessionId: string, campaignSlugOverride?: string): Promise<void> {
+  const { resolveCampaignSlug } = await import("../campaign/guildConfig.js");
+  const { getDbForCampaignScope } = await import("../db.js");
+  const campaignSlug = campaignSlugOverride ?? resolveCampaignSlug({ guildId });
+  const db = getDbForCampaignScope({ guildId, campaignSlug });
   const now = Date.now();
 
   db.prepare(
@@ -237,7 +239,7 @@ test("speaker attribution stores validated PC mappings and rejects invalid PC cl
   const guildId = "guild-speaker-pc";
   const sessionId = "session-speaker-pc";
   const campaignSlug = "default";
-  await seedSessionFixture(guildId, sessionId);
+  await seedSessionFixture(guildId, sessionId, campaignSlug);
   seedPcRegistry(guildId, campaignSlug);
 
   const { setGuildDmUserId } = await import("../campaign/guildConfig.js");
@@ -284,7 +286,7 @@ test("speaker attribution state treats missing registry PCs as unresolved before
   const guildId = "guild-speaker-stale-pc";
   const sessionId = "session-speaker-stale-pc";
   const campaignSlug = "default";
-  await seedSessionFixture(guildId, sessionId);
+  await seedSessionFixture(guildId, sessionId, campaignSlug);
   seedPcRegistry(guildId, campaignSlug);
 
   const { setGuildDmUserId } = await import("../campaign/guildConfig.js");
@@ -308,4 +310,20 @@ test("speaker attribution state treats missing registry PCs as unresolved before
   expect(state.ready).toBe(false);
   expect(state.pendingCount).toBe(1);
   expect(state.speakers.find((speaker) => speaker.discordUserId === "player-1")?.classification).toBeNull();
+});
+
+test("registry scope paths remain rooted at repo data when cwd is apps/web", () => {
+  vi.unstubAllEnvs();
+
+  const originalCwd = process.cwd();
+  const webCwd = path.join(originalCwd, "apps", "web");
+
+  process.chdir(webCwd);
+  try {
+    expect(getRegistryDirForScope({ guildId: "Guild-1", campaignSlug: "Default" })).toBe(
+      path.join(originalCwd, "data", "registry", "g_guild-1__c_default")
+    );
+  } finally {
+    process.chdir(originalCwd);
+  }
 });
