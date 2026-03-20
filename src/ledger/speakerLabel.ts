@@ -48,9 +48,9 @@ export async function resolveSpeakerAttribution(args: {
   try {
     const campaignSlug = args.campaignId ?? resolveCampaignSlug({ guildId: args.guildId });
     const registry = loadRegistry({ campaignSlug });
-    const mappedPc = registry.byDiscordUserId.get(args.authorId);
-    if (mappedPc) {
-      return { label: mappedPc.canonical_name, kind: "player" };
+    const mappedPcs = registry.byDiscordUserId.get(args.authorId) ?? [];
+    if (mappedPcs.length === 1) {
+      return { label: mappedPcs[0].canonical_name, kind: "player" };
     }
   } catch {
     return { label: args.discordDisplayName, kind: "player" };

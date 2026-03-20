@@ -51,7 +51,7 @@ export type LoadedRegistry = {
   factions: Faction[];
   misc: Misc[];
   byId: Map<string, Entity>;
-  byDiscordUserId: Map<string | undefined, Character>;
+  byDiscordUserId: Map<string, Character[]>;
   byName: Map<string, Entity>; // normalized key -> entity
   ignore: Set<string>; // normalized ignore tokens
 };

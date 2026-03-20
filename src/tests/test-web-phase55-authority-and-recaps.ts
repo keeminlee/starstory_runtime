@@ -168,6 +168,8 @@ async function seedSessionTranscript(args: {
   sessionId: string;
   playerUserId: string;
   dmUserId: string;
+  extraPlayerUserId?: string;
+  extraPlayerName?: string;
 }): Promise<void> {
   const { getDbForCampaign } = await import("../db.js");
   const db = getDbForCampaign(args.campaignSlug);
@@ -216,6 +218,30 @@ async function seedSessionTranscript(args: {
     "primary",
     args.dmUserId,
   );
+
+  if (args.extraPlayerUserId) {
+    db.prepare(
+      `INSERT INTO ledger_entries (
+        id, guild_id, channel_id, message_id, author_id, author_name,
+        timestamp_ms, content, content_norm, session_id, tags, source, narrative_weight, speaker_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      `${args.sessionId}-speaker-extra-player`,
+      args.guildId,
+      "channel-1",
+      `${args.sessionId}-speaker-extra-player-msg`,
+      args.extraPlayerUserId,
+      args.extraPlayerName ?? "Second Speaker",
+      now - 1_500,
+      "I keep watch.",
+      "I keep watch.",
+      args.sessionId,
+      "human",
+      "text",
+      "primary",
+      null,
+    );
+  }
 }
 
 describe("Phase 5.5 write authority enforcement", () => {
@@ -571,7 +597,7 @@ describe("Phase 5.5 recap source visibility", () => {
     );
   });
 
-  test("speaker attribution inline PC creation rejects duplicate discord-user ownership without corrupting the registry", async () => {
+  test("speaker attribution can create and select multiple PCs for one player", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-phase55-speaker-inline-duplicate-"));
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
@@ -607,28 +633,133 @@ describe("Phase 5.5 recap source visibility", () => {
       },
     });
 
-    await expect(
-      saveSessionSpeakerAttributionBatch({
-        guildId,
-        campaignSlug,
-        sessionId,
-        payload: {
-          entries: [
-            {
-              discordUserId: playerUserId,
-              classificationType: "pc",
-              createPc: {
-                canonicalName: "Kenan",
-              },
+    const saved = await saveSessionSpeakerAttributionBatch({
+      guildId,
+      campaignSlug,
+      sessionId,
+      payload: {
+        entries: [
+          {
+            discordUserId: playerUserId,
+            classificationType: "pc",
+            createPc: {
+              canonicalName: "Kenan",
             },
-          ],
-        },
-      })
-    ).rejects.toMatchObject({ code: "conflict", status: 409 });
+          },
+        ],
+      },
+    });
 
     const snapshot = await getWebRegistrySnapshot({ campaignSlug, searchParams: { guild_id: guildId } });
-    expect(snapshot.categories.pcs.filter((entry) => entry.discordUserId === playerUserId)).toHaveLength(1);
-    expect(snapshot.categories.pcs.find((entry) => entry.discordUserId === playerUserId)?.canonicalName).toBe("Minx");
+    const ownedPcs = snapshot.categories.pcs.filter((entry) => entry.discordUserId === playerUserId);
+    const minxId = ownedPcs.find((entry) => entry.canonicalName === "Minx")?.id;
+    const kenanId = ownedPcs.find((entry) => entry.canonicalName === "Kenan")?.id;
+
+    expect(ownedPcs).toHaveLength(2);
+    expect(saved.speakers.find((speaker) => speaker.discordUserId === playerUserId)?.classification?.pcEntityId).toBe(kenanId);
+
+    const reselected = await saveSessionSpeakerAttributionBatch({
+      guildId,
+      campaignSlug,
+      sessionId,
+      payload: {
+        entries: [
+          {
+            discordUserId: playerUserId,
+            classificationType: "pc",
+            pcEntityId: minxId,
+          },
+        ],
+      },
+    });
+
+    expect(reselected.speakers.find((speaker) => speaker.discordUserId === playerUserId)?.classification?.pcEntityId).toBe(minxId);
+  });
+
+  test("registry delete is blocked when a PC is still selected in pending speaker attribution", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-phase55-speaker-delete-guard-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const guildId = "guild-1";
+    const dmUserId = "dm-1";
+    const playerUserId = "player-1";
+    const extraPlayerUserId = "player-2";
+    const { campaignSlug, sessionId } = await setupGuildCampaignAndSession({ guildId, dmUserId, playerUserId });
+    await seedSessionTranscript({
+      guildId,
+      campaignSlug,
+      sessionId,
+      playerUserId,
+      dmUserId,
+      extraPlayerUserId,
+      extraPlayerName: "Snowflake",
+    });
+
+    const { upsertGuildSeenDiscordUser } = await import("../campaign/guildSeenDiscordUsers.js");
+    const {
+      createWebRegistryEntry,
+      deleteWebRegistryEntry,
+      getWebRegistrySnapshot,
+    } = await import("../../apps/web/lib/server/registryService");
+    const { saveSessionSpeakerAttributionBatch } = await import("../../apps/web/lib/server/sessionSpeakerAttributionService");
+
+    upsertGuildSeenDiscordUser({
+      guildId,
+      discordUserId: playerUserId,
+      nickname: "Jamison",
+      username: "jamison",
+      seenAtMs: Date.now(),
+    });
+    upsertGuildSeenDiscordUser({
+      guildId,
+      discordUserId: extraPlayerUserId,
+      nickname: "Snowflake",
+      username: "snowflake",
+      seenAtMs: Date.now(),
+    });
+
+    await setAuth({ userId: dmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+
+    await createWebRegistryEntry({
+      campaignSlug,
+      body: {
+        category: "pcs",
+        canonicalName: "Minx",
+        aliases: [],
+        notes: "",
+        discordUserId: playerUserId,
+      },
+    });
+
+    const snapshot = await getWebRegistrySnapshot({ campaignSlug, searchParams: { guild_id: guildId } });
+    const minxId = snapshot.categories.pcs.find((entry) => entry.canonicalName === "Minx")?.id;
+
+    const saved = await saveSessionSpeakerAttributionBatch({
+      guildId,
+      campaignSlug,
+      sessionId,
+      payload: {
+        entries: [
+          {
+            discordUserId: playerUserId,
+            classificationType: "pc",
+            pcEntityId: minxId,
+          },
+        ],
+      },
+    });
+
+    expect(saved.pendingCount).toBe(1);
+
+    await expect(
+      deleteWebRegistryEntry({
+        campaignSlug,
+        entryId: String(minxId),
+        category: "pcs",
+        searchParams: { guild_id: guildId },
+      })
+    ).rejects.toMatchObject({ code: "conflict", status: 409 });
   });
 
   test("session detail returns to pending attribution when a stored PC mapping disappears from registry", async () => {

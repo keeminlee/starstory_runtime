@@ -419,7 +419,7 @@ describe("web session scope disambiguation", () => {
     const targetRegistry = loadRegistryForScope({ guildId, campaignSlug: campaign1.campaign_slug });
     const otherRegistry = loadRegistryForScope({ guildId: otherGuildId, campaignSlug: campaign2.campaign_slug });
 
-    expect(targetRegistry.byDiscordUserId.get(playerUserId)?.canonical_name).toBe("Jamison");
+    expect(targetRegistry.byDiscordUserId.get(playerUserId)?.map((pc) => pc.canonical_name)).toEqual(["Jamison"]);
     expect(otherRegistry.byDiscordUserId.get(playerUserId)).toBeUndefined();
   });
 

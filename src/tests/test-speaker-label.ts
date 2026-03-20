@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 let dmUserId: string | null = null;
-const byDiscordUserId = new Map<string, { canonical_name: string }>();
+const byDiscordUserId = new Map<string, Array<{ canonical_name: string }>>();
 
 vi.mock("../campaign/guildConfig.js", () => ({
   getGuildDmUserId: vi.fn(() => dmUserId),
@@ -50,7 +50,7 @@ describe("speaker attribution", () => {
   });
 
   test("canon maps player by discord id to canonical PC name", async () => {
-    byDiscordUserId.set("user-2", { canonical_name: "Jamison" });
+    byDiscordUserId.set("user-2", [{ canonical_name: "Jamison" }]);
     const { resolveSpeakerAttribution } = await import("../ledger/speakerLabel.js");
 
     const result = await resolveSpeakerAttribution({
@@ -61,6 +61,20 @@ describe("speaker attribution", () => {
     });
 
     expect(result).toEqual({ label: "Jamison", kind: "player" });
+  });
+
+  test("canon falls back to discord display when multiple PCs share the same discord id", async () => {
+    byDiscordUserId.set("user-2", [{ canonical_name: "Jamison" }, { canonical_name: "Kenan" }]);
+    const { resolveSpeakerAttribution } = await import("../ledger/speakerLabel.js");
+
+    const result = await resolveSpeakerAttribution({
+      guildId: "guild-1",
+      authorId: "user-2",
+      discordDisplayName: "BrassOnes",
+      canonMode: true,
+    });
+
+    expect(result).toEqual({ label: "BrassOnes", kind: "player" });
   });
 
   test("canon falls back to discord display when unmapped", async () => {

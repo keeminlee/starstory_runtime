@@ -221,7 +221,7 @@ describe("compendium PC discord-user validation", () => {
     ).rejects.toMatchObject({ code: "invalid_request", status: 422 });
   });
 
-  test("PC writes reject duplicate discord-user ownership before mutating the registry", async () => {
+  test("PC writes allow multiple PCs for one discord user and registry load remains stable", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-web-pc-duplicate-user-"));
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
@@ -239,6 +239,7 @@ describe("compendium PC discord-user validation", () => {
       getWebRegistrySnapshot,
     } = await import("../../apps/web/lib/server/registryService");
     const { upsertGuildSeenDiscordUser } = await import("../campaign/guildSeenDiscordUsers.js");
+    const { loadRegistryForScope } = await import("../registry/loadRegistry.js");
 
     upsertGuildSeenDiscordUser({ guildId, discordUserId: "known-user", nickname: "Known", seenAtMs: 1 });
 
@@ -255,21 +256,111 @@ describe("compendium PC discord-user validation", () => {
       },
     });
 
-    await expect(
-      createWebRegistryEntry({
-        campaignSlug,
-        body: {
-          category: "pcs",
-          canonicalName: "Kenan",
-          aliases: [],
-          notes: "",
-          discordUserId: "known-user",
-        },
-      })
-    ).rejects.toMatchObject({ code: "conflict", status: 409 });
+    await createWebRegistryEntry({
+      campaignSlug,
+      body: {
+        category: "pcs",
+        canonicalName: "Kenan",
+        aliases: [],
+        notes: "",
+        discordUserId: "known-user",
+      },
+    });
 
     const snapshot = await getWebRegistrySnapshot({ campaignSlug, searchParams: { guild_id: guildId } });
-    expect(snapshot.categories.pcs.filter((entry) => entry.discordUserId === "known-user")).toHaveLength(1);
-    expect(snapshot.categories.pcs.find((entry) => entry.discordUserId === "known-user")?.canonicalName).toBe("Minx");
+    expect(snapshot.categories.pcs.filter((entry) => entry.discordUserId === "known-user")).toHaveLength(2);
+    expect(snapshot.categories.pcs.filter((entry) => entry.discordUserId === "known-user").map((entry) => entry.canonicalName)).toEqual(["Minx", "Kenan"]);
+
+    const registry = loadRegistryForScope({ guildId, campaignSlug });
+    expect(registry.byDiscordUserId.get("known-user")?.map((pc) => pc.canonical_name)).toEqual(["Minx", "Kenan"]);
+  });
+
+  test("registry delete removes only the targeted entry and leaves sibling PCs intact", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-web-pc-delete-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const guildId = "guild-1";
+    const dmUserId = "dm-1";
+    const campaignSlug = await setupCampaign({
+      guildId,
+      dmUserId,
+      campaignName: makeUniqueCampaignName("Compendium Delta", tempDir),
+    });
+
+    const {
+      createWebRegistryEntry,
+      deleteWebRegistryEntry,
+      getWebRegistrySnapshot,
+    } = await import("../../apps/web/lib/server/registryService");
+    const { upsertGuildSeenDiscordUser } = await import("../campaign/guildSeenDiscordUsers.js");
+
+    upsertGuildSeenDiscordUser({ guildId, discordUserId: "known-user", nickname: "Known", seenAtMs: 1 });
+
+    await setAuth({ userId: dmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+
+    const first = await createWebRegistryEntry({
+      campaignSlug,
+      body: {
+        category: "pcs",
+        canonicalName: "Minx",
+        aliases: [],
+        notes: "",
+        discordUserId: "known-user",
+      },
+    });
+    const second = await createWebRegistryEntry({
+      campaignSlug,
+      body: {
+        category: "pcs",
+        canonicalName: "Kenan",
+        aliases: [],
+        notes: "",
+        discordUserId: "known-user",
+      },
+    });
+
+    const minxId = first.categories.pcs.find((entry) => entry.canonicalName === "Minx")?.id;
+    const kenanId = second.categories.pcs.find((entry) => entry.canonicalName === "Kenan")?.id;
+    expect(minxId).toBeTruthy();
+    expect(kenanId).toBeTruthy();
+
+    await deleteWebRegistryEntry({
+      campaignSlug,
+      entryId: String(minxId),
+      category: "pcs",
+      searchParams: { guild_id: guildId },
+    });
+
+    const snapshot = await getWebRegistrySnapshot({ campaignSlug, searchParams: { guild_id: guildId } });
+    expect(snapshot.categories.pcs.find((entry) => entry.id === minxId)).toBeUndefined();
+    expect(snapshot.categories.pcs.find((entry) => entry.id === kenanId)?.canonicalName).toBe("Kenan");
+  });
+
+  test("registry delete returns a safe not-found error for missing entries", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-web-pc-delete-missing-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const guildId = "guild-1";
+    const dmUserId = "dm-1";
+    const campaignSlug = await setupCampaign({
+      guildId,
+      dmUserId,
+      campaignName: makeUniqueCampaignName("Compendium Epsilon", tempDir),
+    });
+
+    const { deleteWebRegistryEntry } = await import("../../apps/web/lib/server/registryService");
+
+    await setAuth({ userId: dmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+
+    await expect(
+      deleteWebRegistryEntry({
+        campaignSlug,
+        entryId: "pc_missing",
+        category: "pcs",
+        searchParams: { guild_id: guildId },
+      })
+    ).rejects.toMatchObject({ code: "not_found", status: 404 });
   });
 });

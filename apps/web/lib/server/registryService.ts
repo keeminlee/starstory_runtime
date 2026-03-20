@@ -17,6 +17,7 @@ import {
   getGuildSeenDiscordUser,
   listGuildSeenDiscordUsers,
 } from "../../../../src/campaign/guildSeenDiscordUsers";
+import { getDbForCampaignScope } from "../../../../src/db";
 import { normKey } from "../../../../src/registry/loadRegistry";
 import {
   addAliasIfMissing,
@@ -24,6 +25,7 @@ import {
   createRegistryEntry,
   removePendingAtIndex,
 } from "../../../../src/registry/reviewNamesCore";
+import { getSessionSpeakerAttributionState } from "../../../../src/sessions/sessionSpeakerAttribution";
 import type { Faction, Location, Misc } from "../../../../src/registry/types";
 import { ensureRegistryScaffold, getRegistryDirForCampaign, getRegistryDirForScope } from "../../../../src/registry/scaffold";
 
@@ -395,24 +397,6 @@ function resolveValidatedPcDiscordUserId(args: {
   return discordUserId;
 }
 
-function assertPcDiscordUserIsAvailable(args: {
-  scope: RegistryScope;
-  discordUserId: string;
-  currentEntityId?: string;
-}): void {
-  const existingPc = loadRegistryIndex(args.scope).categories.pcs.find((entry) =>
-    entry.discordUserId === args.discordUserId && entry.id !== args.currentEntityId
-  );
-
-  if (existingPc) {
-    throw new WebDataError(
-      "conflict",
-      409,
-      `Discord user is already linked to PC '${existingPc.canonicalName}'. Select the existing PC instead.`
-    );
-  }
-}
-
 function assertNameCollision(
   scope: RegistryScope,
   input: {
@@ -435,6 +419,49 @@ function assertNameCollision(
     }
 
     throw new WebDataError("conflict", 409, `Registry name conflict for '${name}'.`);
+  }
+}
+
+function assertRegistryEntryDeleteSafe(args: {
+  guildId: string;
+  campaignSlug: string;
+  entryId: string;
+  category: RegistryCategoryKey;
+}): void {
+  if (args.category !== "pcs") {
+    return;
+  }
+
+  const db = getDbForCampaignScope({ guildId: args.guildId, campaignSlug: args.campaignSlug });
+  const rows = db.prepare(
+    `SELECT DISTINCT session_id
+     FROM session_speaker_classifications
+     WHERE guild_id = ?
+       AND campaign_slug = ?
+       AND pc_entity_id = ?
+     ORDER BY classified_at_ms DESC`
+  ).all(args.guildId, args.campaignSlug, args.entryId) as Array<{ session_id: string }>;
+
+  for (const row of rows) {
+    try {
+      const state = getSessionSpeakerAttributionState({
+        guildId: args.guildId,
+        campaignSlug: args.campaignSlug,
+        sessionId: row.session_id,
+      });
+      const isStillSelected = state.speakers.some((speaker) => speaker.classification?.pcEntityId === args.entryId);
+      if (isStillSelected && state.pendingCount > 0) {
+        throw new WebDataError(
+          "conflict",
+          409,
+          `Registry entry is still selected in pending speaker attribution for session '${row.session_id}'. Clear or finish that attribution before deleting it.`
+        );
+      }
+    } catch (error) {
+      if (error instanceof WebDataError) {
+        throw error;
+      }
+    }
   }
 }
 
@@ -528,9 +555,6 @@ export function createRegistryEntryForResolvedScope(args: {
     const pcDiscordUserId = category === "pcs"
       ? resolveValidatedPcDiscordUserId({ guildId: args.guildId, submittedDiscordUserId: args.body.discordUserId })
       : undefined;
-    if (category === "pcs" && pcDiscordUserId) {
-      assertPcDiscordUserIsAvailable({ scope, discordUserId: pcDiscordUserId });
-    }
     const created = createRegistryEntry({
       prefix: category === "pcs" ? "pc" : "npc",
       canonicalName,
@@ -668,11 +692,6 @@ export function updateRegistryEntryForResolvedScope(args: {
       submittedDiscordUserId: args.body.discordUserId,
       existingDiscordUserId: current.discord_user_id,
     });
-    assertPcDiscordUserIsAvailable({
-      scope,
-      discordUserId: nextDiscordUserId,
-      currentEntityId: args.entryId,
-    });
     updated.discord_user_id = nextDiscordUserId;
   } else {
     delete updated.discord_user_id;
@@ -714,6 +733,13 @@ export function deleteRegistryEntryForResolvedScope(args: {
   if (index < 0) {
     throw new WebDataError("not_found", 404, `Registry entry not found: ${args.entryId}`);
   }
+
+  assertRegistryEntryDeleteSafe({
+    guildId: args.guildId,
+    campaignSlug: args.campaignSlug,
+    entryId: args.entryId,
+    category: args.category,
+  });
 
   list.splice(index, 1);
   writeCategoryDoc(scope, args.category, doc);
