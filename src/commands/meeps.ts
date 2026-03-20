@@ -40,10 +40,14 @@ function resolvePcFromUser(
   scope: { guildId: string; campaignSlug: string }
 ): { canonical_name: string; discord_user_id: string } | null {
   const registry = loadRegistryForScope(scope);
-  const pc = registry.byDiscordUserId.get(user.id);
-  if (!pc) {
+  const pcs = registry.byDiscordUserId.get(user.id) ?? [];
+  if (pcs.length !== 1) {
+    if (pcs.length > 1) {
+      meepsLog.warn(`Ambiguous PC mapping for discord_user_id=${user.id}; meep commands require an explicit beneficiary.`);
+    }
     return null;
   }
+  const [pc] = pcs;
   return {
     canonical_name: pc.canonical_name,
     discord_user_id: pc.discord_user_id!,

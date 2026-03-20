@@ -89,6 +89,28 @@ function hasIncompleteRows(state: SessionSpeakerAttributionState, drafts: Record
   });
 }
 
+function formatPcOptionLabel(args: {
+  canonicalName: string;
+  discordUserId: string | null;
+  duplicateOwnerCount: number;
+  currentSpeakerDiscordUserId: string;
+  currentSpeakerDisplayName: string;
+}): string {
+  if (args.duplicateOwnerCount <= 1) {
+    return args.canonicalName;
+  }
+
+  if (args.discordUserId === args.currentSpeakerDiscordUserId) {
+    return `${args.canonicalName} - played by ${args.currentSpeakerDisplayName}`;
+  }
+
+  if (args.discordUserId) {
+    return `${args.canonicalName} - player ${args.discordUserId}`;
+  }
+
+  return args.canonicalName;
+}
+
 export function SpeakerAttributionPanel({
   sessionId,
   campaignSlug,
@@ -103,6 +125,14 @@ export function SpeakerAttributionPanel({
   const [banner, setBanner] = useState<BannerState>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const duplicatePcOwnerCounts = attribution.availablePcs.reduce((counts, pc) => {
+    if (!pc.discordUserId) {
+      return counts;
+    }
+
+    counts.set(pc.discordUserId, (counts.get(pc.discordUserId) ?? 0) + 1);
+    return counts;
+  }, new Map<string, number>());
 
   useEffect(() => {
     setAttribution(initialState);
@@ -266,7 +296,13 @@ export function SpeakerAttributionPanel({
                         <option value="">Select PC</option>
                         {attribution.availablePcs.map((pc) => (
                           <option key={pc.id} value={pc.id}>
-                            {pc.canonicalName}
+                            {formatPcOptionLabel({
+                              canonicalName: pc.canonicalName,
+                              discordUserId: pc.discordUserId,
+                              duplicateOwnerCount: pc.discordUserId ? (duplicatePcOwnerCounts.get(pc.discordUserId) ?? 0) : 0,
+                              currentSpeakerDiscordUserId: speaker.discordUserId,
+                              currentSpeakerDisplayName: speaker.displayName,
+                            })}
                           </option>
                         ))}
                         <option value={CREATE_PC_OPTION}>Create new PC</option>

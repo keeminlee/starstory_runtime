@@ -115,7 +115,7 @@ export function loadRegistry(opts?: {
 
   // Validate and index characters
   const byId = new Map<string, Entity>();
-  const byDiscordUserId = new Map<string | undefined, Character>();
+  const byDiscordUserId = new Map<string, Character[]>();
   const byName = new Map<string, Entity>();
   const allEntities: Entity[] = [];
 
@@ -130,10 +130,9 @@ export function loadRegistry(opts?: {
     if (byId.has(char.id)) throw new Error(`Duplicate id: ${char.id}`);
 
     if (char.type === "pc" && char.discord_user_id) {
-      if (byDiscordUserId.has(char.discord_user_id)) {
-        throw new Error(`Duplicate discord_user_id: ${char.discord_user_id}`);
-      }
-      byDiscordUserId.set(char.discord_user_id, char);
+      const ownedCharacters = byDiscordUserId.get(char.discord_user_id) ?? [];
+      ownedCharacters.push(char);
+      byDiscordUserId.set(char.discord_user_id, ownedCharacters);
     }
 
     if (char.type === "pc" && !char.discord_user_id) {
@@ -320,8 +319,8 @@ export function loadRegistryForScope(
 export function findByDiscordUserId(
   registry: LoadedRegistry,
   id: string
-): Character | undefined {
-  return registry.byDiscordUserId.get(id);
+): Character[] {
+  return registry.byDiscordUserId.get(id) ?? [];
 }
 
 /**

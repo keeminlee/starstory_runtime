@@ -4,6 +4,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import {
   applyCampaignRegistryPendingActionApi,
   createCampaignRegistryEntryApi,
+  deleteCampaignRegistryEntryApi,
   getEntityAppearancesApi,
   updateCampaignRegistryEntryApi,
 } from "@/lib/api/registry";
@@ -291,6 +292,25 @@ export function CampaignRegistryManager({
     }, `Updated ${canonicalName || entity.canonicalName}.`);
 
     setEditingEntryId(null);
+  }
+
+  async function handleDeleteEntry(entity: RegistryEntityDto) {
+    if (!window.confirm("Delete this registry entry?\nThis removes it from the campaign compendium.")) {
+      return;
+    }
+
+    await withUpdate(async () => {
+      const response = await deleteCampaignRegistryEntryApi(
+        campaignSlug,
+        entity.id,
+        { category: entity.category },
+        scopedSearchParams,
+      );
+      return response.registry;
+    }, `Deleted ${entity.canonicalName}.`);
+
+    setEditingEntryId((current) => current === entity.id ? null : current);
+    setExpandedAppearanceId((current) => current === entity.id ? null : current);
   }
 
   async function handlePendingAccept(key: string, category: RegistryCategoryKey) {
@@ -650,6 +670,7 @@ export function CampaignRegistryManager({
                           {expandedAppearanceId === entity.id ? "Hide Chronicle" : "Chronicle"}
                         </button>
                         <button type="button" disabled={isPending || !isEditable} onClick={() => setEditingEntryId(entity.id)} className="control-button-ghost rounded-full px-3 py-1 text-xs uppercase tracking-wider">Edit</button>
+                        <button type="button" disabled={isPending || !isEditable} onClick={() => handleDeleteEntry(entity)} className="control-button-danger rounded-full px-3 py-1 text-xs uppercase tracking-wider">Delete</button>
                       </div>
                     </div>
                     {expandedAppearanceId === entity.id ? (

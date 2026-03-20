@@ -327,3 +327,58 @@ test("registry scope paths remain rooted at repo data when cwd is apps/web", () 
     process.chdir(originalCwd);
   }
 });
+
+test("speaker attribution accepts duplicate-owned PCs and preserves the selected pcEntityId", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-session-speaker-duplicate-owner-"));
+  tempDirs.push(tempDir);
+  configureHermeticEnv(tempDir);
+
+  const guildId = "guild-speaker-duplicate-owner";
+  const sessionId = "session-speaker-duplicate-owner";
+  const campaignSlug = "default";
+  await seedSessionFixture(guildId, sessionId, campaignSlug);
+
+  const registryDir = getRegistryDirForScope({ guildId, campaignSlug });
+  ensureRegistryScaffold(registryDir);
+  fs.writeFileSync(
+    path.join(registryDir, "pcs.yml"),
+    [
+      "version: 1",
+      "",
+      "characters:",
+      "  - id: pc_minx",
+      "    canonical_name: Minx",
+      "    aliases: []",
+      "    discord_user_id: player-1",
+      "    notes: Warlock",
+      "  - id: pc_kenan",
+      "    canonical_name: Kenan",
+      "    aliases: []",
+      "    discord_user_id: player-1",
+      "    notes: Fighter",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+
+  const { loadRegistryForScope } = await import("../registry/loadRegistry.js");
+  const { setGuildDmUserId } = await import("../campaign/guildConfig.js");
+  const {
+    getSessionSpeakerClassifications,
+    setSessionSpeakerClassifications,
+  } = await import("../sessions/sessionSpeakerAttribution.js");
+
+  const registry = loadRegistryForScope({ guildId, campaignSlug });
+  expect(registry.byDiscordUserId.get("player-1")?.map((pc) => pc.canonical_name)).toEqual(["Minx", "Kenan"]);
+
+  setGuildDmUserId(guildId, "dm-1");
+  setSessionSpeakerClassifications({
+    guildId,
+    campaignSlug,
+    sessionId,
+    entries: [{ discordUserId: "player-1", classificationType: "pc", pcEntityId: "pc_kenan" }],
+  });
+
+  const stored = getSessionSpeakerClassifications({ guildId, campaignSlug, sessionId });
+  expect(stored[0]?.pcEntityId).toBe("pc_kenan");
+});

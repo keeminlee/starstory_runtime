@@ -69,6 +69,10 @@ export type RegistryUpdateEntryRequest =
       discordUserId?: never;
     };
 
+export type RegistryDeleteEntryRequest = {
+  category: RegistryCategoryKey;
+};
+
 export type RegistryPendingActionRequest =
   | {
       action: "accept";

@@ -28,8 +28,14 @@ function resolvePcFromUser(
 ): { canonical_name: string; discord_user_id: string } | null {
   try {
     const registry = loadRegistryForScope(scope);
-    const pc = registry.byDiscordUserId.get(user.id);
-    if (!pc) return null;
+    const pcs = registry.byDiscordUserId.get(user.id) ?? [];
+    if (pcs.length !== 1) {
+      if (pcs.length > 1) {
+        missionsLog.warn(`Ambiguous PC mapping for discord_user_id=${user.id}; mission beneficiary resolution requires explicit session attribution.`);
+      }
+      return null;
+    }
+    const [pc] = pcs;
     return { canonical_name: pc.canonical_name, discord_user_id: pc.discord_user_id! };
   } catch {
     return null;

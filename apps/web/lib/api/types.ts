@@ -10,6 +10,7 @@ import type {
 } from "@/lib/types";
 import type {
   RegistryCreateEntryRequest,
+  RegistryDeleteEntryRequest,
   RegistryPendingActionRequest,
   SeenDiscordUserOption,
   RegistrySnapshotDto,
@@ -86,6 +87,8 @@ export type CampaignSeenDiscordUsersResponse = {
 export type RegistryCreateEntryApiRequest = RegistryCreateEntryRequest;
 
 export type RegistryUpdateEntryApiRequest = RegistryUpdateEntryRequest;
+
+export type RegistryDeleteEntryApiRequest = RegistryDeleteEntryRequest;
 
 export type RegistryPendingActionApiRequest = RegistryPendingActionRequest;
 

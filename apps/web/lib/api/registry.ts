@@ -4,6 +4,7 @@ import type {
   CampaignSeenDiscordUsersResponse,
   EntityAppearancesResponse,
   RegistryCreateEntryApiRequest,
+  RegistryDeleteEntryApiRequest,
   RegistryPendingActionApiRequest,
   RegistryUpdateEntryApiRequest,
 } from "@/lib/api/types";
@@ -71,6 +72,22 @@ export async function updateCampaignRegistryEntryApi(
     `/api/campaigns/${encodeURIComponent(campaignSlug)}/registry/entries/${encodeURIComponent(entryId)}`,
     {
       method: "PATCH",
+      body,
+      query: toQuery(searchParams),
+    }
+  );
+}
+
+export async function deleteCampaignRegistryEntryApi(
+  campaignSlug: string,
+  entryId: string,
+  body: RegistryDeleteEntryApiRequest,
+  searchParams?: QueryInput
+): Promise<CampaignRegistryResponse> {
+  return fetchJson<CampaignRegistryResponse>(
+    `/api/campaigns/${encodeURIComponent(campaignSlug)}/registry/entries/${encodeURIComponent(entryId)}`,
+    {
+      method: "DELETE",
       body,
       query: toQuery(searchParams),
     }
