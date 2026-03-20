@@ -220,4 +220,56 @@ describe("compendium PC discord-user validation", () => {
       })
     ).rejects.toMatchObject({ code: "invalid_request", status: 422 });
   });
+
+  test("PC writes reject duplicate discord-user ownership before mutating the registry", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-web-pc-duplicate-user-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const guildId = "guild-1";
+    const dmUserId = "dm-1";
+    const campaignSlug = await setupCampaign({
+      guildId,
+      dmUserId,
+      campaignName: makeUniqueCampaignName("Compendium Gamma", tempDir),
+    });
+
+    const {
+      createWebRegistryEntry,
+      getWebRegistrySnapshot,
+    } = await import("../../apps/web/lib/server/registryService");
+    const { upsertGuildSeenDiscordUser } = await import("../campaign/guildSeenDiscordUsers.js");
+
+    upsertGuildSeenDiscordUser({ guildId, discordUserId: "known-user", nickname: "Known", seenAtMs: 1 });
+
+    await setAuth({ userId: dmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+
+    await createWebRegistryEntry({
+      campaignSlug,
+      body: {
+        category: "pcs",
+        canonicalName: "Minx",
+        aliases: [],
+        notes: "",
+        discordUserId: "known-user",
+      },
+    });
+
+    await expect(
+      createWebRegistryEntry({
+        campaignSlug,
+        body: {
+          category: "pcs",
+          canonicalName: "Kenan",
+          aliases: [],
+          notes: "",
+          discordUserId: "known-user",
+        },
+      })
+    ).rejects.toMatchObject({ code: "conflict", status: 409 });
+
+    const snapshot = await getWebRegistrySnapshot({ campaignSlug, searchParams: { guild_id: guildId } });
+    expect(snapshot.categories.pcs.filter((entry) => entry.discordUserId === "known-user")).toHaveLength(1);
+    expect(snapshot.categories.pcs.find((entry) => entry.discordUserId === "known-user")?.canonicalName).toBe("Minx");
+  });
 });

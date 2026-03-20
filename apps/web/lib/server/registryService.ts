@@ -395,6 +395,24 @@ function resolveValidatedPcDiscordUserId(args: {
   return discordUserId;
 }
 
+function assertPcDiscordUserIsAvailable(args: {
+  scope: RegistryScope;
+  discordUserId: string;
+  currentEntityId?: string;
+}): void {
+  const existingPc = loadRegistryIndex(args.scope).categories.pcs.find((entry) =>
+    entry.discordUserId === args.discordUserId && entry.id !== args.currentEntityId
+  );
+
+  if (existingPc) {
+    throw new WebDataError(
+      "conflict",
+      409,
+      `Discord user is already linked to PC '${existingPc.canonicalName}'. Select the existing PC instead.`
+    );
+  }
+}
+
 function assertNameCollision(
   scope: RegistryScope,
   input: {
@@ -510,6 +528,9 @@ export function createRegistryEntryForResolvedScope(args: {
     const pcDiscordUserId = category === "pcs"
       ? resolveValidatedPcDiscordUserId({ guildId: args.guildId, submittedDiscordUserId: args.body.discordUserId })
       : undefined;
+    if (category === "pcs" && pcDiscordUserId) {
+      assertPcDiscordUserIsAvailable({ scope, discordUserId: pcDiscordUserId });
+    }
     const created = createRegistryEntry({
       prefix: category === "pcs" ? "pc" : "npc",
       canonicalName,
@@ -642,11 +663,17 @@ export function updateRegistryEntryForResolvedScope(args: {
   };
 
   if (category === "pcs") {
-    updated.discord_user_id = resolveValidatedPcDiscordUserId({
+    const nextDiscordUserId = resolveValidatedPcDiscordUserId({
       guildId: args.guildId,
       submittedDiscordUserId: args.body.discordUserId,
       existingDiscordUserId: current.discord_user_id,
     });
+    assertPcDiscordUserIsAvailable({
+      scope,
+      discordUserId: nextDiscordUserId,
+      currentEntityId: args.entryId,
+    });
+    updated.discord_user_id = nextDiscordUserId;
   } else {
     delete updated.discord_user_id;
   }

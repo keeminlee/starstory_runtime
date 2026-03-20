@@ -571,6 +571,66 @@ describe("Phase 5.5 recap source visibility", () => {
     );
   });
 
+  test("speaker attribution inline PC creation rejects duplicate discord-user ownership without corrupting the registry", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-phase55-speaker-inline-duplicate-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    const guildId = "guild-1";
+    const dmUserId = "dm-1";
+    const playerUserId = "player-1";
+    const { campaignSlug, sessionId } = await setupGuildCampaignAndSession({ guildId, dmUserId, playerUserId });
+    await seedSessionTranscript({ guildId, campaignSlug, sessionId, playerUserId, dmUserId });
+
+    const { upsertGuildSeenDiscordUser } = await import("../campaign/guildSeenDiscordUsers.js");
+    const { createWebRegistryEntry, getWebRegistrySnapshot } = await import("../../apps/web/lib/server/registryService");
+    const { saveSessionSpeakerAttributionBatch } = await import("../../apps/web/lib/server/sessionSpeakerAttributionService");
+
+    upsertGuildSeenDiscordUser({
+      guildId,
+      discordUserId: playerUserId,
+      nickname: "Jamison",
+      username: "jamison",
+      seenAtMs: Date.now(),
+    });
+
+    await setAuth({ userId: dmUserId, guilds: [{ id: guildId, name: "Guild One" }] });
+
+    await createWebRegistryEntry({
+      campaignSlug,
+      body: {
+        category: "pcs",
+        canonicalName: "Minx",
+        aliases: [],
+        notes: "",
+        discordUserId: playerUserId,
+      },
+    });
+
+    await expect(
+      saveSessionSpeakerAttributionBatch({
+        guildId,
+        campaignSlug,
+        sessionId,
+        payload: {
+          entries: [
+            {
+              discordUserId: playerUserId,
+              classificationType: "pc",
+              createPc: {
+                canonicalName: "Kenan",
+              },
+            },
+          ],
+        },
+      })
+    ).rejects.toMatchObject({ code: "conflict", status: 409 });
+
+    const snapshot = await getWebRegistrySnapshot({ campaignSlug, searchParams: { guild_id: guildId } });
+    expect(snapshot.categories.pcs.filter((entry) => entry.discordUserId === playerUserId)).toHaveLength(1);
+    expect(snapshot.categories.pcs.find((entry) => entry.discordUserId === playerUserId)?.canonicalName).toBe("Minx");
+  });
+
   test("session detail returns to pending attribution when a stored PC mapping disappears from registry", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-phase55-speaker-stale-pc-"));
     tempDirs.push(tempDir);
