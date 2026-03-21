@@ -6,8 +6,10 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 process.env.DISCORD_TOKEN ??= "test-token";
 
 const tempDirs: string[] = [];
+const originalCwd = process.cwd();
 
 function configureHermeticEnv(tempDir: string): void {
+  vi.stubEnv("MEEPO_ENV_POLICY_MODE", "");
   vi.stubEnv("DATA_ROOT", tempDir);
   vi.stubEnv("DATA_CAMPAIGNS_DIR", "campaigns");
   vi.stubEnv("DATA_DB_FILENAME", "db.sqlite");
@@ -18,6 +20,7 @@ function configureHermeticEnv(tempDir: string): void {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.resetModules();
+  process.chdir(originalCwd);
 
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
@@ -32,6 +35,7 @@ afterEach(() => {
 
 describe("provider config foundations", () => {
   test("parses provider defaults and optional secret env keys", async () => {
+    vi.stubEnv("MEEPO_ENV_POLICY_MODE", "");
     vi.stubEnv("DISCORD_TOKEN", "discord-test-token");
     vi.stubEnv("OPENAI_API_KEY", "");
     vi.stubEnv("OPENAI_MODEL", "gpt-4o");
@@ -119,5 +123,20 @@ describe("provider config foundations", () => {
     expect(resolveRuntimeSttProvider()).toBe("debug");
     expect(resolveRuntimeSttProvider("guild-2")).toBe("whisper");
     expect(resolveRuntimeLlmProvider("guild-2")).toBe("google");
+  });
+
+  test("web consumer does not require discord token", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-provider-web-config-"));
+    tempDirs.push(tempDir);
+    configureHermeticEnv(tempDir);
+
+    vi.stubEnv("DISCORD_TOKEN", "");
+    process.chdir(path.join(originalCwd, "apps", "web"));
+
+    const { loadConfig } = await import("../config/env.js");
+    const cfg = loadConfig();
+
+    expect(cfg.envPolicy.consumer).toBe("web");
+    expect(cfg.discord.token).toBe("");
   });
 });
