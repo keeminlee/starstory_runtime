@@ -56,7 +56,7 @@ jobs:
           APP_DIR="/home/meepo/meepo-bot"
           ssh -p "${{ secrets.EC2_PORT }}" \
             "${{ secrets.EC2_SSH_USER }}@${{ secrets.EC2_SSH_HOST }}" \
-            "mkdir -p ~/.ssh; chmod 700 ~/.ssh; ssh-keyscan github.com >> ~/.ssh/known_hosts; chmod 644 ~/.ssh/known_hosts; git config --global --add safe.directory $APP_DIR; APP_DIR=$APP_DIR /bin/bash $APP_DIR/deploy/ec2/deploy-meepo.sh"
+            "git -C $APP_DIR remote set-url origin https://github.com/keeminlee/starstory.git; git config --global --add safe.directory $APP_DIR; APP_DIR=$APP_DIR /bin/bash $APP_DIR/deploy/ec2/deploy-meepo.sh"
 
       - name: Deploy Discord commands
         run: |
