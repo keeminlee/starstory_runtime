@@ -63,4 +63,4 @@ jobs:
           APP_DIR="/home/meepo/meepo-bot"
           ssh -p "${{ secrets.EC2_PORT }}" \
             "${{ secrets.EC2_SSH_USER }}@${{ secrets.EC2_SSH_HOST }}" \
-            "set -a; . /etc/meepo/meepo-bot.env; if [ -f /etc/meepo/meepo-web.env ]; then . /etc/meepo/meepo-web.env; fi; set +a; cd $APP_DIR && npm run deploy:commands"
+            "sudo bash -lc 'set -a; . /etc/meepo/meepo-bot.env; if [ -f /etc/meepo/meepo-web.env ]; then . /etc/meepo/meepo-web.env; fi; set +a; cd $APP_DIR && npm run deploy:commands'"

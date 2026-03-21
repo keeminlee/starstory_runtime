@@ -33,7 +33,7 @@ This note covers the remaining production-side work after the repo change that a
 - Discord global command propagation may still take a short period after a successful deploy.
 - The production deploy flow is documented in `docs/runtime/ops/DEPLOY_FLOW.md`.
 - This workflow change does not replace the broader public-host and OAuth cutover work tracked in `docs/product/external-cutover-handoff.md`.
-- Manual fallback remains available: SSH to the host, source `/etc/meepo/meepo-bot.env`, then run `npm run deploy:commands` from `APP_DIR`.
+- Manual fallback remains available: SSH to the host, then run `sudo bash -lc 'set -a; . /etc/meepo/meepo-bot.env; if [ -f /etc/meepo/meepo-web.env ]; then . /etc/meepo/meepo-web.env; fi; set +a; cd /home/meepo/meepo-bot && npm run deploy:commands'`.
 
 ## Rollback
 

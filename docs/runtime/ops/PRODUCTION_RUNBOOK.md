@@ -155,11 +155,7 @@ Symptoms:
 Recovery:
 
 ```bash
-cd /home/meepo/meepo-bot
-set -a
-. /etc/meepo/meepo-bot.env
-set +a
-npm run deploy:commands
+sudo bash -lc 'set -a; . /etc/meepo/meepo-bot.env; if [ -f /etc/meepo/meepo-web.env ]; then . /etc/meepo/meepo-web.env; fi; set +a; cd /home/meepo/meepo-bot && npm run deploy:commands'
 ```
 
 ### Service Restart Failure
