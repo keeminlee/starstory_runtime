@@ -1,7 +1,35 @@
-import "dotenv/config";
+import fs from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { parse as parseDotenv } from "dotenv";
 import { REST, Routes } from "discord.js";
-import { devGuildCommands, globalCommands } from "./index.js";
 import { getEnv } from "../config/rawEnv.js";
+
+const DEFAULT_ENV_FILES = [
+  path.resolve(process.cwd(), ".env"),
+  process.env.MEEPO_BOT_ENV_FILE?.trim() || "/etc/meepo/meepo-bot.env",
+  process.env.MEEPO_WEB_ENV_FILE?.trim() || "/etc/meepo/meepo-web.env",
+];
+
+function loadEnvFile(filePath: string): void {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return;
+  }
+  const parsed = parseDotenv(fs.readFileSync(filePath, "utf8"));
+  for (const [key, value] of Object.entries(parsed)) {
+    const current = process.env[key];
+    if (current !== undefined && current.trim() !== "") {
+      continue;
+    }
+    process.env[key] = value;
+  }
+}
+
+export function bootstrapDeployEnv(envFiles: string[] = DEFAULT_ENV_FILES): void {
+  for (const envFile of envFiles) {
+    loadEnvFile(envFile);
+  }
+}
 
 function resolveApplicationId(): string {
   const appId = getEnv("DISCORD_APPLICATION_ID") ?? getEnv("DISCORD_CLIENT_ID");
@@ -26,6 +54,9 @@ function getDiscordErrorCode(error: unknown): number | null {
 }
 
 export async function main(): Promise<void> {
+  bootstrapDeployEnv();
+
+  const { devGuildCommands, globalCommands } = await import("./index.js");
   const token = getEnv("DISCORD_TOKEN");
   if (!token) {
     throw new Error("Missing env var: DISCORD_TOKEN");
@@ -64,7 +95,11 @@ export async function main(): Promise<void> {
   console.log("[deploy-commands] deployment complete");
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+const entryFile = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : "";
+
+if (import.meta.url === entryFile) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

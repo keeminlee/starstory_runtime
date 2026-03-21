@@ -117,6 +117,7 @@ export default defineConfig({
       "src/tests/test-web-scope-guards.ts",
       "src/tests/test-guild-seen-discord-users.ts",
       "src/tests/test-env-policy.ts",
+      "src/tests/test-deploy-commands-env.ts",
       "src/tests/test-provider-config-foundations.ts",
       "src/tests/test-provider-adapters.ts",
       "src/tests/test-web-provider-settings.ts",
