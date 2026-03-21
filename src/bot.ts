@@ -62,6 +62,10 @@ const overlayLog = log.withScope("overlay");
 const textReplyLog = log.withScope("text-reply");
 const recallLog = log.withScope("recall");
 
+if (!cfg.discord.token.trim()) {
+  throw new Error("Missing required env var: DISCORD_TOKEN");
+}
+
 const TEXT_STOP_PHRASES = new Set<string>([
   "meepo stop",
   "meepo shush",

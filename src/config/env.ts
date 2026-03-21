@@ -25,13 +25,6 @@ function optAny(names: string[]): string | undefined {
   return undefined;
 }
 
-function reqForConsumer(name: string, consumer: "runtime" | "web"): string {
-  if (consumer === "web") {
-    return opt(name) ?? "";
-  }
-  return req(name);
-}
-
 function optInt(name: string, def: number): number {
   const v = opt(name);
   if (!v) return def;
@@ -142,7 +135,7 @@ export function loadConfig(): Config {
     mode: enumOf<MeepoMode>("MEEPO_MODE", ["canon", "ambient", "lab", "dormant"] as const, "ambient"),
 
     discord: {
-      token: reqForConsumer("DISCORD_TOKEN", envPolicy.consumer),
+      token: opt("DISCORD_TOKEN") ?? "",
       dmRoleId: opt("DM_ROLE_ID"),
       clientId: opt("DISCORD_CLIENT_ID"),
       guildId: opt("GUILD_ID"),
