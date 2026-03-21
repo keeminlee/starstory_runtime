@@ -131,7 +131,8 @@ describe("provider config foundations", () => {
     configureHermeticEnv(tempDir);
 
     vi.stubEnv("DISCORD_TOKEN", "");
-    process.chdir(path.join(originalCwd, "apps", "web"));
+    vi.stubEnv("MEEPO_ENV_POLICY_CONSUMER", "web");
+    process.chdir(originalCwd);
 
     const { loadConfig } = await import("../config/env.js");
     const cfg = loadConfig();

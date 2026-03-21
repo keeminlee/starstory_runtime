@@ -92,6 +92,23 @@ describe("env policy", () => {
     expect(env.OPENAI_API_KEY).toBe("test-openai-key");
   });
 
+  test("explicit web consumer override wins when cwd is repo root", () => {
+    const { repoRoot, webRoot } = makeTempRepo();
+
+    const snapshot = initializeEnvPolicy({
+      env: {
+        NODE_ENV: "production",
+        MEEPO_ENV_POLICY_CONSUMER: "web",
+      } as NodeJS.ProcessEnv,
+      cwd: repoRoot,
+      repoRoot,
+      webRoot,
+      forceReload: true,
+    });
+
+    expect(snapshot.consumer).toBe("web");
+  });
+
   test("startup diagnostics expose fingerprints without leaking full secrets", () => {
     const { repoRoot, webRoot } = makeTempRepo();
     const secret = "sk-production-secret-1234";

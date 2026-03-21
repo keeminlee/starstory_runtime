@@ -78,7 +78,12 @@ function resolveMode(env: NodeJS.ProcessEnv): EnvPolicyMode {
   return "development-dotenv";
 }
 
-function resolveConsumer(cwd: string, webRoot: string): EnvPolicyConsumer {
+function resolveConsumer(env: NodeJS.ProcessEnv, cwd: string, webRoot: string): EnvPolicyConsumer {
+  const explicit = env.MEEPO_ENV_POLICY_CONSUMER?.trim();
+  if (explicit === "runtime" || explicit === "web") {
+    return explicit;
+  }
+
   const normalizedCwd = normalizeForCompare(cwd);
   const normalizedWebRoot = normalizeForCompare(webRoot);
   return normalizedCwd === normalizedWebRoot || normalizedCwd.startsWith(`${normalizedWebRoot}/`)
@@ -185,7 +190,7 @@ export function initializeEnvPolicy(options: InitializeEnvPolicyOptions = {}): E
   const cwd = options.cwd ?? process.cwd();
   const repoRoot = options.repoRoot ?? DEFAULT_REPO_ROOT;
   const webRoot = options.webRoot ?? DEFAULT_WEB_ROOT;
-  const consumer = options.consumer ?? resolveConsumer(cwd, webRoot);
+  const consumer = options.consumer ?? resolveConsumer(env, cwd, webRoot);
   const mode = options.mode ?? resolveMode(env);
   const cacheKey = [mode, consumer, normalizeForCompare(cwd), normalizeForCompare(repoRoot), normalizeForCompare(webRoot)].join("|");
 

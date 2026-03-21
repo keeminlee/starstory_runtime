@@ -9,6 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../..");
 
 const webEnvDiagnostics = enforceWebEnvPolicy();
+process.env.MEEPO_ENV_POLICY_CONSUMER = "web";
 
 if (process.env.NODE_ENV === "production") {
   console.info("[web-env-policy] Startup diagnostics", webEnvDiagnostics);
