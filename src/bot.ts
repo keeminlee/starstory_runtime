@@ -1,4 +1,3 @@
-import "dotenv/config";
 import { Client, GatewayIntentBits } from "discord.js";
 import { log } from "./utils/logger.js";
 import { registerHandlers } from "./commands/index.js";
@@ -176,6 +175,15 @@ bootLog.info("Process startup diagnostics", {
   ppid: process.ppid,
   node_version: process.version,
   meepo_mode: cfg.mode,
+  env_policy_mode: cfg.envPolicy.mode,
+  env_policy_consumer: cfg.envPolicy.consumer,
+  llm_provider: cfg.llm.provider,
+  stt_provider: cfg.stt.provider,
+  dotenv_detected: cfg.envPolicy.detectedFiles,
+  dotenv_loaded: cfg.envPolicy.loadedFiles,
+  dotenv_ignored: cfg.envPolicy.ignoredFiles,
+  dotenv_forbidden: cfg.envPolicy.forbiddenFiles,
+  env_key_state: cfg.envPolicy.secretState,
   build_marker: getEnv("MEEPO_BUILD_ID") ?? getEnv("npm_package_version") ?? "dev-local",
   started_at_ms: Date.now(),
 });

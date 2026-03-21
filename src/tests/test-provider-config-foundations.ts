@@ -42,6 +42,7 @@ describe("provider config foundations", () => {
     const { loadConfig } = await import("../config/env.js");
     const cfg = loadConfig();
 
+    expect(cfg.envPolicy.mode).toBe("test-hermetic");
     expect(cfg.stt.provider).toBe("whisper");
     expect(cfg.llm.provider).toBe("openai");
     expect(cfg.llm.openaiModel).toBe("gpt-4o");

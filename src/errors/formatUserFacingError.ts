@@ -5,6 +5,14 @@ const DEFAULT_USER_MESSAGE = "⚠️ Meepo stumbled while writing this memory.";
 
 export type UserFacingFailureClass = "retryable" | "corrective" | "internal";
 
+export type UserFacingErrorDiagnostics = {
+  provider?: string;
+  model?: string;
+  envKey?: string;
+  providerCode?: string;
+  status?: number;
+};
+
 type FailureContract = {
   message: string;
   failureClass: UserFacingFailureClass;
@@ -136,7 +144,47 @@ export type UserFacingErrorPayload = {
   retryable: boolean;
   correctiveActionRequired: boolean;
   trace_id?: string;
+  diagnostics?: UserFacingErrorDiagnostics;
 };
+
+function getErrorCause(err: unknown): unknown {
+  if (!err || typeof err !== "object" || !("cause" in err)) {
+    return undefined;
+  }
+  return (err as { cause?: unknown }).cause;
+}
+
+function findNestedMeepoError(err: unknown): MeepoError | null {
+  const visited = new Set<unknown>();
+  let current: unknown = err;
+
+  while (current && typeof current === "object" && !visited.has(current)) {
+    if (current instanceof MeepoError) {
+      return current;
+    }
+    visited.add(current);
+    current = getErrorCause(current);
+  }
+
+  return null;
+}
+
+function extractDiagnostics(err: MeepoError): UserFacingErrorDiagnostics | undefined {
+  const diagnostics: UserFacingErrorDiagnostics = {};
+  const provider = typeof err.metadata?.provider === "string" ? err.metadata.provider.trim() : "";
+  const model = typeof err.metadata?.model === "string" ? err.metadata.model.trim() : "";
+  const envKey = typeof err.metadata?.env_key === "string" ? err.metadata.env_key.trim() : "";
+  const providerCode = typeof err.metadata?.provider_code === "string" ? err.metadata.provider_code.trim() : "";
+  const status = Number(err.metadata?.status);
+
+  if (provider) diagnostics.provider = provider;
+  if (model) diagnostics.model = model;
+  if (envKey) diagnostics.envKey = envKey;
+  if (providerCode) diagnostics.providerCode = providerCode;
+  if (Number.isFinite(status)) diagnostics.status = status;
+
+  return Object.keys(diagnostics).length > 0 ? diagnostics : undefined;
+}
 
 function withRetryAfterIfPresent(message: string, err: MeepoError): string {
   const retryAfterSeconds = Number(err.metadata?.retry_after_seconds);
@@ -171,7 +219,7 @@ export function formatUserFacingError(
   ctx?: UserFacingErrorContext
 ): UserFacingErrorPayload {
   const obs = getObservabilityContext();
-  const known = err instanceof MeepoError ? err : toMeepoError(err, "ERR_UNKNOWN");
+  const known = err instanceof MeepoError ? err : findNestedMeepoError(err) ?? toMeepoError(err, "ERR_UNKNOWN");
 
   const traceId = ctx?.trace_id ?? known.trace_id ?? obs.trace_id;
   const contract = CODE_FAILURE_CONTRACTS[known.code];
@@ -187,6 +235,7 @@ export function formatUserFacingError(
 
   const contentLines = [resolvedMessage, `(${known.code})`];
   if (traceId) contentLines.push(`trace=${traceId}`);
+  const diagnostics = extractDiagnostics(known);
 
   return {
     content: contentLines.join("\n"),
@@ -195,5 +244,6 @@ export function formatUserFacingError(
     retryable,
     correctiveActionRequired,
     trace_id: traceId,
+    diagnostics,
   };
 }

@@ -281,6 +281,45 @@ function runNoRawEnv(): void {
   console.log("PASS: no process.env usage found in config-only runtime paths");
 }
 
+function runRuntimeDotenvBoundary(): void {
+  const srcFiles = getTsFilesUnder("src").filter((filePath) => {
+    const normalized = relativePath(filePath);
+    return !normalized.startsWith("src/tools/")
+      && !normalized.startsWith("src/tests/")
+        && normalized !== "src/commands/deploy-commands.ts"
+        && normalized !== "src/config/envPolicy.ts";
+  });
+  const webFiles = walkFiles(path.join(repoRoot, "apps", "web"))
+    .filter((filePath) => filePath.endsWith(".ts") || filePath.endsWith(".tsx") || filePath.endsWith(".mts") || filePath.endsWith(".cts"))
+    .filter((filePath) => {
+      const normalized = relativePath(filePath);
+      return !normalized.startsWith("apps/web/.next/") && !normalized.startsWith("apps/web/node_modules/");
+    });
+  const strictFiles = [...srcFiles, ...webFiles];
+
+  const dotenvImportMatches = findMatches(strictFiles, /import\s+["']dotenv\/config["']|from\s+["']dotenv["']/);
+  if (dotenvImportMatches.length > 0) {
+    failWithMatches(
+      "Forbidden runtime/web dotenv imports detected (first 20):",
+      dotenvImportMatches,
+      20,
+      "Runtime and web entrypoints must use src/config/envPolicy.ts instead of dotenv imports.",
+    );
+  }
+
+  const dotenvConfigMatches = findMatches(strictFiles, /dotenv\.config\s*\(|config\s*\([^\)]*override\s*:\s*true/i);
+  if (dotenvConfigMatches.length > 0) {
+    failWithMatches(
+      "Forbidden runtime/web dotenv config usage detected (first 20):",
+      dotenvConfigMatches,
+      20,
+      "Runtime and web entrypoints must not call dotenv.config() or enable override=true.",
+    );
+  }
+
+  console.log("PASS: runtime dotenv boundary");
+}
+
 function runRepoHygiene(): void {
   const violations: string[] = [];
 
@@ -313,6 +352,7 @@ const runners: Record<string, () => void> = {
   "runtime-scope-fallbacks": runRuntimeScopeFallbacks,
   "observability-runtime": runObservabilityRuntime,
   "no-raw-env": runNoRawEnv,
+  "runtime-dotenv-boundary": runRuntimeDotenvBoundary,
   "repo-hygiene": runRepoHygiene,
 };
 

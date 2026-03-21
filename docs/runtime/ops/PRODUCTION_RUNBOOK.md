@@ -120,6 +120,7 @@ Symptoms:
 - Web service fails immediately after restart.
 - Auth routing or callback behavior is inconsistent.
 - Command deploy fails with missing Discord credentials.
+- Startup logs report env-policy violations or forbidden dotenv files.
 
 Recovery:
 
@@ -127,12 +128,23 @@ Recovery:
 test -f /etc/meepo/meepo-bot.env
 test -f /etc/meepo/meepo-web.env
 /bin/bash /home/meepo/meepo-bot/deploy/ec2/auth-runtime-preflight.sh
+find /home/meepo/meepo-bot -maxdepth 3 \( -name .env -o -name .env.local \) -print
 ```
 
 Then confirm required keys exist.
 
 - Bot env: `DISCORD_TOKEN`, `DISCORD_APPLICATION_ID` or `DISCORD_CLIENT_ID`
 - Web env: `NODE_ENV`, `NEXTAUTH_URL`, `AUTH_URL`, `AUTH_TRUST_HOST`, `AUTH_SECRET`
+
+Production rule:
+- Host-injected env files under `/etc/meepo/*.env` are authoritative.
+- Repo-local `.env` and `.env.local` files must not exist in production runtime workspaces.
+- Bot/runtime code now defaults to `production-host` env policy mode when `NODE_ENV=production`.
+- For local non-production debugging only, you can temporarily set `MEEPO_ENV_POLICY_MODE=development-dotenv`.
+
+Startup diagnostics:
+- Bot and web startup now log env-policy diagnostics including mode, detected dotenv files, provider defaults, and safe key fingerprints/suffixes.
+- Use these diagnostics to confirm the process is reading host env only and not a stale repo-local override.
 
 ### Command Manifest Mismatch
 

@@ -90,4 +90,31 @@ describe("formatUserFacingError", () => {
     expect(payload.content).toContain("web app");
     expect(payload.content).toContain("/starstory showtime start");
   });
+
+  test("nested MeepoError cause preserves diagnostics and failure class", () => {
+    const inner = new MeepoError("ERR_LLM_RATE_LIMIT", {
+      trace_id: "trace-nested",
+      metadata: {
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        provider_code: "rate_limit_exceeded",
+        status: 429,
+      },
+    });
+    const outer = new Error("recap wrapper");
+    (outer as Error & { cause?: unknown }).cause = inner;
+
+    const payload = formatUserFacingError(outer);
+
+    expect(payload.code).toBe("ERR_LLM_RATE_LIMIT");
+    expect(payload.failureClass).toBe("retryable");
+    expect(payload.retryable).toBe(true);
+    expect(payload.content).toContain("trace=trace-nested");
+    expect(payload.diagnostics).toEqual({
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      providerCode: "rate_limit_exceeded",
+      status: 429,
+    });
+  });
 });

@@ -6,11 +6,30 @@ export type SttProvider = GuildSttProvider | "noop" | "debug";
 export type LlmProvider = "openai" | "anthropic" | "google";
 export type TtsProvider = "openai" | "noop";
 export type BargeInMode = "immediate" | "micro_confirm";
+export type EnvPolicyMode = "development-dotenv" | "production-host" | "test-hermetic";
+export type EnvPolicyConsumer = "runtime" | "web";
 
 export type MeepoMode = "canon" | "ambient" | "lab" | "dormant";
 
+export interface EnvPolicySecretDiagnostic {
+  present: boolean;
+  fingerprint?: string;
+  suffix?: string;
+}
+
+export interface EnvPolicySnapshot {
+  mode: EnvPolicyMode;
+  consumer: EnvPolicyConsumer;
+  detectedFiles: string[];
+  loadedFiles: string[];
+  ignoredFiles: string[];
+  forbiddenFiles: string[];
+  secretState: Record<string, EnvPolicySecretDiagnostic>;
+}
+
 export interface Config {
   mode: MeepoMode;
+  envPolicy: EnvPolicySnapshot;
 
   discord: {
     token: string;
