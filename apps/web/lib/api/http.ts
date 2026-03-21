@@ -13,12 +13,14 @@ type FetchJsonOptions = {
 export class WebApiError extends Error {
   readonly status: number;
   readonly code: string;
+  readonly details?: ApiErrorResponse["error"]["details"];
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, details?: ApiErrorResponse["error"]["details"]) {
     super(message);
     this.name = "WebApiError";
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -128,7 +130,7 @@ export async function fetchJson<T>(path: string, options: FetchJsonOptions = {})
 
     const code = payload?.error?.code ?? "internal";
     const message = payload?.error?.message ?? toErrorMessage(response.status, "Request failed.");
-    throw new WebApiError(response.status, code, message);
+    throw new WebApiError(response.status, code, message, payload?.error?.details);
   }
 
   return (await response.json()) as T;

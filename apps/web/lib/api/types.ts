@@ -21,6 +21,19 @@ export type ApiErrorResponse = {
   error: {
     code: string;
     message: string;
+    details?: {
+      recapCode?: string;
+      meepoCode?: string;
+      failureClass?: "retryable" | "corrective" | "internal";
+      retryable?: boolean;
+      correctiveActionRequired?: boolean;
+      traceId?: string;
+      provider?: string;
+      model?: string;
+      envKey?: string;
+      providerCode?: string;
+      status?: number;
+    };
   };
 };
 

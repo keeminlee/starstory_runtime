@@ -3,9 +3,16 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
+import { enforceWebEnvPolicy } from "./scripts/next-env-policy.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../..");
+
+const webEnvDiagnostics = enforceWebEnvPolicy();
+
+if (process.env.NODE_ENV === "production") {
+  console.info("[web-env-policy] Startup diagnostics", webEnvDiagnostics);
+}
 
 function runGit(args: string[]): string | null {
   try {

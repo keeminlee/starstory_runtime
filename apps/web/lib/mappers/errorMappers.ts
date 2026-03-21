@@ -1,5 +1,6 @@
 import { WebAuthError } from "@/lib/server/authContext";
 import { CapabilityUnavailableError } from "@/lib/server/capabilityErrors";
+import { formatUserFacingError } from "../../../../src/errors/formatUserFacingError.js";
 
 export type WebDataErrorCode =
   | "unauthorized"
@@ -27,12 +28,19 @@ export type WebDataErrorCode =
 export class WebDataError extends Error {
   readonly code: WebDataErrorCode;
   readonly status: number;
+  readonly details?: WebErrorResponse["error"]["details"];
 
-  constructor(code: WebDataErrorCode, status: number, message: string, options?: { cause?: unknown }) {
+  constructor(
+    code: WebDataErrorCode,
+    status: number,
+    message: string,
+    options?: { cause?: unknown; details?: WebErrorResponse["error"]["details"] }
+  ) {
     super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
     this.name = "WebDataError";
     this.code = code;
     this.status = status;
+    this.details = options?.details;
   }
 }
 
@@ -40,8 +48,52 @@ export type WebErrorResponse = {
   error: {
     code: WebDataErrorCode;
     message: string;
+    details?: {
+      recapCode?: string;
+      meepoCode?: string;
+      failureClass?: "retryable" | "corrective" | "internal";
+      retryable?: boolean;
+      correctiveActionRequired?: boolean;
+      traceId?: string;
+      provider?: string;
+      model?: string;
+      envKey?: string;
+      providerCode?: string;
+      status?: number;
+    };
   };
 };
+
+function buildWebErrorDetails(error: unknown): WebErrorResponse["error"]["details"] | undefined {
+  const formatted = formatUserFacingError(error);
+  const rawCode =
+    typeof error === "object" && error !== null && "code" in error
+      ? String((error as { code?: unknown }).code ?? "")
+      : "";
+
+  const details: NonNullable<WebErrorResponse["error"]["details"]> = {};
+
+  if (rawCode.startsWith("RECAP_")) details.recapCode = rawCode;
+  if (formatted.code !== "ERR_UNKNOWN") details.meepoCode = formatted.code;
+  details.failureClass = formatted.failureClass;
+  details.retryable = formatted.retryable;
+  details.correctiveActionRequired = formatted.correctiveActionRequired;
+  if (formatted.trace_id) details.traceId = formatted.trace_id;
+  if (formatted.diagnostics?.provider) details.provider = formatted.diagnostics.provider;
+  if (formatted.diagnostics?.model) details.model = formatted.diagnostics.model;
+  if (formatted.diagnostics?.envKey) details.envKey = formatted.diagnostics.envKey;
+  if (formatted.diagnostics?.providerCode) details.providerCode = formatted.diagnostics.providerCode;
+  if (typeof formatted.diagnostics?.status === "number") details.status = formatted.diagnostics.status;
+
+  return Object.keys(details).length > 0 ? details : undefined;
+}
+
+function makeWebDataError(code: WebDataErrorCode, status: number, message: string, cause: unknown): WebDataError {
+  return new WebDataError(code, status, message, {
+    cause,
+    details: buildWebErrorDetails(cause),
+  });
+}
 
 export function mapToWebDataError(error: unknown): WebDataError {
   if (error instanceof WebDataError) {
@@ -49,11 +101,11 @@ export function mapToWebDataError(error: unknown): WebDataError {
   }
 
   if (error instanceof WebAuthError) {
-    return new WebDataError("unauthorized", 401, error.message, { cause: error });
+    return makeWebDataError("unauthorized", 401, error.message, error);
   }
 
   if (error instanceof CapabilityUnavailableError) {
-    return new WebDataError(error.code, error.status, error.message, { cause: error });
+    return makeWebDataError(error.code, error.status, error.message, error);
   }
 
   const recapCode =
@@ -62,91 +114,91 @@ export function mapToWebDataError(error: unknown): WebDataError {
       : "";
   if (recapCode === "SCOPE_VIOLATION") {
     const message = error instanceof Error ? error.message : String(error);
-    return new WebDataError("not_found", 404, message, { cause: error });
+    return makeWebDataError("not_found", 404, message, error);
   }
   if (recapCode.startsWith("RECAP_")) {
     const message = error instanceof Error ? error.message : String(error);
     if (recapCode === "RECAP_SESSION_NOT_FOUND") {
-      return new WebDataError("not_found", 404, message, { cause: error });
+      return makeWebDataError("not_found", 404, message, error);
     }
     if (recapCode === "RECAP_SESSION_ACTIVE") {
-      return new WebDataError("conflict", 409, message, { cause: error });
+      return makeWebDataError("conflict", 409, message, error);
     }
     if (recapCode === "RECAP_TRANSCRIPT_UNAVAILABLE") {
-      return new WebDataError("transcript_unavailable", 424, message, { cause: error });
+      return makeWebDataError("transcript_unavailable", 424, message, error);
     }
     if (recapCode === "RECAP_INVALID_OUTPUT") {
-      return new WebDataError("recap_invalid_output", 502, message, { cause: error });
+      return makeWebDataError("recap_invalid_output", 502, message, error);
     }
     if (recapCode === "RECAP_IN_PROGRESS") {
-      return new WebDataError("recap_in_progress", 409, message, { cause: error });
+      return makeWebDataError("recap_in_progress", 409, message, error);
     }
     if (recapCode === "RECAP_RATE_LIMITED") {
-      return new WebDataError("recap_rate_limited", 429, message, { cause: error });
+      return makeWebDataError("recap_rate_limited", 429, message, error);
     }
     if (recapCode === "RECAP_CAPACITY_REACHED") {
-      return new WebDataError("recap_capacity_reached", 503, message, { cause: error });
+      return makeWebDataError("recap_capacity_reached", 503, message, error);
     }
     if (recapCode === "RECAP_GENERATION_FAILED") {
-      return new WebDataError("generation_failed", 502, message, { cause: error });
+      return makeWebDataError("generation_failed", 502, message, error);
     }
     if (recapCode === "RECAP_SPEAKER_ATTRIBUTION_REQUIRED") {
-      return new WebDataError("RECAP_SPEAKER_ATTRIBUTION_REQUIRED", 409, message, { cause: error });
+      return makeWebDataError("RECAP_SPEAKER_ATTRIBUTION_REQUIRED", 409, message, error);
     }
-    return new WebDataError("recap_unavailable", 424, message, { cause: error });
+    return makeWebDataError("recap_unavailable", 424, message, error);
   }
 
   const message = error instanceof Error ? error.message : String(error);
   if (/session not found/i.test(message)) {
-    return new WebDataError("not_found", 404, message, { cause: error });
+    return makeWebDataError("not_found", 404, message, error);
   }
   if (/transcript|no bronze transcript|no transcript/i.test(message)) {
-    return new WebDataError("transcript_unavailable", 424, message, { cause: error });
+    return makeWebDataError("transcript_unavailable", 424, message, error);
   }
 
   if (/OPENAI_API_KEY|ANTHROPIC_API_KEY|GOOGLE_API_KEY|llm provider/i.test(message)) {
     if (/OPENAI_API_KEY|openai api key/i.test(message)) {
-      return new WebDataError(
+      return makeWebDataError(
         "openai_unconfigured",
         503,
         "This action is unavailable until OPENAI_API_KEY is configured.",
-        { cause: error }
+        error
       );
     }
     if (/ANTHROPIC_API_KEY|anthropic api key/i.test(message)) {
-      return new WebDataError(
+      return makeWebDataError(
         "anthropic_unconfigured",
         503,
         "This action is unavailable until ANTHROPIC_API_KEY is configured.",
-        { cause: error }
+        error
       );
     }
     if (/GOOGLE_API_KEY|google api key/i.test(message)) {
-      return new WebDataError(
+      return makeWebDataError(
         "google_unconfigured",
         503,
         "This action is unavailable until GOOGLE_API_KEY is configured.",
-        { cause: error }
+        error
       );
     }
-    return new WebDataError(
+    return makeWebDataError(
       "llm_unconfigured",
       503,
       "This action is unavailable until the selected LLM provider is configured.",
-      { cause: error }
+      error
     );
   }
 
   if (/DISCORD_TOKEN/i.test(message)) {
-    return new WebDataError(
+    return makeWebDataError(
       "discord_refresh_unconfigured",
       503,
       "Discord refresh capability is unavailable because DISCORD_TOKEN is not configured.",
-      { cause: error }
+      error
     );
   }
 
-  return new WebDataError("internal", 500, message || "Unknown session data error", { cause: error });
+  return makeWebDataError("internal", 500, message || "Unknown session data error", error);
 }
 
 export function toWebErrorResponse(error: unknown): {
@@ -160,6 +212,7 @@ export function toWebErrorResponse(error: unknown): {
       error: {
         code: mapped.code,
         message: mapped.message,
+        ...(mapped.details ? { details: mapped.details } : {}),
       },
     },
   };

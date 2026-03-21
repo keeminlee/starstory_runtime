@@ -1,33 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { config as loadDotenv } from "dotenv";
 import type { BargeInMode, Config, LlmProvider, LogFormat, LogLevel, MeepoMode, SttProvider, TtsProvider } from "./types.js";
+import { emitEnvStartupDiagnostics, initializeEnvPolicy } from "./envPolicy.js";
 import { redactConfigSnapshot } from "./redact.js";
 
-function preloadEnvFiles(): void {
-  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-  const repoRoot = path.resolve(moduleDir, "..", "..");
-  const cwd = process.cwd();
-  const candidates = [
-    path.join(repoRoot, ".env"),
-    path.join(repoRoot, ".env.local"),
-    path.join(cwd, ".env"),
-    path.join(cwd, ".env.local"),
-  ];
-
-  const seen = new Set<string>();
-  for (const candidate of candidates) {
-    const normalized = path.normalize(candidate);
-    if (seen.has(normalized) || !fs.existsSync(candidate)) {
-      continue;
-    }
-    seen.add(normalized);
-    loadDotenv({ path: candidate, override: false });
-  }
-}
-
-preloadEnvFiles();
+const envPolicy = initializeEnvPolicy();
 
 function req(name: string): string {
   const v = process.env[name];
@@ -154,6 +131,7 @@ export function loadConfig(): Config {
   }
 
   const cfg: Config = {
+    envPolicy,
     mode: enumOf<MeepoMode>("MEEPO_MODE", ["canon", "ambient", "lab", "dormant"] as const, "ambient"),
 
     discord: {
@@ -306,6 +284,12 @@ export function loadConfig(): Config {
 
 export function printConfigSnapshot(cfg: Config): void {
   const snap = redactConfigSnapshot({
+    MEEPO_ENV_POLICY_MODE: cfg.envPolicy.mode,
+    MEEPO_ENV_POLICY_CONSUMER: cfg.envPolicy.consumer,
+    MEEPO_ENV_DETECTED_FILES: cfg.envPolicy.detectedFiles.join(","),
+    MEEPO_ENV_LOADED_FILES: cfg.envPolicy.loadedFiles.join(","),
+    MEEPO_ENV_IGNORED_FILES: cfg.envPolicy.ignoredFiles.join(","),
+    MEEPO_ENV_FORBIDDEN_FILES: cfg.envPolicy.forbiddenFiles.join(","),
     MEEPO_MODE: cfg.mode,
     DISCORD_TOKEN: "<redacted>",
     DM_ROLE_ID: cfg.discord.dmRoleId,
@@ -393,3 +377,7 @@ export function printConfigSnapshot(cfg: Config): void {
 }
 
 export const cfg = loadConfig();
+emitEnvStartupDiagnostics({
+  llmProvider: cfg.llm.provider,
+  sttProvider: cfg.stt.provider,
+});
