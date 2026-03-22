@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "yaml";
 import { getWebCampaignDetail } from "@/lib/server/campaignReaders";
+import { getDemoRegistrySnapshot } from "@/lib/server/demoCampaign";
 import { WebDataError } from "@/lib/mappers/errorMappers";
 import type {
   KnownSessionHitDto,
@@ -513,6 +514,9 @@ export async function getWebRegistrySnapshot(args: {
   searchParams?: QueryInput;
 }): Promise<RegistrySnapshotDto> {
   const campaign = await assertAuthorizedCampaign(args.campaignSlug, args.searchParams);
+  if (campaign.readOnlyReason === "demo_mode") {
+    return getDemoRegistrySnapshot();
+  }
   return getRegistrySnapshotForResolvedScope({
     campaignSlug: campaign.slug,
     guildId: requireGuildScopedCampaign(toRegistryScope(campaign)),
