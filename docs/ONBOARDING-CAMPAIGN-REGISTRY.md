@@ -31,6 +31,13 @@
 
 ## Tool cycle (scan-names + review-names)
 
+Scanner posture on the current branch:
+
+- `scan-names` prefers `bronze_transcript` over `ledger_entries`.
+- pending output is aggregated per session and written as `decisions.pending.yml` version 2.
+- known canonical entity hits are emitted separately under `knownHits`.
+- use `--rebuild` after scanner logic changes when you want to wipe and regenerate pending state.
+
 - **Explicit campaign**
   ```bash
   npx tsx src/tools/registry/scan-names.ts --campaign pandas-dd-server
@@ -45,6 +52,11 @@
   ```bash
   npx tsx src/tools/registry/scan-names.ts
   npx tsx src/tools/registry/review-names.ts
+  ```
+
+- **Full rebuild after scanner changes**
+  ```bash
+  npx tsx src/tools/registry/scan-names.ts --campaign pandas-dd-server --rebuild
   ```
 
 All tools print `Campaign: <slug>` at start. Canonical pending/registry files live under scoped roots (`data/registry/g_<guild>__c_<campaign>/`).

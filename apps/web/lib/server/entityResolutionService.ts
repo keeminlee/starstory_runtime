@@ -43,6 +43,7 @@ import type {
   EntityReviewDecision,
   RegistryCategoryKey,
   RegistryEntityDto,
+  SessionKnownHitDto,
 } from "@/lib/registry/types";
 
 type QueryInput = Record<string, string | string[] | undefined> | undefined;
@@ -1067,14 +1068,14 @@ async function getEntityCandidatesForResolvedSession(args: {
   sessionId: string;
   guildId: string;
   campaignSlug: string;
-}): Promise<{ sessionId: string; campaignSlug: string; candidates: EntityCandidateDto[] }> {
+}): Promise<{ sessionId: string; campaignSlug: string; candidates: EntityCandidateDto[]; knownHits: SessionKnownHitDto[] }> {
   const transcript = readSessionTranscript({
     guildId: args.guildId,
     campaignSlug: args.campaignSlug,
     sessionId: args.sessionId,
   });
   if (!transcript || transcript.lineCount === 0) {
-    return { sessionId: args.sessionId, campaignSlug: args.campaignSlug, candidates: [] };
+    return { sessionId: args.sessionId, campaignSlug: args.campaignSlug, candidates: [], knownHits: [] };
   }
 
   const scanRows: ScanSourceRow[] = transcript.lines
@@ -1124,7 +1125,7 @@ async function getEntityCandidatesForResolvedSession(args: {
     registry: { characters, ignore: ignoreSet, byName: byName as never },
     minCount: 1,
     maxExamples: 3,
-    includeKnown: false,
+    includeKnown: true,
   });
 
   const db = getDbForCampaignScope({ campaignSlug: args.campaignSlug, guildId: args.guildId });
@@ -1154,13 +1155,24 @@ async function getEntityCandidatesForResolvedSession(args: {
     };
   });
 
-  return { sessionId: args.sessionId, campaignSlug: args.campaignSlug, candidates };
+  const knownHits: SessionKnownHitDto[] = scanResult.knownHits.map((hit) => {
+    const match = byName.get(normKey(hit.canonical_name));
+    return {
+      canonicalName: hit.canonical_name,
+      entityId: match?.id ?? "",
+      category: match?.category ?? ("npcs" as RegistryCategoryKey),
+      count: hit.count,
+      primaryCount: hit.primaryCount,
+    };
+  });
+
+  return { sessionId: args.sessionId, campaignSlug: args.campaignSlug, candidates, knownHits };
 }
 
 export async function getEntityCandidates(args: {
   sessionId: string;
   searchParams?: QueryInput;
-}): Promise<{ sessionId: string; campaignSlug: string; candidates: EntityCandidateDto[] }> {
+}): Promise<{ sessionId: string; campaignSlug: string; candidates: EntityCandidateDto[]; knownHits: SessionKnownHitDto[] }> {
   try {
     const { guildId, campaignSlug, sessionId } = await resolveAuthorizedSession(args);
     return await getEntityCandidatesForResolvedSession({ guildId, campaignSlug, sessionId });

@@ -34,6 +34,7 @@ This is the single router for active documentation. Start here, then follow only
 - [systems/awakening/ARCHITECTURE.md](systems/awakening/ARCHITECTURE.md) - Awakening runtime architecture.
 - [systems/awakening/SCRIPTS.md](systems/awakening/SCRIPTS.md) - Awakening script contract.
 - [ONBOARDING-CAMPAIGN-REGISTRY.md](ONBOARDING-CAMPAIGN-REGISTRY.md) - Campaign registry model.
+- [CHRONICLE_COMPENDIUM_ENTITY_OVERHAUL_B2.md](CHRONICLE_COMPENDIUM_ENTITY_OVERHAUL_B2.md) - Chronicle and Compendium entity overhaul on the current branch.
 - [systems/CAUSAL_CORE_PHYSICS.md](systems/CAUSAL_CORE_PHYSICS.md) - Causal model contract.
 - [OVERLAY.md](OVERLAY.md) - OBS overlay architecture.
 - [MISSIONS_V0.md](MISSIONS_V0.md) - Mission economy surface.

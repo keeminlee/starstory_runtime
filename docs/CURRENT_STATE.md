@@ -73,6 +73,14 @@ Primary user routes:
 - `/campaigns/[campaignSlug]/sessions/[sessionId]`
 - `/campaigns/[campaignSlug]/compendium`
 
+Current Chronicle and Compendium entity posture:
+
+- Chronicle recap rendering and recap annotation share one line-normalization path.
+- Chronicle panel spacing is slightly tighter than earlier archive-shell defaults.
+- Compendium `Current Session` entity filtering is transcript-backed and includes both unresolved candidates and known canonical entity hits.
+- Campaign pending review data is session-aware and sourced from durable YAML, not rebuilt ad hoc in the UI.
+- The Compendium entity list does not expose a Chronicle drill-in button until a real product flow exists.
+
 Web authority rules:
 
 - Web auth is Discord OAuth via Auth.js.
@@ -96,6 +104,7 @@ Web authority rules:
   - compatibility lanes still exist
   - session end must not depend on recap success
 - Detailed recap convergence, fallback drift, and compatibility behavior are tracked in [RECAP_SURFACE_MAP.md](RECAP_SURFACE_MAP.md) and the recap-track docs linked from [INDEX.md](INDEX.md).
+- Chronicle and Compendium entity-overhaul details are tracked in [CHRONICLE_COMPENDIUM_ENTITY_OVERHAUL_B2.md](CHRONICLE_COMPENDIUM_ENTITY_OVERHAUL_B2.md).
 
 ## Current Constraints
 

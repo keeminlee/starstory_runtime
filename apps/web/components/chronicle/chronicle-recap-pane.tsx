@@ -287,7 +287,7 @@ export function ChronicleRecapPane({
     return (
       <div className="flex-1 min-w-0">
         <div className="rounded-[28px] border border-border/70 bg-background/72 shadow-[0_24px_80px_rgba(0,0,0,0.28)] backdrop-blur-md">
-          <div className="px-8 py-10 sm:px-10 sm:py-12">
+          <div className="px-4 py-5 sm:px-5 sm:py-6">
             <div className="space-y-2 mb-6">
               <h3 className="font-serif text-xl text-foreground">Recap generation blocked</h3>
               <p className="text-sm text-muted-foreground">
@@ -390,7 +390,7 @@ export function ChronicleRecapPane({
     <div className="flex-1 min-w-0">
       <div className="rounded-[28px] border border-border/70 bg-background/72 shadow-[0_24px_80px_rgba(0,0,0,0.28)] backdrop-blur-md">
         {verboseModeEnabled ? (
-          <div className="flex items-center justify-end border-b border-border/70 px-8 py-4">
+          <div className="flex items-center justify-end border-b border-border/70 px-4 py-2 sm:px-5 sm:py-3">
             <div className="flex rounded-lg border border-border/70 bg-background/50 p-1">
               {TABS.map((tab) => {
                 const enabled = tabAvailability[tab.id];
@@ -416,7 +416,7 @@ export function ChronicleRecapPane({
           </div>
         ) : null}
 
-        <article className="mx-auto max-w-3xl px-8 py-10 sm:px-10 sm:py-12">
+        <article className="mx-auto max-w-3xl px-4 py-5 sm:px-5 sm:py-6">
           <header className="border-b border-border/50 pb-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0 flex-1">

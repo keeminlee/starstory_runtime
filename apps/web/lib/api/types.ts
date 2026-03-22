@@ -124,6 +124,7 @@ import type {
   EntityReviewBatchDto,
   EntityReviewDecision,
   RegistryCategoryKey,
+  SessionKnownHitDto,
 } from "@/lib/registry/types";
 import type { SessionAnnotatedRecaps } from "@/lib/types";
 
@@ -131,6 +132,7 @@ export type EntityCandidatesResponse = {
   sessionId: string;
   campaignSlug: string;
   candidates: EntityCandidateDto[];
+  knownHits: SessionKnownHitDto[];
 };
 
 export type ResolveEntityRequest = {

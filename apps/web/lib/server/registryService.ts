@@ -4,6 +4,7 @@ import yaml from "yaml";
 import { getWebCampaignDetail } from "@/lib/server/campaignReaders";
 import { WebDataError } from "@/lib/mappers/errorMappers";
 import type {
+  KnownSessionHitDto,
   RegistryCategoryKey,
   RegistryCreateEntryRequest,
   RegistryEntityDto,
@@ -38,7 +39,17 @@ type PendingCandidate = {
   display: string;
   count: number;
   primaryCount: number;
+  sentenceInitialCount?: number;
   examples: string[];
+  sessions?: Array<{ sessionId: string; count: number; primaryCount: number }>;
+};
+
+type KnownHitYaml = {
+  canonical_name?: string;
+  canonicalName?: string;
+  count: number;
+  primaryCount: number;
+  sessions?: Array<{ sessionId: string; count: number; primaryCount: number }>;
 };
 
 type PendingDoc = {
@@ -49,6 +60,7 @@ type PendingDoc = {
     guildId?: string | null;
   };
   pending?: PendingCandidate[];
+  knownHits?: KnownHitYaml[];
 };
 
 type RegistryRoot = {
@@ -337,7 +349,18 @@ function loadRegistrySnapshot(scope: RegistryScope): RegistrySnapshotDto {
         display: item.display,
         count: item.count,
         primaryCount: item.primaryCount,
+        sentenceInitialCount: item.sentenceInitialCount ?? 0,
         examples: Array.isArray(item.examples) ? item.examples : [],
+        sessions: Array.isArray(item.sessions) ? item.sessions : [],
+      }))
+    : [];
+
+  const knownHits: KnownSessionHitDto[] = Array.isArray(pendingDoc.knownHits)
+    ? pendingDoc.knownHits.map((hit) => ({
+        canonicalName: hit.canonicalName ?? hit.canonical_name ?? "",
+        count: hit.count,
+        primaryCount: hit.primaryCount,
+        sessions: Array.isArray(hit.sessions) ? hit.sessions : [],
       }))
     : [];
 
@@ -350,6 +373,7 @@ function loadRegistrySnapshot(scope: RegistryScope): RegistrySnapshotDto {
       sourceCampaignSlug: pendingDoc.source?.campaignSlug ?? null,
       sourceGuildId: pendingDoc.source?.guildId ?? null,
       items: pendingItems,
+      knownHits,
     },
   };
 }

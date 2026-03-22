@@ -179,14 +179,7 @@ function resolveDefaultTab(recap: SessionRecap | null): RecapTab {
   return "balanced";
 }
 
-function normalizeRecapLines(recapText: string): string[] {
-  return recapText
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => line.replace(/^-+\s*/, ""))
-    .filter(Boolean);
-}
+import { normalizeRecapLines } from "@/lib/shared/normalizeRecapLines";
 
 function getAnchorRect(target: HTMLElement): PreviewEntityState["anchorRect"] {
   const rect = target.getBoundingClientRect();

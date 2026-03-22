@@ -5,13 +5,12 @@ import {
   applyCampaignRegistryPendingActionApi,
   createCampaignRegistryEntryApi,
   deleteCampaignRegistryEntryApi,
-  getEntityAppearancesApi,
   getCampaignRegistryApi,
   updateCampaignRegistryEntryApi,
 } from "@/lib/api/registry";
 import { WebApiError } from "@/lib/api/http";
 import { getEntityCandidatesApi } from "@/lib/api/sessions";
-import type { EntityAppearanceDto, EntityCandidateDto } from "@/lib/registry/types";
+import type { EntityCandidateDto, SessionKnownHitDto } from "@/lib/registry/types";
 import type {
   RegistryCategoryKey,
   RegistryEntityDto,
@@ -24,7 +23,6 @@ import {
   NO_KNOWN_USERS_HELPER_TEXT,
   UNKNOWN_STORED_MAPPING_LABEL,
 } from "@/lib/registry/pcDiscordUserSelection";
-import { formatSessionDisplayTitle } from "@/lib/campaigns/display";
 import { useVerboseMode } from "@/providers/verbose-mode-provider";
 import { EntityResolutionPanel } from "@/components/session/entity-resolution-panel";
 
@@ -100,16 +98,12 @@ export function CampaignRegistryManager({
 
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
 
-  // Appearance history: expanded entity -> cached appearances
-  const [expandedAppearanceId, setExpandedAppearanceId] = useState<string | null>(null);
-  const [appearanceCache, setAppearanceCache] = useState<Record<string, EntityAppearanceDto[]>>({});
-  const [appearanceLoading, setAppearanceLoading] = useState(false);
-
   // Session-scope filtering
   const [sessionScope, setSessionScope] = useState<"current" | "all">(
     selectedSessionId ? "current" : "all"
   );
   const [sessionCandidates, setSessionCandidates] = useState<EntityCandidateDto[]>([]);
+  const [sessionKnownHits, setSessionKnownHits] = useState<SessionKnownHitDto[]>([]);
   const [sessionCandidatesLoading, setSessionCandidatesLoading] = useState(false);
 
   const scopedSearchParams = useMemo(
@@ -124,26 +118,36 @@ export function CampaignRegistryManager({
   useEffect(() => {
     if (!selectedSessionId) {
       setSessionCandidates([]);
+      setSessionKnownHits([]);
       setSessionScope("all");
       return;
     }
     setSessionScope("current");
     setSessionCandidatesLoading(true);
     getEntityCandidatesApi(selectedSessionId, scopedSearchParams)
-      .then((res) => setSessionCandidates(res.candidates))
-      .catch(() => setSessionCandidates([]))
+      .then((res) => {
+        setSessionCandidates(res.candidates);
+        setSessionKnownHits(res.knownHits ?? []);
+      })
+      .catch(() => {
+        setSessionCandidates([]);
+        setSessionKnownHits([]);
+      })
       .finally(() => setSessionCandidatesLoading(false));
   }, [selectedSessionId, scopedSearchParams]);
 
-  // Build a set of candidate names from the current session for cross-referencing
+  // Build a set of candidate + known-entity names from the current session for cross-referencing
   const sessionCandidateNames = useMemo(() => {
-    if (sessionCandidates.length === 0) return new Set<string>();
+    if (sessionCandidates.length === 0 && sessionKnownHits.length === 0) return new Set<string>();
     const names = new Set<string>();
     for (const c of sessionCandidates) {
       names.add(c.candidateName.toLowerCase());
     }
+    for (const hit of sessionKnownHits) {
+      names.add(hit.canonicalName.toLowerCase());
+    }
     return names;
-  }, [sessionCandidates]);
+  }, [sessionCandidates, sessionKnownHits]);
 
   const refreshRegistry = useCallback(async () => {
     try {
@@ -153,27 +157,6 @@ export function CampaignRegistryManager({
       // Silently fail — registry may already be stale but we don't want to hide the UI
     }
   }, [campaignSlug, scopedSearchParams]);
-
-  const toggleAppearances = useCallback(
-    async (entityId: string) => {
-      if (expandedAppearanceId === entityId) {
-        setExpandedAppearanceId(null);
-        return;
-      }
-      setExpandedAppearanceId(entityId);
-      if (appearanceCache[entityId]) return;
-      setAppearanceLoading(true);
-      try {
-        const res = await getEntityAppearancesApi(campaignSlug, entityId, scopedSearchParams);
-        setAppearanceCache((prev) => ({ ...prev, [entityId]: res.appearances }));
-      } catch {
-        setAppearanceCache((prev) => ({ ...prev, [entityId]: [] }));
-      } finally {
-        setAppearanceLoading(false);
-      }
-    },
-    [expandedAppearanceId, appearanceCache, campaignSlug, scopedSearchParams]
-  );
 
   const categoryCounts = useMemo(
     () => ({
@@ -236,14 +219,23 @@ export function CampaignRegistryManager({
   }, [activeTab, query, registry, sessionScope, selectedSessionId, sessionCandidateNames]);
 
   const filteredPending = useMemo(() => {
+    let items = registry.pending.items;
+
+    // Session-scope filter: only show pending items present in the current session
+    if (sessionScope === "current" && selectedSessionId) {
+      items = items.filter((item) =>
+        item.sessions.some((s) => s.sessionId === selectedSessionId)
+      );
+    }
+
     const q = query.trim().toLowerCase();
-    if (!q) return registry.pending.items;
-    return registry.pending.items.filter((item) => {
+    if (!q) return items;
+    return items.filter((item) => {
       if (item.display.toLowerCase().includes(q)) return true;
       if (item.key.toLowerCase().includes(q)) return true;
       return item.examples.some((example) => example.toLowerCase().includes(q));
     });
-  }, [query, registry.pending.items]);
+  }, [query, registry.pending.items, sessionScope, selectedSessionId]);
 
   const filteredIgnore = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -366,7 +358,6 @@ export function CampaignRegistryManager({
     }, `Deleted ${entity.canonicalName}.`);
 
     setEditingEntryId((current) => current === entity.id ? null : current);
-    setExpandedAppearanceId((current) => current === entity.id ? null : current);
   }
 
   async function handlePendingAccept(key: string, category: RegistryCategoryKey) {
@@ -607,6 +598,11 @@ export function CampaignRegistryManager({
                     <p className="font-semibold">{item.display}</p>
                     <p className="text-xs text-muted-foreground">
                       {item.count} total / {item.primaryCount} primary
+                      {item.sessions && item.sessions.length > 0 && (
+                        <span className="ml-2 inline-flex items-center rounded-full bg-accent/30 px-1.5 py-0.5 text-[10px] font-medium">
+                          {item.sessions.length} {item.sessions.length === 1 ? "session" : "sessions"}
+                        </span>
+                      )}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -761,43 +757,10 @@ export function CampaignRegistryManager({
                         ) : null}
                       </div>
                       <div className="flex gap-2">
-                        <button type="button" onClick={() => toggleAppearances(entity.id)} className="control-button-ghost rounded-full px-3 py-1 text-xs uppercase tracking-wider">
-                          {expandedAppearanceId === entity.id ? "Hide Chronicle" : "Chronicle"}
-                        </button>
                         <button type="button" disabled={isPending || !isEditable} onClick={() => setEditingEntryId(entity.id)} className="control-button-ghost rounded-full px-3 py-1 text-xs uppercase tracking-wider">Edit</button>
                         <button type="button" disabled={isPending || !isEditable} onClick={() => handleDeleteEntry(entity)} className="control-button-danger rounded-full px-3 py-1 text-xs uppercase tracking-wider">Delete</button>
                       </div>
                     </div>
-                    {expandedAppearanceId === entity.id ? (
-                      <div className="mt-3 border-t border-border/40 pt-3">
-                        {appearanceLoading && !appearanceCache[entity.id] ? (
-                          <p className="text-xs text-muted-foreground">Loading appearances…</p>
-                        ) : (appearanceCache[entity.id]?.length ?? 0) === 0 ? (
-                          <p className="text-xs text-muted-foreground">No session appearances recorded yet.</p>
-                        ) : (
-                          <div className="space-y-2">
-                            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                              Appeared in {appearanceCache[entity.id]!.length} session{appearanceCache[entity.id]!.length === 1 ? "" : "s"}
-                            </p>
-                            {appearanceCache[entity.id]!.map((a) => (
-                              <div key={a.sessionId} className="rounded-md border border-border/40 bg-background/25 px-3 py-2 text-xs">
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="font-medium">
-                                    {formatSessionDisplayTitle({
-                                      label: a.sessionLabel,
-                                      sessionId: a.sessionId,
-                                    })}
-                                  </span>
-                                  <span className="text-muted-foreground">{a.mentionCount} mention{a.mentionCount === 1 ? "" : "s"}</span>
-                                </div>
-                                {a.sessionDate ? <p className="mt-0.5 text-muted-foreground">{a.sessionDate}</p> : null}
-                                {a.excerpt ? <p className="mt-1 text-muted-foreground italic">&ldquo;{a.excerpt}&rdquo;</p> : null}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ) : null}
                     </>
                   )}
                 </div>
