@@ -59,29 +59,48 @@ If the data is correct but presentation or access is wrong, inspect Surfaces.
 
 Primary user routes:
 
-- `apps/web/app/page.tsx`
-- `apps/web/app/dashboard/page.tsx`
+- `apps/web/app/page.tsx` — logged-out landing
+- `apps/web/app/dashboard/page.tsx` — smart redirect to first campaign
 - `apps/web/app/settings/page.tsx`
-- `apps/web/app/campaigns/[campaignSlug]/sessions/page.tsx`
+- `apps/web/app/campaigns/[campaignSlug]/page.tsx` — campaign home (Chronicle/Compendium tabbed shell)
 - `apps/web/app/campaigns/[campaignSlug]/sessions/[sessionId]/page.tsx`
 - `apps/web/app/campaigns/[campaignSlug]/compendium/page.tsx`
+
+Shell architecture:
+
+- Layout uses a fixed floating rail (`app-floating-rail.tsx`) with top-right shell controls (`app-shell-controls.tsx`). The old sidebar and header are removed.
+- Campaign page is a tabbed shell (`campaign-page.tsx`) switching between Chronicle and Compendium.
+- Chronicle surface includes a session constellation graph (`campaign-session-constellation.tsx`), a recap reading pane (`chronicle-recap-pane.tsx`), and an entity overlay pipeline (`recapEntityOverlay.ts`, `annotated-recap-renderer.tsx`).
+- Session constellation supports drag-to-reorder and drag-to-archive via `use-session-rail-model.ts`.
+- Full architecture: `docs/STARSTORY_SHELL_RESET.md`.
 
 Internal API boundary:
 
 - `apps/web/app/api/campaigns/route.ts`
 - `apps/web/app/api/campaigns/[campaignSlug]/route.ts`
 - `apps/web/app/api/campaigns/[campaignSlug]/sessions/route.ts`
+- `apps/web/app/api/campaigns/[campaignSlug]/session-order/route.ts`
 - `apps/web/app/api/sessions/[sessionId]/route.ts`
 - `apps/web/app/api/sessions/[sessionId]/transcript/route.ts`
 - `apps/web/app/api/sessions/[sessionId]/recap/route.ts`
 - `apps/web/app/api/sessions/[sessionId]/regenerate/route.ts`
+- `apps/web/app/api/sessions/[sessionId]/unarchive/route.ts`
 
-Web adapters over canonical modules:
+Data access layer:
 
-- campaign/session web readers: `apps/web/lib/server/campaignReaders.ts`, `apps/web/lib/server/sessionReaders.ts`
-- canonical mapping layer: `apps/web/lib/mappers/*`
-- campaign/session display helpers: `apps/web/lib/campaigns/display.ts`
-- web API clients consumed by pages: `apps/web/lib/api/*`
+- Archive read store: `apps/web/lib/server/readData/archiveReadStore.ts` (typed SQLite queries for sessions, transcripts, recaps, speaker attribution, born stars)
+- Campaign/session web readers: `apps/web/lib/server/campaignReaders.ts`, `apps/web/lib/server/sessionReaders.ts`
+- Entity overlay: `apps/web/lib/chronicle/recapEntityOverlay.ts`
+- Canonical mapping layer: `apps/web/lib/mappers/*`
+- Campaign/session display helpers: `apps/web/lib/campaigns/display.ts`
+- Web API clients consumed by pages: `apps/web/lib/api/*`
+
+Sky constellation domain:
+
+- Type contracts: `apps/web/lib/starstory/domain/sky/skyObserverTypes.ts`
+- Spatial mapper: `apps/web/lib/starstory/domain/sky/campaignSkyMapper.ts`
+- Observer presentation: `apps/web/lib/starstory/domain/sky/observerPresentation.ts`
+- Preserved but intentionally not mounted on homepage. See `docs/product/homepage-constellation-preservation.md`.
 
 Auth/scope posture:
 
