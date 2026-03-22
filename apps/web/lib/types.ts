@@ -72,6 +72,7 @@ export type CampaignSummary = {
   isDm?: boolean;
   description: string;
   sessionCount: number;
+  archivedSessionCount?: number;
   lastSessionDate: string | null;
   sessions: SessionSummary[];
   type?: "user" | "system";
@@ -79,6 +80,62 @@ export type CampaignSummary = {
   persisted?: boolean;
   canWrite?: boolean;
   readOnlyReason?: "not_campaign_dm" | "demo_mode";
+};
+
+export type HomepageSkySessionSummary = Pick<
+  SessionSummary,
+  "id" | "label" | "title" | "date"
+>;
+
+export type HomepageSkyCampaignSummary = {
+  id: string;
+  slug: string;
+  name: string;
+  guildIconUrl?: string | null;
+  sessionCount: number;
+  lastSessionDate: string | null;
+  sessions: HomepageSkySessionSummary[];
+};
+
+export type HomepageSkyBornStarSummary = {
+  id: string;
+  guildId: string;
+  campaignSlug: string;
+  campaignName: string;
+  guildIconUrl?: string | null;
+  sessionId: string;
+  sessionLabel: string | null;
+  bornAt: string;
+  lineCount: number;
+  startedByUserId: string | null;
+};
+
+export type HomepageSkyPersonalAnchorStarSummary = HomepageSkyBornStarSummary;
+
+export type HomepageSkySkippedCampaign = {
+  campaignId: string;
+  guildId: string;
+  campaignSlug: string;
+  reason: "already_in_projection" | "no_sessions";
+};
+
+export type HomepageSkyDiagnostics = {
+  sourceGuildIds: string[];
+  discoveredGuildIds: string[];
+  scopedDirectoryGuildIds: string[];
+  scopedDirectoryRecordCount: number;
+  projectedCampaignIds: string[];
+  skippedCampaigns: HomepageSkySkippedCampaign[];
+};
+
+export type HomepageSkyProjection = {
+  totalSessions: number;
+  campaignCount: number;
+  wordsRecorded: number;
+  campaigns: HomepageSkyCampaignSummary[];
+  bornStars: HomepageSkyBornStarSummary[];
+  personalAnchorStar: HomepageSkyPersonalAnchorStarSummary | null;
+  diagnostics?: HomepageSkyDiagnostics;
 };
 
 export type DashboardEmptyGuild = {

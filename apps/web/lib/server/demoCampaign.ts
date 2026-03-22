@@ -1,4 +1,5 @@
 import type { CampaignSummary, SessionDetail, SessionSummary } from "@/lib/types";
+import type { HomepageSkyCampaignSummary } from "@/lib/types";
 
 const DEMO_GUILD_ID = "system-demo";
 const DEMO_CAMPAIGN_SLUG = "demo";
@@ -150,6 +151,7 @@ export function getDemoCampaignSummary(): CampaignSummary {
     guildIconUrl: null,
     description: "Guided sample archive with example sessions, recaps, and compendium entries.",
     sessionCount: DEMO_SESSIONS.length,
+    archivedSessionCount: 0,
     lastSessionDate: DEMO_SESSIONS[0]?.date ?? null,
     sessions: DEMO_SESSIONS,
     type: "system",
@@ -166,4 +168,21 @@ export function getDemoSessionDetail(sessionId: string): SessionDetail | null {
 
 export function isDemoSessionId(sessionId: string): boolean {
   return sessionId in DEMO_SESSION_DETAILS;
+}
+
+export function getDemoCampaignForSky(): HomepageSkyCampaignSummary {
+  return {
+    id: `${DEMO_GUILD_ID}::${DEMO_CAMPAIGN_SLUG}`,
+    slug: DEMO_CAMPAIGN_SLUG,
+    name: "Demo Campaign",
+    guildIconUrl: null,
+    sessionCount: DEMO_SESSIONS.length,
+    lastSessionDate: DEMO_SESSIONS[DEMO_SESSIONS.length - 1]?.date ?? null,
+    sessions: DEMO_SESSIONS.map((s) => ({
+      id: s.id,
+      label: s.label,
+      title: s.title,
+      date: s.date,
+    })),
+  };
 }

@@ -1,93 +1,91 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { StarfieldCanvas } from "./StarfieldCanvas";
 import { StarLayer } from "./StarLayer";
 import { ConstellationLayer } from "./ConstellationLayer";
-import type { Star, ProtoStarRendererState } from "@/lib/starstory/domain/sky/starData";
+import type { Star } from "@/lib/starstory/domain/sky/starData";
+import type { SkyLink } from "@/lib/starstory/domain/sky/skyObserverTypes";
+import type { ObserverStarPresentation } from "@/lib/starstory/domain/sky/observerPresentation";
 import styles from "./sky.module.css";
 
 const PHI_MIN = -30;
 const PHI_MAX = 30;
-const SCROLL_SPEED = 1.8;
-const DEAD_ZONE_LEFT = 0.15;
-const DEAD_ZONE_RIGHT = 0.85;
-const DEAD_ZONE_TOP = 0.15;
-const DEAD_ZONE_BOTTOM = 0.85;
+const DRAG_SENSITIVITY = 0.3;
 
 type SkyViewportProps = {
   stars: Star[];
-  protoStarStates: Map<string, ProtoStarRendererState>;
+  links: SkyLink[];
   onStarClick?: (id: string) => void;
+  hoveredStarId?: string | null;
+  highlightedCampaignId?: string | null;
+  presentationByStarId?: Map<string, ObserverStarPresentation>;
+  onStarHoverChange?: (starId: string | null) => void;
 };
 
-export function SkyViewport({ stars, protoStarStates, onStarClick }: SkyViewportProps) {
+export function SkyViewport({
+  stars,
+  links,
+  onStarClick,
+  hoveredStarId,
+  highlightedCampaignId,
+  presentationByStarId,
+  onStarHoverChange,
+}: SkyViewportProps) {
   const [camera, setCamera] = useState({ theta: 0, phi: 0 });
-  const mouseRef = useRef({ x: 0.5, y: 0.5 });
   const containerRef = useRef<HTMLDivElement>(null);
-  const rafRef = useRef(0);
+  const isDraggingRef = useRef(false);
+  const lastDragRef = useRef({ x: 0, y: 0 });
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const onMove = (e: MouseEvent) => {
-      const rect = el.getBoundingClientRect();
-      mouseRef.current = {
-        x: (e.clientX - rect.left) / rect.width,
-        y: (e.clientY - rect.top) / rect.height,
-      };
-    };
-    el.addEventListener("mousemove", onMove);
-    return () => el.removeEventListener("mousemove", onMove);
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    isDraggingRef.current = true;
+    lastDragRef.current = { x: e.clientX, y: e.clientY };
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
   }, []);
 
-  useEffect(() => {
-    let prev = performance.now();
-    const tick = (now: number) => {
-      const dt = Math.min((now - prev) / 16.67, 3);
-      prev = now;
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!isDraggingRef.current) return;
 
-      const { x, y } = mouseRef.current;
-      let dTheta = 0;
-      let dPhi = 0;
+    const dx = e.clientX - lastDragRef.current.x;
+    const dy = e.clientY - lastDragRef.current.y;
+    lastDragRef.current = { x: e.clientX, y: e.clientY };
 
-      if (x < DEAD_ZONE_LEFT) {
-        dTheta = -SCROLL_SPEED * ((DEAD_ZONE_LEFT - x) / DEAD_ZONE_LEFT) * dt;
-      } else if (x > DEAD_ZONE_RIGHT) {
-        dTheta = SCROLL_SPEED * ((x - DEAD_ZONE_RIGHT) / (1 - DEAD_ZONE_RIGHT)) * dt;
-      }
+    setCamera((prev) => ({
+      theta: prev.theta - dx * DRAG_SENSITIVITY,
+      phi: Math.max(PHI_MIN, Math.min(PHI_MAX, prev.phi + dy * DRAG_SENSITIVITY * 0.5)),
+    }));
+  }, []);
 
-      if (y < DEAD_ZONE_TOP) {
-        dPhi = SCROLL_SPEED * 0.5 * ((DEAD_ZONE_TOP - y) / DEAD_ZONE_TOP) * dt;
-      } else if (y > DEAD_ZONE_BOTTOM) {
-        dPhi = -SCROLL_SPEED * 0.5 * ((y - DEAD_ZONE_BOTTOM) / (1 - DEAD_ZONE_BOTTOM)) * dt;
-      }
-
-      if (dTheta !== 0 || dPhi !== 0) {
-        setCamera((prev) => ({
-          theta: prev.theta + dTheta,
-          phi: Math.max(PHI_MIN, Math.min(PHI_MAX, prev.phi + dPhi)),
-        }));
-      }
-
-      rafRef.current = requestAnimationFrame(tick);
-    };
-
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
+  const handlePointerUp = useCallback(() => {
+    isDraggingRef.current = false;
   }, []);
 
   return (
-    <div ref={containerRef} className={styles.skyViewport}>
+    <div
+      ref={containerRef}
+      className={styles.skyViewport}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+    >
       <StarfieldCanvas cameraTheta={camera.theta} cameraPhi={camera.phi} />
       <StarLayer
         stars={stars}
         cameraTheta={camera.theta}
         cameraPhi={camera.phi}
-        protoStarStates={protoStarStates}
         onStarClick={onStarClick}
+        hoveredStarId={hoveredStarId}
+        presentationByStarId={presentationByStarId}
+        onStarHoverChange={onStarHoverChange}
       />
-      <ConstellationLayer stars={stars} cameraTheta={camera.theta} cameraPhi={camera.phi} />
+      <ConstellationLayer
+        stars={stars}
+        links={links}
+        cameraTheta={camera.theta}
+        cameraPhi={camera.phi}
+        highlightedCampaignId={highlightedCampaignId}
+      />
     </div>
   );
 }

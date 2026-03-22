@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronRight, Clock } from "lucide-react";
+import { Archive, ChevronRight, Clock } from "lucide-react";
 import { InlineEditableText } from "@/components/shared/inline-editable-text";
 import { StatusChip } from "@/components/shared/status-chip";
 import type { StatusChipTone } from "@/components/shared/status-chip";
@@ -198,7 +198,7 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
                     type="button"
                     disabled={isArchiving || session.status === "in_progress"}
                     title={session.status === "in_progress" ? "Active sessions cannot be archived." : "Archive session"}
-                    className="rounded-full border border-border px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-amber-400/40 hover:text-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="group flex h-9 w-9 items-center overflow-hidden rounded-full border border-border/70 bg-background/58 px-2.5 shadow-[0_12px_26px_rgba(0,0,0,0.16)] transition-[width,border-color,background-color] duration-200 hover:w-[10.75rem] hover:border-amber-400/40 hover:bg-background/82 hover:text-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
                     onClick={async () => {
                       if (!window.confirm("Archive this session? It will be hidden from default lists but remain readable by direct link.")) {
                         return;
@@ -220,7 +220,10 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
                       }
                     }}
                   >
-                    {isArchiving ? "Archiving" : session.status === "in_progress" ? "Archive blocked" : "Archive session"}
+                    <Archive className="h-4 w-4 shrink-0 text-amber-200/80" />
+                    <span className="max-w-0 overflow-hidden whitespace-nowrap pl-2 text-xs font-semibold uppercase tracking-wider opacity-0 transition-all duration-200 group-hover:max-w-[7.5rem] group-hover:opacity-100">
+                      {isArchiving ? "Archiving" : session.status === "in_progress" ? "Archive blocked" : "Archive session"}
+                    </span>
                   </button>
                 ) : null}
               </>

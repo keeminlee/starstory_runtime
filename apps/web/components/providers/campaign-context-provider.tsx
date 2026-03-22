@@ -21,6 +21,7 @@ export type CampaignSelectorOption = {
   slug: string;
   guildId: string | null;
   guildName: string;
+  guildIconUrl?: string | null;
   name: string;
   type: "user" | "system";
   editable: boolean;

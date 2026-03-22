@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import { CampaignOverview } from "@/components/campaign/campaign-overview";
-import { CampaignSessionsActions } from "@/components/campaign/campaign-sessions-actions";
 import { ArchiveShell } from "@/components/layout/archive-shell";
 import { EmptyState } from "@/components/shared/empty-state";
 import { WebApiError } from "@/lib/api/http";
@@ -41,7 +40,7 @@ export default async function CampaignSessionsPage({ params, searchParams }: Pag
 
   if (routeAmbiguous) {
     return (
-      <ArchiveShell section="Sessions">
+      <ArchiveShell section="Sessions" showCampaignSelector={false}>
         <EmptyState
           title="Choose guild context"
           description="This campaign slug exists in multiple authorized guilds. Open it from Dashboard so the app can pass an explicit guild scope."
@@ -55,11 +54,8 @@ export default async function CampaignSessionsPage({ params, searchParams }: Pag
   }
 
   return (
-    <ArchiveShell section="Sessions" campaignName={campaign.name}>
-      <div className="space-y-4">
-        <CampaignSessionsActions campaignSlug={campaign.slug} guildId={campaign.guildId} showArchived={showArchived} />
-        <CampaignOverview campaign={campaign} searchParams={query} />
-      </div>
+    <ArchiveShell section="Sessions" campaignName={campaign.name} showCampaignSelector={false}>
+      <CampaignOverview campaign={campaign} searchParams={query} showArchived={showArchived} />
     </ArchiveShell>
   );
 }

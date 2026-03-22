@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
-import type { Star, ProtoStarRendererState } from "@/lib/starstory/domain/sky/starData";
+import type { Star } from "@/lib/starstory/domain/sky/starData";
 import { PARALLAX_SPEEDS } from "@/lib/starstory/domain/sky/starData";
-import { ProtoStarRenderer } from "./ProtoStarRenderer";
+import type { ObserverStarPresentation } from "@/lib/starstory/domain/sky/observerPresentation";
+import { ObserverTooltip } from "@/components/sky/ObserverTooltip";
 import styles from "./sky.module.css";
 
 const VIEWPORT_DEGREES = 120;
@@ -12,8 +13,10 @@ type StarLayerProps = {
   stars: Star[];
   cameraTheta: number;
   cameraPhi: number;
-  protoStarStates: Map<string, ProtoStarRendererState>;
   onStarClick?: (id: string) => void;
+  hoveredStarId?: string | null;
+  presentationByStarId?: Map<string, ObserverStarPresentation>;
+  onStarHoverChange?: (starId: string | null) => void;
 };
 
 function thetaToScreen(starTheta: number, cameraTheta: number, speed: number): number {
@@ -33,8 +36,10 @@ export function StarLayer({
   stars,
   cameraTheta,
   cameraPhi,
-  protoStarStates,
   onStarClick,
+  hoveredStarId,
+  presentationByStarId,
+  onStarHoverChange,
 }: StarLayerProps) {
   const positioned = useMemo(() => {
     return stars.map((star) => {
@@ -50,7 +55,9 @@ export function StarLayer({
   return (
     <div className={styles.starLayer}>
       {positioned.map((star) => {
-        const protoState = protoStarStates.get(star.id);
+        const presentation = presentationByStarId?.get(star.id);
+        const isHovered = hoveredStarId === star.id;
+
         return (
           <div
             key={star.id}
@@ -60,12 +67,18 @@ export function StarLayer({
               top: `${star.screenY}%`,
             }}
             onClick={() => onStarClick?.(star.id)}
+            onMouseEnter={() => onStarHoverChange?.(star.id)}
+            onMouseLeave={() => onStarHoverChange?.(null)}
           >
-            {star.type === "proto" && protoState ? (
-              <ProtoStarRenderer state={protoState} />
-            ) : (
-              <div className={styles.campaignStar} data-layer={star.layer} />
-            )}
+            <div
+              className={styles.campaignStar}
+              data-layer={star.layer}
+              data-prominence={star.prominence ?? "minor"}
+              data-born={star.type === "campaign" && star.nodeKind === "anchor" ? "true" : undefined}
+            />
+            {isHovered && presentation ? (
+              <ObserverTooltip presentation={presentation} />
+            ) : null}
           </div>
         );
       })}

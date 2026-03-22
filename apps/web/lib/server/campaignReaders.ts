@@ -3,19 +3,52 @@ import { WebAuthError } from "@/lib/server/authContext";
 import { mapCanonicalSessionOrigin } from "@/lib/mappers/sessionMappers";
 import { prettifyCampaignSlug, formatSessionDisplayTitle } from "@/lib/campaigns/display";
 import {
+  countArchivedSessionsForGuildCampaign,
   getGuildConfigState,
   getGuildCampaignDisplayName,
   isCampaignSlugOwnedByGuild,
+  listBornStarsForGuildCampaign,
+  listKnownGuildIds,
+  listScopedCampaignDirectoryRecords,
   listGuildCampaignRecords,
   listSessionsForGuildCampaign,
   readSessionRecap,
   readSessionTranscript,
 } from "@/lib/server/readData/archiveReadStore";
 import { getDemoCampaignSummary } from "@/lib/server/demoCampaign";
+import { getGuildDisplayMetadataByIds } from "@/lib/server/discordGuildMetadataStore";
 import { ScopeGuardError } from "@/lib/server/scopeGuards";
 import { WebDataError } from "@/lib/mappers/errorMappers";
 import { assertUserCanWriteCampaignArchive, canUserWriteCampaignArchive } from "@/lib/server/writeAuthority";
-import type { CampaignSummary, DashboardEmptyGuild, DashboardModel, SessionArtifactStatus, SessionSummary } from "@/lib/types";
+import { repairMissingBornStarsForCampaignScope } from "../../../../src/sessions/starBirth.js";
+import type {
+  CampaignSummary,
+  DashboardEmptyGuild,
+  DashboardModel,
+  HomepageSkyCampaignSummary,
+  HomepageSkyBornStarSummary,
+  HomepageSkyDiagnostics,
+  HomepageSkyProjection,
+  HomepageSkySkippedCampaign,
+  SessionArtifactStatus,
+  SessionSummary,
+} from "@/lib/types";
+
+const HOMEPAGE_SKY_DIAGNOSTICS_ENABLED =
+  process.env.NODE_ENV !== "production"
+  && /^(1|true|yes|on)$/i.test(process.env.STARSTORY_HOMEPAGE_DIAGNOSTICS?.trim() ?? "");
+
+function logHomepageSkyDiagnostics(event: string, context: Record<string, unknown>): void {
+  if (!HOMEPAGE_SKY_DIAGNOSTICS_ENABLED) {
+    return;
+  }
+
+  console.info(`[homepage-sky] ${event}`, context);
+}
+
+function dedupeStrings(values: string[]): string[] {
+  return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
 
 type QueryInput = Record<string, string | string[] | undefined> | undefined;
 
@@ -29,6 +62,10 @@ function readIncludeArchived(searchParams?: QueryInput): boolean {
 
 function toIsoDate(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
+}
+
+function toIsoDateTime(ms: number): string {
+  return new Date(ms).toISOString();
 }
 
 function countWords(text: string): number {
@@ -455,6 +492,267 @@ export async function listWebCampaignsForGuilds(args: {
   return { campaigns, wordsRecorded, emptyGuilds };
 }
 
+function toHomepageSkyCampaign(campaign: CampaignSummary): HomepageSkyCampaignSummary {
+  return {
+    id: `${campaign.guildId ?? "global"}::${campaign.slug}`,
+    slug: campaign.slug,
+    name: campaign.name,
+    guildIconUrl: campaign.guildIconUrl ?? null,
+    sessionCount: campaign.sessionCount,
+    lastSessionDate: campaign.lastSessionDate,
+    sessions: campaign.sessions.map((session) => ({
+      id: session.id,
+      label: session.label,
+      title: session.title,
+      date: session.date,
+    })),
+  };
+}
+
+function toHomepageSkyCampaignFromSessions(args: {
+  guildId: string;
+  campaignSlug: string;
+  guildIconUrl?: string | null;
+  sessions: SessionSummaryWithStats[];
+}): HomepageSkyCampaignSummary {
+  const campaignName = getGuildCampaignDisplayName({ guildId: args.guildId, campaignSlug: args.campaignSlug })
+    ?? (args.sessions.every((entry) => entry.session.sessionOrigin === "lab_legacy")
+      ? "Lab legacy"
+      : prettifyCampaignSlug(args.campaignSlug));
+
+  return {
+    id: `${args.guildId}::${args.campaignSlug}`,
+    slug: args.campaignSlug,
+    name: campaignName,
+    guildIconUrl: args.guildIconUrl ?? null,
+    sessionCount: args.sessions.length,
+    lastSessionDate: args.sessions[0]?.session.date ?? null,
+    sessions: args.sessions.map((entry) => ({
+      id: entry.session.id,
+      label: entry.session.label,
+      title: entry.session.title,
+      date: entry.session.date,
+    })),
+  };
+}
+
+export async function getHomepageSkyProjection(args?: {
+  includeArchived?: boolean;
+  viewerUserId?: string | null;
+}): Promise<HomepageSkyProjection> {
+  const sourceGuildIds = listKnownGuildIds();
+  const scopedDirectoryRecords = listScopedCampaignDirectoryRecords();
+  const scopedDirectoryGuildIds = dedupeStrings(scopedDirectoryRecords.map((record) => record.guildId));
+  const discoveredGuildIds = dedupeStrings([...sourceGuildIds, ...scopedDirectoryGuildIds]);
+
+  logHomepageSkyDiagnostics("discovery", {
+    sourceGuildCount: sourceGuildIds.length,
+    discoveredGuildCount: discoveredGuildIds.length,
+    discoveredGuildIds,
+    scopedDirectoryRecordCount: scopedDirectoryRecords.length,
+    includeArchived: args?.includeArchived ?? false,
+  });
+
+  if (discoveredGuildIds.length === 0 && scopedDirectoryRecords.length === 0) {
+    return {
+      totalSessions: 0,
+      campaignCount: 0,
+      wordsRecorded: 0,
+      campaigns: [],
+      bornStars: [],
+      personalAnchorStar: null,
+      diagnostics: {
+        sourceGuildIds,
+        discoveredGuildIds,
+        scopedDirectoryGuildIds,
+        scopedDirectoryRecordCount: scopedDirectoryRecords.length,
+        projectedCampaignIds: [],
+        skippedCampaigns: [],
+      },
+    };
+  }
+
+  const durableGuildMetadata = await getGuildDisplayMetadataByIds({ guildIds: discoveredGuildIds });
+  const guildNameMap = new Map(durableGuildMetadata.map((guild) => [guild.guildId, guild.guildName]));
+  const guildIconMap = new Map(
+    durableGuildMetadata
+      .filter((guild) => Boolean(guild.guildIcon?.trim()))
+      .map((guild) => [guild.guildId, guild.guildIcon!.trim()])
+  );
+
+  const results = await Promise.all(
+    discoveredGuildIds.map((guildId) =>
+      listWebCampaignForGuild({
+        guildId,
+        guildName: guildNameMap.get(guildId),
+        guildIconUrl: guildIconMap.get(guildId),
+        includeArchived: args?.includeArchived ?? false,
+      })
+    )
+  );
+
+  const projectedCampaigns = results
+    .flatMap((result) => result.campaigns)
+    .map(toHomepageSkyCampaign);
+
+  const campaignGuildIconMap = new Map(
+    projectedCampaigns.map((campaign) => [campaign.id, campaign.guildIconUrl ?? null])
+  );
+
+  const bornStarScopes = new Map<string, { guildId: string; campaignSlug: string }>();
+  for (const guildId of discoveredGuildIds) {
+    for (const campaign of listGuildCampaignRecords(guildId)) {
+      const campaignSlug = campaign.campaign_slug?.trim();
+      if (!campaignSlug) {
+        continue;
+      }
+
+      bornStarScopes.set(`${guildId}::${campaignSlug}`, { guildId, campaignSlug });
+    }
+  }
+  for (const campaign of projectedCampaigns) {
+    const [guildId, campaignSlug] = campaign.id.split("::");
+    if (guildId && campaignSlug) {
+      bornStarScopes.set(`${guildId}::${campaignSlug}`, { guildId, campaignSlug });
+    }
+  }
+  for (const record of scopedDirectoryRecords) {
+    bornStarScopes.set(`${record.guildId}::${record.campaignSlug}`, record);
+  }
+
+  for (const scope of bornStarScopes.values()) {
+    repairMissingBornStarsForCampaignScope({
+      guildId: scope.guildId,
+      campaignSlug: scope.campaignSlug,
+    });
+  }
+
+  const bornStars: HomepageSkyBornStarSummary[] = [...bornStarScopes.values()]
+    .flatMap((scope) => listBornStarsForGuildCampaign(scope))
+    .map((bornStar) => ({
+      id: `born::${bornStar.sessionId}`,
+      guildId: bornStar.guildId,
+      campaignSlug: bornStar.campaignSlug,
+      campaignName: bornStar.campaignName
+        ?? getGuildCampaignDisplayName({ guildId: bornStar.guildId, campaignSlug: bornStar.campaignSlug })
+        ?? prettifyCampaignSlug(bornStar.campaignSlug),
+      guildIconUrl: campaignGuildIconMap.get(`${bornStar.guildId}::${bornStar.campaignSlug}`) ?? null,
+      sessionId: bornStar.sessionId,
+      sessionLabel: bornStar.sessionLabel,
+      bornAt: toIsoDateTime(bornStar.bornAtMs),
+      lineCount: bornStar.lineCount,
+      startedByUserId: bornStar.startedByUserId,
+    }))
+    .sort((left, right) => {
+      if (left.bornAt !== right.bornAt) {
+        return right.bornAt.localeCompare(left.bornAt);
+      }
+
+      return left.id.localeCompare(right.id);
+    });
+
+  const normalizedViewerUserId = args?.viewerUserId?.trim() || null;
+  const personalAnchorStar = normalizedViewerUserId
+    ? bornStars.find((star) => star.startedByUserId === normalizedViewerUserId) ?? null
+    : null;
+
+  const seenCampaigns = new Set(projectedCampaigns.map((campaign) => campaign.id));
+  const skippedCampaigns: HomepageSkySkippedCampaign[] = [];
+  let wordsRecorded = results.reduce((sum, result) => sum + result.wordsRecorded, 0);
+
+  for (const record of scopedDirectoryRecords) {
+    const campaignId = `${record.guildId}::${record.campaignSlug}`;
+    if (seenCampaigns.has(campaignId)) {
+      skippedCampaigns.push({
+        campaignId,
+        guildId: record.guildId,
+        campaignSlug: record.campaignSlug,
+        reason: "already_in_projection",
+      });
+      logHomepageSkyDiagnostics("skip_campaign", {
+        campaignId,
+        reason: "already_in_projection",
+      });
+      continue;
+    }
+
+    const sessions = await listWebSessionsForCampaign({
+      guildId: record.guildId,
+      campaignSlug: record.campaignSlug,
+      limit: 50,
+      includeArchived: args?.includeArchived ?? false,
+    });
+
+    if (sessions.length === 0) {
+      skippedCampaigns.push({
+        campaignId,
+        guildId: record.guildId,
+        campaignSlug: record.campaignSlug,
+        reason: "no_sessions",
+      });
+      logHomepageSkyDiagnostics("skip_campaign", {
+        campaignId,
+        reason: "no_sessions",
+      });
+      continue;
+    }
+
+    projectedCampaigns.push(
+      toHomepageSkyCampaignFromSessions({
+        guildId: record.guildId,
+        campaignSlug: record.campaignSlug,
+        guildIconUrl: guildIconMap.get(record.guildId) ?? null,
+        sessions,
+      })
+    );
+    campaignGuildIconMap.set(campaignId, guildIconMap.get(record.guildId) ?? null);
+    wordsRecorded += sessions.reduce((sum, entry) => sum + entry.wordCount, 0);
+    seenCampaigns.add(campaignId);
+  }
+
+  projectedCampaigns.sort((left, right) => {
+    const rightDate = right.lastSessionDate ?? "";
+    const leftDate = left.lastSessionDate ?? "";
+    if (rightDate !== leftDate) {
+      return rightDate.localeCompare(leftDate);
+    }
+
+    if (left.sessionCount !== right.sessionCount) {
+      return right.sessionCount - left.sessionCount;
+    }
+
+    return left.slug.localeCompare(right.slug);
+  });
+
+  const totalSessions = projectedCampaigns.reduce((sum, campaign) => sum + campaign.sessionCount, 0);
+  const diagnostics: HomepageSkyDiagnostics = {
+    sourceGuildIds,
+    discoveredGuildIds,
+    scopedDirectoryGuildIds,
+    scopedDirectoryRecordCount: scopedDirectoryRecords.length,
+    projectedCampaignIds: projectedCampaigns.map((campaign) => campaign.id),
+    skippedCampaigns,
+  };
+
+  logHomepageSkyDiagnostics("projection_complete", {
+    campaignCount: projectedCampaigns.length,
+    totalSessions,
+    wordsRecorded,
+    projectedCampaignIds: diagnostics.projectedCampaignIds,
+    skippedCampaignCount: diagnostics.skippedCampaigns.length,
+  });
+
+  return {
+    totalSessions,
+    campaignCount: projectedCampaigns.length,
+    wordsRecorded,
+    campaigns: projectedCampaigns,
+    bornStars,
+    personalAnchorStar,
+    diagnostics,
+  };
+}
+
 export async function getWebDashboardModel(args?: {
   searchParams?: Record<string, string | string[] | undefined>;
 }): Promise<DashboardModel> {
@@ -569,6 +867,9 @@ export async function getWebCampaignDetail(args: {
     limit: 50,
     includeArchived,
   });
+  const archivedSessionCount = includeArchived
+    ? sessions.filter((entry) => entry.session.isArchived).length
+    : countArchivedSessionsForGuildCampaign({ guildId, campaignSlug: args.campaignSlug });
   const guildDisplayName = resolveGuildDisplayName({ guildId, guildName: resolvedScope.guildName });
   const guildIconUrl = resolveGuildIconUrl(resolvedScope.guildIconUrl);
   const canWrite = canUserWriteCampaignArchive({ guildId, campaignSlug: args.campaignSlug, userId: auth.user?.id ?? null });
@@ -583,6 +884,7 @@ export async function getWebCampaignDetail(args: {
     isDm: canWrite,
     description: buildCampaignDescription(guildDisplayName),
     sessionCount: sessions.length,
+    archivedSessionCount,
     lastSessionDate: sessions[0]?.session.date ?? null,
     sessions: sessions.map((entry) => entry.session),
     type: "user",

@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-serif: var(--font-playfair-display), serif;
+  --font-sans: var(--font-source-serif-4), Georgia, serif;
+  --font-serif: var(--font-libre-baskerville), Georgia, serif;
 
   --radius-lg: 0.85rem;
   --radius-md: calc(0.85rem - 2px);
@@ -56,6 +56,7 @@
 
   body {
     margin: 0;
+    font-family: var(--font-source-serif-4), Georgia, serif;
     line-height: inherit;
     background:
       radial-gradient(circle at top, hsla(42, 80%, 64%, 0.08), transparent 30%),
@@ -63,6 +64,25 @@
       linear-gradient(to bottom, var(--color-background), hsl(232 30% 5%));
     color: var(--color-foreground);
     min-height: 100vh;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-libre-baskerville), Georgia, serif;
+  }
+}
+
+@layer utilities {
+  .font-heading {
+    font-family: var(--font-libre-baskerville), Georgia, serif;
+  }
+
+  .font-body-serif {
+    font-family: var(--font-source-serif-4), Georgia, serif;
   }
 }
 
@@ -195,6 +215,14 @@
 }
 
 .button-primary {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  text-decoration: none;
+  vertical-align: middle;
   background: linear-gradient(180deg, var(--color-gold-bright), var(--color-gold-soft));
   color: var(--color-primary-foreground);
   box-shadow:
@@ -267,6 +295,14 @@
 
 .control-button-ghost,
 .control-button-danger {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  text-decoration: none;
+  vertical-align: middle;
   border: 1px solid var(--color-border);
   background: hsla(226, 16%, 14%, 0.45);
   color: var(--color-foreground);

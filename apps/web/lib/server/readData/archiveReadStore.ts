@@ -76,6 +76,18 @@ export type ArchiveRecap = {
 
 export type ArchiveRecapReadiness = "pending" | "ready" | "failed";
 
+export type ArchiveBornStar = {
+  sessionId: string;
+  guildId: string;
+  campaignSlug: string;
+  campaignName: string | null;
+  sessionLabel: string | null;
+  bornAtMs: number;
+  validatedAtMs: number;
+  lineCount: number;
+  startedByUserId: string | null;
+};
+
 const DEFAULT_CAMPAIGNS_DIR = "campaigns";
 const DEFAULT_DB_FILENAME = "db.sqlite";
 const DEFAULT_DATA_ROOT = "data";
@@ -375,6 +387,135 @@ export function listGuildCampaignRecords(guildId: string): GuildCampaignRecord[]
       )
       .all(guildId) as GuildCampaignRecord[];
     return rows;
+  } catch {
+    return [];
+  }
+}
+
+export function listKnownGuildIds(): string[] {
+  const db = openReadOnlyDb(getControlDbPath());
+  const guildIds = new Set<string>();
+
+  if (db) {
+    try {
+      const campaignRows = db
+        .prepare(
+          `SELECT DISTINCT guild_id
+           FROM guild_campaigns
+           WHERE guild_id IS NOT NULL AND TRIM(guild_id) <> ''`
+        )
+        .all() as Array<{ guild_id: string | null }>;
+      for (const row of campaignRows) {
+        const guildId = row.guild_id?.trim();
+        if (guildId) {
+          guildIds.add(guildId);
+        }
+      }
+    } catch {
+      // Ignore missing guild_campaigns tables in older control DBs.
+    }
+
+    try {
+      const configRows = db
+        .prepare(
+          `SELECT DISTINCT guild_id
+           FROM guild_config
+           WHERE guild_id IS NOT NULL AND TRIM(guild_id) <> ''`
+        )
+        .all() as Array<{ guild_id: string | null }>;
+      for (const row of configRows) {
+        const guildId = row.guild_id?.trim();
+        if (guildId) {
+          guildIds.add(guildId);
+        }
+      }
+    } catch {
+      // Ignore missing guild_config tables in older control DBs.
+    }
+  }
+
+  for (const record of listScopedCampaignDirectoryRecords()) {
+    guildIds.add(record.guildId);
+  }
+
+  return [...guildIds].sort((left, right) => left.localeCompare(right));
+}
+
+export function listScopedCampaignDirectoryRecords(): Array<{ guildId: string; campaignSlug: string }> {
+  const dataRoot = resolveDataRoot();
+  const campaignsDir = path.join(dataRoot, resolveCampaignsDir());
+
+  if (!fs.existsSync(campaignsDir)) {
+    return [];
+  }
+
+  const records = new Map<string, { guildId: string; campaignSlug: string }>();
+  const scopedDirPattern = /^g_([^_].*?)__c_(.+)$/;
+
+  for (const entry of fs.readdirSync(campaignsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    const match = scopedDirPattern.exec(entry.name);
+    if (!match) {
+      continue;
+    }
+
+    const guildId = match[1]?.trim();
+    const campaignSlug = match[2]?.trim();
+    if (!guildId || !campaignSlug) {
+      continue;
+    }
+
+    const key = `${guildId}::${campaignSlug}`;
+    records.set(key, { guildId, campaignSlug });
+  }
+
+  return [...records.values()].sort((left, right) => {
+    if (left.guildId !== right.guildId) {
+      return left.guildId.localeCompare(right.guildId);
+    }
+    return left.campaignSlug.localeCompare(right.campaignSlug);
+  });
+}
+
+export function listBornStarsForGuildCampaign(args: {
+  guildId: string;
+  campaignSlug: string;
+}): ArchiveBornStar[] {
+  const dbPath = resolveCampaignDbPath({ campaignSlug: args.campaignSlug, guildId: args.guildId });
+  if (!dbPath) {
+    return [];
+  }
+
+  const db = openReadOnlyDb(dbPath);
+  if (!db) {
+    return [];
+  }
+
+  try {
+    return db
+      .prepare(
+        `SELECT bs.session_id, bs.guild_id, bs.campaign_slug, bs.campaign_name, bs.session_label,
+                bs.born_at_ms, bs.validated_at_ms, bs.line_count, sessions.started_by_id
+         FROM born_stars bs
+         LEFT JOIN sessions ON sessions.session_id = bs.session_id
+         WHERE bs.guild_id = ? AND bs.campaign_slug = ?
+         ORDER BY bs.born_at_ms DESC, bs.session_id ASC`
+      )
+      .all(args.guildId, args.campaignSlug)
+      .map((row: any) => ({
+        sessionId: String(row.session_id),
+        guildId: String(row.guild_id),
+        campaignSlug: String(row.campaign_slug),
+        campaignName: typeof row.campaign_name === "string" && row.campaign_name.trim().length > 0 ? row.campaign_name.trim() : null,
+        sessionLabel: typeof row.session_label === "string" && row.session_label.trim().length > 0 ? row.session_label.trim() : null,
+        bornAtMs: Number(row.born_at_ms ?? 0),
+        validatedAtMs: Number(row.validated_at_ms ?? 0),
+        lineCount: Number(row.line_count ?? 0),
+        startedByUserId: typeof row.started_by_id === "string" && row.started_by_id.trim().length > 0 ? row.started_by_id.trim() : null,
+      })) as ArchiveBornStar[];
   } catch {
     return [];
   }
@@ -741,6 +882,83 @@ export function listSessionsForGuildCampaign(args: {
   }
 
   return [];
+}
+
+export function countArchivedSessionsForGuildCampaign(args: {
+  guildId: string;
+  campaignSlug: string;
+}): number {
+  const guildId = args.guildId.trim();
+  const campaignSlug = args.campaignSlug.trim();
+  const dbCandidates = getCampaignDbCandidates({ campaignSlug, guildId });
+  if (dbCandidates.length === 0) return 0;
+
+  for (const candidate of dbCandidates) {
+    const hasGuildColumn = sessionsTableHasGuildIdColumn(candidate.db);
+    const hasArchivedAtColumn = sessionsTableHasArchivedAtColumn(candidate.db);
+    if (!hasArchivedAtColumn) {
+      continue;
+    }
+
+    try {
+      if (hasGuildColumn) {
+        const exactRow = candidate.db
+          .prepare(
+            `SELECT COUNT(*) AS count
+             FROM sessions
+             WHERE guild_id = ? AND archived_at_ms IS NOT NULL`
+          )
+          .get(guildId) as { count: number } | undefined;
+        if (Number(exactRow?.count ?? 0) > 0) {
+          return Number(exactRow?.count ?? 0);
+        }
+
+        const trimmedRow = candidate.db
+          .prepare(
+            `SELECT COUNT(*) AS count
+             FROM sessions
+             WHERE TRIM(guild_id) = ? AND archived_at_ms IS NOT NULL`
+          )
+          .get(guildId) as { count: number } | undefined;
+        if (Number(trimmedRow?.count ?? 0) > 0) {
+          warnSessionReader({
+            reason: "guild_trim_match",
+            guildId,
+            campaignSlug,
+            dbPath: candidate.dbPath,
+            source: candidate.source,
+            rowCount: Number(trimmedRow?.count ?? 0),
+          });
+          return Number(trimmedRow?.count ?? 0);
+        }
+
+        continue;
+      }
+
+      const legacyRow = candidate.db
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM sessions
+           WHERE archived_at_ms IS NOT NULL`
+        )
+        .get() as { count: number } | undefined;
+      if (Number(legacyRow?.count ?? 0) > 0) {
+        warnSessionReader({
+          reason: "missing_guild_column",
+          guildId,
+          campaignSlug,
+          dbPath: candidate.dbPath,
+          source: candidate.source,
+          rowCount: Number(legacyRow?.count ?? 0),
+        });
+        return Number(legacyRow?.count ?? 0);
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return 0;
 }
 
 export function findSessionByGuildAndId(args: {
