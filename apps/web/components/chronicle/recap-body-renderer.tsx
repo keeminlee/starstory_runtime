@@ -1,4 +1,4 @@
-type RecapBlock =
+export type RecapBlock =
   | { type: "paragraph"; text: string }
   | { type: "unordered-list"; items: string[] }
   | { type: "ordered-list"; items: string[] };
@@ -15,7 +15,7 @@ function stripListMarker(line: string): string {
   return line.replace(/^([-*]|\d+[.)])\s+/, "").trim();
 }
 
-function parseRecapBlocks(text: string): RecapBlock[] {
+export function parseRecapBlocks(text: string): RecapBlock[] {
   const lines = text.split(/\r?\n/);
   const blocks: RecapBlock[] = [];
   let paragraphLines: string[] = [];

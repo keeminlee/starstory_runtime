@@ -1,15 +1,17 @@
 "use client";
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   applyCampaignRegistryPendingActionApi,
   createCampaignRegistryEntryApi,
   deleteCampaignRegistryEntryApi,
   getEntityAppearancesApi,
+  getCampaignRegistryApi,
   updateCampaignRegistryEntryApi,
 } from "@/lib/api/registry";
 import { WebApiError } from "@/lib/api/http";
-import type { EntityAppearanceDto } from "@/lib/registry/types";
+import { getEntityCandidatesApi } from "@/lib/api/sessions";
+import type { EntityAppearanceDto, EntityCandidateDto } from "@/lib/registry/types";
 import type {
   RegistryCategoryKey,
   RegistryEntityDto,
@@ -23,15 +25,15 @@ import {
   UNKNOWN_STORED_MAPPING_LABEL,
 } from "@/lib/registry/pcDiscordUserSelection";
 import { formatSessionDisplayTitle } from "@/lib/campaigns/display";
+import { useVerboseMode } from "@/providers/verbose-mode-provider";
+import { EntityResolutionPanel } from "@/components/session/entity-resolution-panel";
 
-const TABS: Array<{ key: RegistryCategoryKey | "pending" | "ignore"; label: string }> = [
+const CATEGORY_TABS: Array<{ key: RegistryCategoryKey; label: string }> = [
   { key: "pcs", label: "PCs" },
   { key: "npcs", label: "NPCs" },
   { key: "locations", label: "Locations" },
   { key: "factions", label: "Factions" },
   { key: "misc", label: "Misc" },
-  { key: "pending", label: "Pending" },
-  { key: "ignore", label: "Ignore" },
 ];
 
 type CampaignRegistryManagerProps = {
@@ -42,6 +44,7 @@ type CampaignRegistryManagerProps = {
   searchParams?: Record<string, string | string[] | undefined>;
   isEditable?: boolean;
   readOnlyReason?: "not_campaign_dm" | "demo_mode";
+  selectedSessionId?: string | null;
 };
 
 function getReadOnlyMessage(reason?: "not_campaign_dm" | "demo_mode"): string {
@@ -76,13 +79,16 @@ export function CampaignRegistryManager({
   searchParams,
   isEditable = true,
   readOnlyReason,
+  selectedSessionId,
 }: CampaignRegistryManagerProps) {
+  const { verboseModeEnabled } = useVerboseMode();
   const [registry, setRegistry] = useState(initialRegistry);
   const [activeTab, setActiveTab] = useState<RegistryCategoryKey | "pending" | "ignore">("pcs");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
+  const [isCreateExpanded, setIsCreateExpanded] = useState(false);
 
   const [newCategory, setNewCategory] = useState<RegistryCategoryKey>("npcs");
   const [newCanonicalName, setNewCanonicalName] = useState("");
@@ -99,6 +105,13 @@ export function CampaignRegistryManager({
   const [appearanceCache, setAppearanceCache] = useState<Record<string, EntityAppearanceDto[]>>({});
   const [appearanceLoading, setAppearanceLoading] = useState(false);
 
+  // Session-scope filtering
+  const [sessionScope, setSessionScope] = useState<"current" | "all">(
+    selectedSessionId ? "current" : "all"
+  );
+  const [sessionCandidates, setSessionCandidates] = useState<EntityCandidateDto[]>([]);
+  const [sessionCandidatesLoading, setSessionCandidatesLoading] = useState(false);
+
   const scopedSearchParams = useMemo(
     () => ({
       ...(searchParams ?? {}),
@@ -106,6 +119,40 @@ export function CampaignRegistryManager({
     }),
     [guildId, searchParams]
   );
+
+  // Load session-scoped candidates when selectedSessionId changes
+  useEffect(() => {
+    if (!selectedSessionId) {
+      setSessionCandidates([]);
+      setSessionScope("all");
+      return;
+    }
+    setSessionScope("current");
+    setSessionCandidatesLoading(true);
+    getEntityCandidatesApi(selectedSessionId, scopedSearchParams)
+      .then((res) => setSessionCandidates(res.candidates))
+      .catch(() => setSessionCandidates([]))
+      .finally(() => setSessionCandidatesLoading(false));
+  }, [selectedSessionId, scopedSearchParams]);
+
+  // Build a set of candidate names from the current session for cross-referencing
+  const sessionCandidateNames = useMemo(() => {
+    if (sessionCandidates.length === 0) return new Set<string>();
+    const names = new Set<string>();
+    for (const c of sessionCandidates) {
+      names.add(c.candidateName.toLowerCase());
+    }
+    return names;
+  }, [sessionCandidates]);
+
+  const refreshRegistry = useCallback(async () => {
+    try {
+      const result = await getCampaignRegistryApi(campaignSlug, scopedSearchParams);
+      setRegistry(result.registry);
+    } catch {
+      // Silently fail — registry may already be stale but we don't want to hide the UI
+    }
+  }, [campaignSlug, scopedSearchParams]);
 
   const toggleAppearances = useCallback(
     async (entityId: string) => {
@@ -166,7 +213,16 @@ export function CampaignRegistryManager({
       return [] as RegistryEntityDto[];
     }
 
-    const entities = registry.categories[activeTab as RegistryCategoryKey];
+    let entities = registry.categories[activeTab as RegistryCategoryKey];
+
+    // Session-scope filter: only show entities whose name or aliases appear in session candidates
+    if (sessionScope === "current" && selectedSessionId && sessionCandidateNames.size > 0) {
+      entities = entities.filter((entity) => {
+        if (sessionCandidateNames.has(entity.canonicalName.toLowerCase())) return true;
+        return entity.aliases.some((alias) => sessionCandidateNames.has(alias.toLowerCase()));
+      });
+    }
+
     const q = query.trim().toLowerCase();
     if (!q) return entities;
 
@@ -177,7 +233,7 @@ export function CampaignRegistryManager({
       if (entity.notes.toLowerCase().includes(q)) return true;
       return false;
     });
-  }, [activeTab, query, registry]);
+  }, [activeTab, query, registry, sessionScope, selectedSessionId, sessionCandidateNames]);
 
   const filteredPending = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -374,6 +430,7 @@ export function CampaignRegistryManager({
 
   return (
     <div className="space-y-6">
+      {verboseModeEnabled ? (
       <section className="rounded-xl card-glass p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -392,96 +449,31 @@ export function CampaignRegistryManager({
           </div>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-muted-foreground md:grid-cols-7">
-          {TABS.map((tab) => (
+          {CATEGORY_TABS.map((tab) => (
             <div key={tab.key} className="rounded-md border border-border/60 bg-background/35 px-2 py-1">
               <span className="font-semibold text-foreground">{tab.label}</span>: {categoryCounts[tab.key]}
             </div>
           ))}
+          <div className="rounded-md border border-amber-400/30 bg-amber-400/5 px-2 py-1">
+            <span className="font-semibold text-amber-300">Pending</span>: {categoryCounts.pending}
+          </div>
+          <div className="rounded-md border border-border/60 bg-background/35 px-2 py-1">
+            <span className="font-semibold text-foreground">Ignore</span>: {categoryCounts.ignore}
+          </div>
         </div>
       </section>
-
-      {isEditable ? (
-      <section className="rounded-xl card-glass p-5">
-        <h3 className="text-lg font-serif">Add Canonical Entry</h3>
-        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-          <label className="space-y-1 text-sm">
-            <span>Category</span>
-            <select
-              value={newCategory}
-              onChange={(event) => setNewCategory(event.currentTarget.value as RegistryCategoryKey)}
-              className="control-select w-full rounded-md px-3 py-2"
-            >
-              <option value="pcs">PCs</option>
-              <option value="npcs">NPCs</option>
-              <option value="locations">Locations</option>
-              <option value="factions">Factions</option>
-              <option value="misc">Misc</option>
-            </select>
-          </label>
-          <label className="space-y-1 text-sm">
-            <span>Canonical Name</span>
-            <input
-              value={newCanonicalName}
-              onChange={(event) => setNewCanonicalName(event.currentTarget.value)}
-              className="control-input w-full rounded-md px-3 py-2"
-              placeholder="e.g. Captain Rowan"
-            />
-          </label>
-          <label className="space-y-1 text-sm md:col-span-2">
-            <span>Aliases (comma-separated)</span>
-            <input
-              value={newAliases}
-              onChange={(event) => setNewAliases(event.currentTarget.value)}
-              className="control-input w-full rounded-md px-3 py-2"
-              placeholder="Rowan, Captain"
-            />
-          </label>
-          <label className="space-y-1 text-sm md:col-span-2">
-            <span>Notes</span>
-            <input
-              value={newNotes}
-              onChange={(event) => setNewNotes(event.currentTarget.value)}
-              className="control-input w-full rounded-md px-3 py-2"
-              placeholder="Optional"
-            />
-          </label>
-          {newCategory === "pcs" ? (
-            <label className="space-y-1 text-sm md:col-span-2">
-              <span>Played by</span>
-              <select
-                value={newDiscordUserId}
-                onChange={(event) => setNewDiscordUserId(event.currentTarget.value)}
-                className="control-select w-full rounded-md px-3 py-2"
-                disabled={!hasKnownDiscordUsers}
-                required
-              >
-                {createPcSelection.options.map((option) => (
-                  <option key={option.value || "__placeholder__"} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-muted-foreground">
-                {createPcSelection.helperText ?? "Choose the observed Discord user who plays this PC."}
-              </p>
-            </label>
-          ) : null}
-        </div>
-        <button
-          type="button"
-          onClick={handleCreateEntry}
-          disabled={isPending || (newCategory === "pcs" && (!hasKnownDiscordUsers || !newDiscordUserId.trim()))}
-          className="mt-4 rounded-full button-primary px-4 py-2 text-xs font-bold uppercase tracking-wider"
-        >
-          Add Entry
-        </button>
-      </section>
-      ) : null}
+      ) : (
+        !isEditable ? (
+          <p className="text-xs uppercase tracking-wider text-amber-200/90">
+            {getReadOnlyMessage(readOnlyReason)}
+          </p>
+        ) : null
+      )}
 
       <section className="rounded-xl card-glass p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap gap-2">
-            {TABS.map((tab) => (
+          <div className="flex flex-wrap items-center gap-2">
+            {CATEGORY_TABS.map((tab) => (
               <button
                 key={tab.key}
                 type="button"
@@ -493,6 +485,29 @@ export function CampaignRegistryManager({
                 {tab.label}
               </button>
             ))}
+            <span className="mx-1 h-4 w-px bg-border/50" aria-hidden />
+            <button
+              type="button"
+              onClick={() => setActiveTab("pending")}
+              className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider ${
+                activeTab === "pending"
+                  ? "bg-amber-600 text-white cursor-pointer"
+                  : "border border-amber-400/30 bg-amber-400/5 text-amber-300 hover:bg-amber-400/10"
+              }`}
+            >
+              Pending{categoryCounts.pending > 0 ? ` (${categoryCounts.pending})` : ""}
+            </button>
+            {verboseModeEnabled ? (
+              <button
+                type="button"
+                onClick={() => setActiveTab("ignore")}
+                className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider ${
+                  activeTab === "ignore" ? "bg-primary text-primary-foreground cursor-pointer" : "control-button-ghost"
+                }`}
+              >
+                Ignore
+              </button>
+            ) : null}
           </div>
           <input
             value={query}
@@ -502,13 +517,90 @@ export function CampaignRegistryManager({
           />
         </div>
 
+        {selectedSessionId ? (
+          <div className="mt-3 flex items-center gap-2">
+            <div className="flex rounded-lg border border-border/70 bg-background/50 p-0.5">
+              <button
+                type="button"
+                onClick={() => setSessionScope("current")}
+                className={`rounded-md px-3 py-1 text-xs font-semibold uppercase tracking-wider transition-all ${
+                  sessionScope === "current"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Current Session
+              </button>
+              <button
+                type="button"
+                onClick={() => setSessionScope("all")}
+                className={`rounded-md px-3 py-1 text-xs font-semibold uppercase tracking-wider transition-all ${
+                  sessionScope === "all"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Show All
+              </button>
+            </div>
+            {sessionScope === "current" && sessionCandidatesLoading ? (
+              <span className="text-xs text-muted-foreground">Loading…</span>
+            ) : null}
+            {sessionScope === "current" && !sessionCandidatesLoading && sessionCandidateNames.size === 0 ? (
+              <span className="text-xs text-muted-foreground">
+                No entity candidates detected in this session.{" "}
+                <button
+                  type="button"
+                  onClick={() => setSessionScope("all")}
+                  className="underline hover:text-foreground"
+                >
+                  Show all
+                </button>
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
         {error ? <p className="mt-4 text-sm text-rose-300">{error}</p> : null}
         {status ? <p className="mt-4 text-sm text-emerald-300">{status}</p> : null}
 
         {activeTab === "pending" ? (
-          <div className="mt-4 space-y-3">
-            {filteredPending.length === 0 ? <p className="text-sm text-muted-foreground">No pending candidates.</p> : null}
-            {filteredPending.map((item) => (
+          <div className="mt-4 space-y-4">
+            {selectedSessionId ? (
+              <>
+                <div className="space-y-1">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                    Session Entity Review
+                  </h4>
+                  <p className="text-xs text-muted-foreground">
+                    Classify entity candidates detected in this session&apos;s transcript before recap generation.
+                  </p>
+                </div>
+                <EntityResolutionPanel
+                  sessionId={selectedSessionId}
+                  campaignSlug={campaignSlug}
+                  searchParams={scopedSearchParams}
+                  canWrite={isEditable}
+                  onResolutionChange={refreshRegistry}
+                />
+              </>
+            ) : (
+              <div className="rounded-lg border border-amber-400/20 bg-amber-400/5 p-4 text-center">
+                <p className="text-sm text-amber-200/90">
+                  Select a session in the Chronicle to review entity candidates.
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Session-scoped candidate review is the primary attribution workflow.
+                </p>
+              </div>
+            )}
+            {filteredPending.length > 0 ? (
+              <details className="group" open={!selectedSessionId}>
+                <summary className="cursor-pointer text-xs font-bold uppercase tracking-wider text-muted-foreground hover:text-foreground">
+                  Campaign-Wide Pending ({filteredPending.length})
+                </summary>
+                <div className="mt-3 space-y-3">
+                {filteredPending.map((item) => (
               <div key={item.key} className="rounded-lg border border-border/60 bg-background/35 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
@@ -569,6 +661,9 @@ export function CampaignRegistryManager({
                 ) : null}
               </div>
             ))}
+                </div>
+              </details>
+            ) : null}
           </div>
         ) : activeTab === "ignore" ? (
           <div className="mt-4">
@@ -711,6 +806,97 @@ export function CampaignRegistryManager({
           </div>
         )}
       </section>
+
+      {isEditable ? (
+      <section className="rounded-xl card-glass p-5">
+        <button
+          type="button"
+          onClick={() => setIsCreateExpanded((v) => !v)}
+          className="flex items-center gap-2 text-sm font-serif text-foreground hover:text-foreground/80"
+        >
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded border border-border/60 text-xs leading-none">
+            {isCreateExpanded ? "−" : "+"}
+          </span>
+          Add Canonical Entry
+        </button>
+        {isCreateExpanded ? (
+        <>
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <label className="space-y-1 text-sm">
+            <span>Category</span>
+            <select
+              value={newCategory}
+              onChange={(event) => setNewCategory(event.currentTarget.value as RegistryCategoryKey)}
+              className="control-select w-full rounded-md px-3 py-2"
+            >
+              <option value="pcs">PCs</option>
+              <option value="npcs">NPCs</option>
+              <option value="locations">Locations</option>
+              <option value="factions">Factions</option>
+              <option value="misc">Misc</option>
+            </select>
+          </label>
+          <label className="space-y-1 text-sm">
+            <span>Canonical Name</span>
+            <input
+              value={newCanonicalName}
+              onChange={(event) => setNewCanonicalName(event.currentTarget.value)}
+              className="control-input w-full rounded-md px-3 py-2"
+              placeholder="e.g. Captain Rowan"
+            />
+          </label>
+          <label className="space-y-1 text-sm md:col-span-2">
+            <span>Aliases (comma-separated)</span>
+            <input
+              value={newAliases}
+              onChange={(event) => setNewAliases(event.currentTarget.value)}
+              className="control-input w-full rounded-md px-3 py-2"
+              placeholder="Rowan, Captain"
+            />
+          </label>
+          <label className="space-y-1 text-sm md:col-span-2">
+            <span>Notes</span>
+            <input
+              value={newNotes}
+              onChange={(event) => setNewNotes(event.currentTarget.value)}
+              className="control-input w-full rounded-md px-3 py-2"
+              placeholder="Optional"
+            />
+          </label>
+          {newCategory === "pcs" ? (
+            <label className="space-y-1 text-sm md:col-span-2">
+              <span>Played by</span>
+              <select
+                value={newDiscordUserId}
+                onChange={(event) => setNewDiscordUserId(event.currentTarget.value)}
+                className="control-select w-full rounded-md px-3 py-2"
+                disabled={!hasKnownDiscordUsers}
+                required
+              >
+                {createPcSelection.options.map((option) => (
+                  <option key={option.value || "__placeholder__"} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                {createPcSelection.helperText ?? "Choose the observed Discord user who plays this PC."}
+              </p>
+            </label>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          onClick={handleCreateEntry}
+          disabled={isPending || (newCategory === "pcs" && (!hasKnownDiscordUsers || !newDiscordUserId.trim()))}
+          className="mt-4 rounded-full button-primary px-4 py-2 text-xs font-bold uppercase tracking-wider"
+        >
+          Add Entry
+        </button>
+        </>
+        ) : null}
+      </section>
+      ) : null}
     </div>
   );
 }

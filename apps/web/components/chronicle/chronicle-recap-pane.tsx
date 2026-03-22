@@ -5,13 +5,28 @@ import { useRouter } from "next/navigation";
 import { InlineEditableText } from "@/components/shared/inline-editable-text";
 import { StatusChip } from "@/components/shared/status-chip";
 import type { StatusChipTone } from "@/components/shared/status-chip";
-import { getSessionRecapApi } from "@/lib/api/sessions";
+import {
+  getSessionDetailApi,
+  getAnnotatedRecapsApi,
+  getEntityCandidatesApi,
+  regenerateSessionRecapApi,
+} from "@/lib/api/sessions";
 import { updateSessionLabelApi } from "@/lib/api/sessions";
 import { WebApiError } from "@/lib/api/http";
-import { RecapBodyRenderer } from "@/components/chronicle/recap-body-renderer";
+import { AnnotatedRecapRenderer } from "@/components/shared/annotated-recap-renderer";
+import { SpeakerAttributionPanel } from "@/components/session/speaker-attribution-panel";
 import { formatSessionDisplayTitle } from "@/lib/campaigns/display";
 import { useVerboseMode } from "@/providers/verbose-mode-provider";
-import type { RecapTab, SessionArtifactStatus, SessionRecap, SessionSummary } from "@/lib/types";
+import type {
+  RecapTab,
+  SessionArtifactStatus,
+  SessionAnnotatedRecaps,
+  SessionRecap,
+  SessionRecapPhase,
+  SessionSpeakerAttributionState,
+  SessionSummary,
+} from "@/lib/types";
+import type { EntityCandidateDto, RegistrySnapshotDto } from "@/lib/registry/types";
 
 type ChronicleRecapPaneProps = {
   selectedSessionId: string | null;
@@ -19,6 +34,9 @@ type ChronicleRecapPaneProps = {
   campaignSlug: string;
   guildId: string | null;
   canEditSessionTitle: boolean;
+  canWrite: boolean;
+  searchParams: Record<string, string | string[] | undefined>;
+  registry: RegistrySnapshotDto | null;
 };
 
 const TABS: Array<{ id: RecapTab; label: string }> = [
@@ -64,33 +82,66 @@ export function ChronicleRecapPane({
   campaignSlug,
   guildId,
   canEditSessionTitle,
+  canWrite,
+  searchParams,
+  registry,
 }: ChronicleRecapPaneProps) {
   const router = useRouter();
   const { verboseModeEnabled } = useVerboseMode();
   const [recap, setRecap] = useState<SessionRecap | null>(null);
   const [recapStatus, setRecapStatus] = useState<SessionArtifactStatus>("missing");
+  const [recapPhase, setRecapPhase] = useState<SessionRecapPhase | null>(null);
+  const [speakerAttribution, setSpeakerAttribution] = useState<SessionSpeakerAttributionState | null>(null);
+  const [annotations, setAnnotations] = useState<SessionAnnotatedRecaps | null>(null);
+  const [candidates, setCandidates] = useState<EntityCandidateDto[]>([]);
   const [activeTab, setActiveTab] = useState<RecapTab>("balanced");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [label, setLabel] = useState(selectedSession?.label ?? "");
 
+  const scopedSearchParams = useMemo(
+    () => {
+      const query: Record<string, string> = { campaign_slug: campaignSlug };
+      if (guildId) query.guild_id = guildId;
+      return query;
+    },
+    [campaignSlug, guildId],
+  );
+
   useEffect(() => {
     setLabel(selectedSession?.label ?? "");
   }, [selectedSession?.id, selectedSession?.label]);
 
-  const fetchRecap = useCallback(
+  const fetchSessionDetail = useCallback(
     async (sessionId: string) => {
       setIsLoading(true);
       setError(null);
       setRecap(null);
       setRecapStatus("missing");
+      setRecapPhase(null);
+      setSpeakerAttribution(null);
+      setAnnotations(null);
+      setCandidates([]);
       try {
-        const query: Record<string, string> = { campaign_slug: campaignSlug };
-        if (guildId) query.guild_id = guildId;
-        const response = await getSessionRecapApi(sessionId, query);
-        setRecap(response.recap);
-        setRecapStatus(response.status);
-        setActiveTab(resolveDefaultTab(response.recap));
+        const response = await getSessionDetailApi(sessionId, scopedSearchParams);
+        const detail = response.session;
+        setRecap(detail.recap);
+        setRecapStatus(detail.artifacts.recap);
+        setRecapPhase(detail.recapPhase);
+        setSpeakerAttribution(detail.speakerAttribution);
+        setActiveTab(resolveDefaultTab(detail.recap));
+
+        // Load annotations + candidates in parallel (non-blocking for recap display)
+        const [annotRes, candRes] = await Promise.allSettled([
+          getAnnotatedRecapsApi(sessionId, scopedSearchParams),
+          getEntityCandidatesApi(sessionId, scopedSearchParams),
+        ]);
+        if (annotRes.status === "fulfilled") {
+          setAnnotations(annotRes.value.annotations);
+        }
+        if (candRes.status === "fulfilled") {
+          setCandidates(candRes.value.candidates);
+        }
       } catch (err) {
         if (err instanceof WebApiError && err.status === 404) {
           setRecapStatus("missing");
@@ -101,20 +152,28 @@ export function ChronicleRecapPane({
         setIsLoading(false);
       }
     },
-    [campaignSlug, guildId],
+    [scopedSearchParams],
   );
 
   useEffect(() => {
     if (!selectedSessionId) {
       setRecap(null);
       setRecapStatus("missing");
+      setRecapPhase(null);
+      setSpeakerAttribution(null);
+      setAnnotations(null);
+      setCandidates([]);
       setError(null);
       return;
     }
-    void fetchRecap(selectedSessionId);
-  }, [selectedSessionId, fetchRecap]);
+    void fetchSessionDetail(selectedSessionId);
+  }, [selectedSessionId, fetchSessionDetail]);
 
   const activeRecapText = recap ? recap[activeTab] : "";
+  const activeAnnotatedLines = useMemo(() => {
+    const tabAnnotation = annotations?.[activeTab];
+    return tabAnnotation?.lines ?? null;
+  }, [annotations, activeTab]);
   const tabAvailability = useMemo(() => {
     if (!recap) return { concise: false, balanced: false, detailed: false };
     return {
@@ -130,7 +189,6 @@ export function ChronicleRecapPane({
     return formatSessionDisplayTitle({
       label: label.trim().length > 0 ? label.trim() : null,
       sessionId: selectedSession.id,
-      title: selectedSession.title,
     });
   }, [label, selectedSession]);
   const displayDate = useMemo(() => formatSessionDate(selectedSession?.date), [selectedSession?.date]);
@@ -209,7 +267,98 @@ export function ChronicleRecapPane({
     );
   }
 
-  /* ── Recap missing / not yet generated ── */
+  /* ── recapPhase-aware pre-recap states ── */
+  if (recapPhase === "live") {
+    return (
+      <div className="flex flex-1 items-center justify-center py-24">
+        <div className="text-center space-y-2">
+          <p className="text-muted-foreground text-sm">
+            Session is still active.
+          </p>
+          <p className="text-muted-foreground/70 text-xs">
+            Recap will be available after the session ends.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (recapPhase === "ended_pending_attribution" && speakerAttribution) {
+    return (
+      <div className="flex-1 min-w-0">
+        <div className="rounded-[28px] border border-border/70 bg-background/72 shadow-[0_24px_80px_rgba(0,0,0,0.28)] backdrop-blur-md">
+          <div className="px-8 py-10 sm:px-10 sm:py-12">
+            <div className="space-y-2 mb-6">
+              <h3 className="font-serif text-xl text-foreground">Recap generation blocked</h3>
+              <p className="text-sm text-muted-foreground">
+                Every session speaker must be classified before recap generation can proceed.
+                {speakerAttribution.pendingCount > 0
+                  ? ` ${speakerAttribution.pendingCount} speaker${speakerAttribution.pendingCount === 1 ? " remains" : "s remain"} unclassified.`
+                  : ""}
+              </p>
+            </div>
+            <SpeakerAttributionPanel
+              sessionId={selectedSessionId!}
+              campaignSlug={campaignSlug}
+              searchParams={scopedSearchParams}
+              canWrite={canWrite}
+              initialState={speakerAttribution}
+              onBeginRecapGeneration={async () => {
+                await regenerateSessionRecapApi(
+                  selectedSessionId!,
+                  { reason: "chronicle-post-attribution" },
+                  scopedSearchParams,
+                );
+                router.refresh();
+                void fetchSessionDetail(selectedSessionId!);
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (recapPhase === "ended_ready") {
+    return (
+      <div className="flex flex-1 items-center justify-center py-24">
+        <div className="text-center space-y-2">
+          <p className="text-muted-foreground text-sm">
+            Recap is ready to generate.
+          </p>
+          <p className="text-muted-foreground/70 text-xs">
+            Open the full session to generate or regenerate a recap.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (recapPhase === "generating") {
+    return (
+      <div className="flex flex-1 items-center justify-center py-24">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary/40 border-t-primary" />
+          <p className="text-xs text-muted-foreground uppercase tracking-widest">Recap generation in progress</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (recapPhase === "failed") {
+    return (
+      <div className="flex flex-1 items-center justify-center py-24">
+        <div className="text-center space-y-2">
+          <p className="text-sm text-rose-400">Recap generation failed.</p>
+          <p className="text-muted-foreground/70 text-xs">
+            Open the full session to review warnings and retry.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Recap missing / not yet generated (fallback for null recapPhase) ── */
   if (recapStatus === "missing" || (recapStatus === "available" && !recap)) {
     return (
       <div className="flex flex-1 items-center justify-center py-24">
@@ -288,12 +437,7 @@ export function ChronicleRecapPane({
                     const nextLabel = nextValue.length > 0 ? nextValue : null;
 
                     try {
-                      const query: Record<string, string> = { campaign_slug: campaignSlug };
-                      if (guildId) {
-                        query.guild_id = guildId;
-                      }
-
-                      const result = await updateSessionLabelApi(selectedSessionId, { label: nextLabel }, query);
+                      const result = await updateSessionLabelApi(selectedSessionId, { label: nextLabel }, scopedSearchParams);
                       const savedLabel = result.session.label ?? "";
                       setLabel(savedLabel);
                       router.refresh();
@@ -341,7 +485,14 @@ export function ChronicleRecapPane({
           </header>
 
           <div className="pt-8">
-            <RecapBodyRenderer text={activeRecapText} />
+            <AnnotatedRecapRenderer
+              annotatedLines={activeAnnotatedLines}
+              text={activeRecapText}
+              campaignSlug={campaignSlug}
+              searchParams={scopedSearchParams}
+              candidates={candidates}
+              registry={registry}
+            />
           </div>
 
           {verboseModeEnabled && recap?.generatedAt ? (

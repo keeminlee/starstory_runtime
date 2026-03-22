@@ -211,6 +211,9 @@ export function CampaignPage({
             campaignSlug={campaign.slug}
             guildId={campaign.guildId}
             canEditSessionTitle={Boolean(campaign.canWrite)}
+            canWrite={Boolean(campaign.canWrite)}
+            searchParams={searchParams}
+            registry={registry}
           />
         ) : (
           <CompendiumSurface
@@ -218,6 +221,7 @@ export function CampaignPage({
             registry={registry}
             seenDiscordUsers={seenDiscordUsers}
             searchParams={searchParams}
+            selectedSessionId={constellation.selectedSessionId}
           />
         )}
       </div>

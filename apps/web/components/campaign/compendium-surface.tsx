@@ -9,6 +9,7 @@ type CompendiumSurfaceProps = {
   registry: RegistrySnapshotDto | null;
   seenDiscordUsers: SeenDiscordUserOption[];
   searchParams: Record<string, string | string[] | undefined>;
+  selectedSessionId: string | null;
 };
 
 export function CompendiumSurface({
@@ -16,6 +17,7 @@ export function CompendiumSurface({
   registry,
   seenDiscordUsers,
   searchParams,
+  selectedSessionId,
 }: CompendiumSurfaceProps) {
   const isEditable = campaign.editable !== false && Boolean(campaign.canWrite);
 
@@ -36,6 +38,7 @@ export function CompendiumSurface({
       searchParams={searchParams}
       isEditable={isEditable}
       readOnlyReason={campaign.readOnlyReason}
+      selectedSessionId={selectedSessionId}
     />
   );
 }
