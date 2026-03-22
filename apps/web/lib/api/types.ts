@@ -63,7 +63,17 @@ export type UpdateSessionLabelResponse = SessionDetailResponse;
 
 export type ArchiveSessionResponse = SessionDetailResponse;
 
+export type UnarchiveSessionResponse = SessionDetailResponse;
+
 export type EndSessionResponse = SessionDetailResponse;
+
+export type SessionOrderRequest = {
+  orderedSessionIds: string[];
+};
+
+export type SessionOrderResponse = {
+  orderedSessionIds: string[];
+};
 
 export type SessionTranscriptResponse = {
   sessionId: string;

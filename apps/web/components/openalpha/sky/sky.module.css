@@ -274,11 +274,11 @@
 /* ─── PRO-43: Campaign Star ─── */
 
 .campaignStar {
-  width: 8px;
-  height: 8px;
+  width: 15px;
+  height: 15px;
   border-radius: 50%;
   background: rgba(200, 216, 255, 0.7);
-  box-shadow: 0 0 12px rgba(180, 200, 255, 0.4);
+  box-shadow: 0 0 21px rgba(180, 200, 255, 0.45);
 }
 
 .campaignStar[data-layer="background"] {
@@ -362,17 +362,17 @@
 /* ─── Campaign Star Prominence Variants ─── */
 
 .campaignStar[data-prominence="anchor"] {
-  width: 14px;
-  height: 14px;
+  width: 24px;
+  height: 24px;
   background: rgba(255, 240, 200, 0.92);
-  box-shadow: 0 0 22px rgba(255, 220, 160, 0.6), 0 0 48px rgba(255, 200, 120, 0.22);
+  box-shadow: 0 0 36px rgba(255, 220, 160, 0.6), 0 0 78px rgba(255, 200, 120, 0.24);
 }
 
 .campaignStar[data-prominence="major"] {
-  width: 10px;
-  height: 10px;
+  width: 18px;
+  height: 18px;
   background: rgba(220, 230, 255, 0.82);
-  box-shadow: 0 0 16px rgba(200, 215, 255, 0.5);
+  box-shadow: 0 0 27px rgba(200, 215, 255, 0.55);
 }
 
 /* ─── Observer Tooltip ─── */

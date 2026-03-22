@@ -96,7 +96,12 @@ export default async function UnifiedCampaignPage({ params, searchParams }: Page
   }
 
   return (
-    <ArchiveShell section="Campaign" campaignName={campaign.name} showCampaignSelector={false}>
+    <ArchiveShell
+      section="Campaign"
+      campaignName={campaign.name}
+      showCampaignSelector={false}
+      contentClassName="archive-shell-transition-target custom-scrollbar w-full flex-1 overflow-y-auto pl-[80px] pr-8 pb-8 pt-24 sm:pr-10 lg:pr-12"
+    >
       <CampaignPage
         campaign={campaign}
         searchParams={query}

@@ -1,14 +1,13 @@
 "use client";
 
 import type { ConstellationNode } from "@/components/chronicle/use-session-rail-model";
+import { CENTRE_X } from "@/components/chronicle/use-session-rail-model";
 
 type SessionConstellationEdgeProps = {
   from: ConstellationNode;
   to: ConstellationNode;
   isActive?: boolean;
 };
-
-const CENTRE_X = 120; // must match centreX in SessionConstellationNode
 
 export function SessionConstellationEdge({ from, to, isActive = false }: SessionConstellationEdgeProps) {
   const x1 = CENTRE_X + from.xOffset;

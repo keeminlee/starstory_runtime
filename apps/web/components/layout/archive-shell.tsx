@@ -7,10 +7,12 @@ type ArchiveShellProps = {
   campaignName?: string;
   showTopControls?: boolean;
   showCampaignSelector?: boolean;
+  /** Override the default max-width class on the content wrapper. */
+  contentClassName?: string;
   children: ReactNode;
 };
 
-export function ArchiveShell({ section, campaignName, showTopControls = true, showCampaignSelector = true, children }: ArchiveShellProps) {
+export function ArchiveShell({ section, campaignName, showTopControls = true, showCampaignSelector = true, contentClassName, children }: ArchiveShellProps) {
   return (
     <div className="archive-shell-root flex min-h-screen text-foreground">
       <AppFloatingRail />
@@ -18,7 +20,7 @@ export function ArchiveShell({ section, campaignName, showTopControls = true, sh
         {showTopControls ? (
           <AppShellControls section={section} campaignName={campaignName} showCampaignSelector={showCampaignSelector} />
         ) : null}
-        <div className="archive-shell-transition-target custom-scrollbar mx-auto w-full max-w-7xl flex-1 overflow-y-auto px-8 pb-8 pt-24 sm:px-10 lg:px-12">
+        <div className={contentClassName ?? "archive-shell-transition-target custom-scrollbar mx-auto w-full max-w-7xl flex-1 overflow-y-auto px-8 pb-8 pt-24 sm:px-10 lg:px-12"}>
           {children}
         </div>
       </main>

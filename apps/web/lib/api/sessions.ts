@@ -21,6 +21,7 @@ import type {
   EntityReviewBatchesResponse,
   SessionAnnotatedRecapsResponse,
   ArchiveSessionResponse,
+  UnarchiveSessionResponse,
   EndSessionResponse,
 } from "@/lib/api/types";
 
@@ -119,6 +120,16 @@ export async function archiveSessionApi(
   searchParams?: QueryInput
 ): Promise<ArchiveSessionResponse> {
   return fetchJson<ArchiveSessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/archive`, {
+    method: "POST",
+    query: toQuery(searchParams),
+  });
+}
+
+export async function unarchiveSessionApi(
+  sessionId: string,
+  searchParams?: QueryInput
+): Promise<UnarchiveSessionResponse> {
+  return fetchJson<UnarchiveSessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/unarchive`, {
     method: "POST",
     query: toQuery(searchParams),
   });

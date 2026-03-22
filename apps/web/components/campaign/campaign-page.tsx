@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { CampaignHeader } from "@/components/campaign/campaign-header";
 import { CampaignModeToggle } from "@/components/campaign/campaign-mode-toggle";
@@ -9,6 +9,8 @@ import { CompendiumSurface } from "@/components/campaign/compendium-surface";
 import { ChronicleSurface } from "@/components/chronicle/chronicle-surface";
 import { CampaignSessionConstellation } from "@/components/chronicle/campaign-session-constellation";
 import { useSessionConstellationModel } from "@/components/chronicle/use-session-rail-model";
+import { archiveSessionApi, unarchiveSessionApi } from "@/lib/api/sessions";
+import { updateSessionOrderApi } from "@/lib/api/campaigns";
 import type { CampaignSummary } from "@/lib/types";
 import type { RegistrySnapshotDto, SeenDiscordUserOption } from "@/lib/registry/types";
 
@@ -53,11 +55,42 @@ export function CampaignPage({
     [campaign.guildId, searchParams],
   );
 
+  /* ── Persistence callbacks ── */
+  const handleReorder = useCallback(
+    (orderedIds: string[]) => {
+      updateSessionOrderApi(campaign.slug, orderedIds, scopedSearchParams).catch(() => {
+        // Reorder persisted optimistically; swallow network errors.
+      });
+    },
+    [campaign.slug, scopedSearchParams],
+  );
+
+  const handleArchive = useCallback(
+    (sessionId: string) => {
+      archiveSessionApi(sessionId, scopedSearchParams)
+        .then(() => router.refresh())
+        .catch(() => {});
+    },
+    [scopedSearchParams, router],
+  );
+
+  const handleUnarchive = useCallback(
+    (sessionId: string) => {
+      unarchiveSessionApi(sessionId, scopedSearchParams)
+        .then(() => router.refresh())
+        .catch(() => {});
+    },
+    [scopedSearchParams, router],
+  );
+
   /* ── Session constellation model (shell-level, persists across modes) ── */
   const constellation = useSessionConstellationModel({
     sessions: campaign.sessions,
     showArchived,
     initialSelectedId: initialSessionId,
+    onReorder: handleReorder,
+    onArchive: handleArchive,
+    onUnarchive: handleUnarchive,
   });
 
   const archivedSessionCount =
@@ -130,23 +163,12 @@ export function CampaignPage({
   }
 
   return (
-    <div className="space-y-8">
-      {/* ── Layer 1: Campaign identity + mode toggle ── */}
-      <div>
-        <CampaignHeader
-          campaign={campaign}
-          campaignName={campaignName}
-          onNameSaved={setCampaignName}
-          scopedSearchParams={scopedSearchParams}
-          headerError={headerError}
-        />
-        <CampaignModeToggle activeView={activeView} onSwitch={switchView} />
-      </div>
-
-      {/* ── Layer 2: Persistent constellation + active surface ── */}
-      <div className="flex gap-6">
+    <>
+      {/* ── Fixed constellation — viewport-anchored, scrolls independently ── */}
+      <div className="fixed left-[80px] top-24 bottom-0 z-20 w-[300px] overflow-y-auto custom-scrollbar">
         <CampaignSessionConstellation
           nodes={constellation.nodes}
+          previewNodes={constellation.previewNodes}
           selectedSessionId={constellation.selectedSessionId}
           hoveredSessionId={constellation.hoveredSessionId}
           onSelect={handleSelectSession}
@@ -156,8 +178,32 @@ export function CampaignPage({
           onToggleArchived={handleToggleArchived}
           hasArchivedSessions={constellation.hasArchivedSessions}
           archivedSessionCount={archivedSessionCount}
+          archivedSessions={constellation.archivedSessions}
+          isEditMode={constellation.isEditMode}
+          onToggleEditMode={constellation.toggleEditMode}
+          dragState={constellation.dragState}
+          onDragStart={constellation.startDrag}
+          onDragMove={constellation.updateDrag}
+          onDragEnd={constellation.endDrag}
+          onDragCancel={constellation.cancelDrag}
         />
+      </div>
 
+      {/* ── Scrolling main content — shifted right to clear fixed constellation ── */}
+      <div className="ml-[316px] max-w-5xl space-y-8 pr-4">
+        {/* ── Campaign identity + mode toggle ── */}
+        <div>
+          <CampaignHeader
+            campaign={campaign}
+            campaignName={campaignName}
+            onNameSaved={setCampaignName}
+            scopedSearchParams={scopedSearchParams}
+            headerError={headerError}
+          />
+          <CampaignModeToggle activeView={activeView} onSwitch={switchView} />
+        </div>
+
+        {/* ── Active surface ── */}
         {activeView === "chronicle" ? (
           <ChronicleSurface
             selectedSessionId={constellation.selectedSessionId}
@@ -175,6 +221,6 @@ export function CampaignPage({
           />
         )}
       </div>
-    </div>
+    </>
   );
 }

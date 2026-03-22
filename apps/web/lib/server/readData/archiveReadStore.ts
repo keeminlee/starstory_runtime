@@ -1092,6 +1092,75 @@ export function archiveSession(args: {
   }
 }
 
+export function unarchiveSession(args: {
+  guildId: string;
+  campaignSlug: string;
+  sessionId: string;
+}): boolean {
+  const dbPath = resolveCampaignDbPath({ campaignSlug: args.campaignSlug, guildId: args.guildId });
+  if (!dbPath || !fs.existsSync(dbPath)) return false;
+
+  try {
+    const db = new Database(dbPath);
+    const result = db
+      .prepare(
+        `UPDATE sessions
+         SET archived_at_ms = NULL
+         WHERE guild_id = ? AND session_id = ? AND archived_at_ms IS NOT NULL`
+      )
+      .run(args.guildId, args.sessionId);
+    db.close();
+    return Number(result.changes ?? 0) > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Read / write session display order for a campaign (web-owned config). */
+export function readSessionDisplayOrder(args: {
+  guildId: string;
+  campaignSlug: string;
+}): string[] | null {
+  const dbPath = resolveCampaignDbPath({ campaignSlug: args.campaignSlug, guildId: args.guildId });
+  if (!dbPath || !fs.existsSync(dbPath)) return null;
+
+  try {
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE IF NOT EXISTS web_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+    const row = db
+      .prepare(`SELECT value FROM web_config WHERE key = ?`)
+      .get("session_display_order") as { value: string } | undefined;
+    db.close();
+    if (!row) return null;
+    const parsed = JSON.parse(row.value);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeSessionDisplayOrder(args: {
+  guildId: string;
+  campaignSlug: string;
+  orderedSessionIds: string[];
+}): boolean {
+  const dbPath = resolveCampaignDbPath({ campaignSlug: args.campaignSlug, guildId: args.guildId });
+  if (!dbPath || !fs.existsSync(dbPath)) return false;
+
+  try {
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE IF NOT EXISTS web_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+    db.prepare(
+      `INSERT INTO web_config (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    ).run("session_display_order", JSON.stringify(args.orderedSessionIds));
+    db.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function readSessionTranscript(args: {
   guildId: string;
   campaignSlug: string;

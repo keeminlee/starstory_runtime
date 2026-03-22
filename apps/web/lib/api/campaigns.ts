@@ -2,6 +2,7 @@ import { fetchJson } from "@/lib/api/http";
 import type {
   CampaignSessionsResponse,
   CampaignsResponse,
+  SessionOrderResponse,
   UpdateCampaignNameRequest,
   UpdateCampaignNameResponse,
 } from "@/lib/api/types";
@@ -42,5 +43,26 @@ export async function updateCampaignNameApi(
     method: "PATCH",
     query: toQuery(searchParams),
     body: payload,
+  });
+}
+
+export async function getSessionOrderApi(
+  campaignSlug: string,
+  searchParams?: QueryInput
+): Promise<SessionOrderResponse> {
+  return fetchJson<SessionOrderResponse>(`/api/campaigns/${encodeURIComponent(campaignSlug)}/session-order`, {
+    query: toQuery(searchParams),
+  });
+}
+
+export async function updateSessionOrderApi(
+  campaignSlug: string,
+  orderedSessionIds: string[],
+  searchParams?: QueryInput
+): Promise<SessionOrderResponse> {
+  return fetchJson<SessionOrderResponse>(`/api/campaigns/${encodeURIComponent(campaignSlug)}/session-order`, {
+    method: "PUT",
+    query: toQuery(searchParams),
+    body: { orderedSessionIds },
   });
 }

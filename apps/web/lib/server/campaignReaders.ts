@@ -14,6 +14,8 @@ import {
   listSessionsForGuildCampaign,
   readSessionRecap,
   readSessionTranscript,
+  readSessionDisplayOrder,
+  writeSessionDisplayOrder,
 } from "@/lib/server/readData/archiveReadStore";
 import { getDemoCampaignSummary } from "@/lib/server/demoCampaign";
 import { getGuildDisplayMetadataByIds } from "@/lib/server/discordGuildMetadataStore";
@@ -958,4 +960,70 @@ export async function updateWebCampaignName(args: {
   }
 
   return updated;
+}
+
+/* ── Session display order ── */
+
+export async function getWebSessionDisplayOrder(args: {
+  campaignSlug: string;
+  searchParams?: QueryInput;
+}): Promise<string[] | null> {
+  const auth = await resolveWebAuthContext(args.searchParams);
+
+  const resolvedScope = resolveGuildScopeForSlug({
+    auth,
+    campaignSlug: args.campaignSlug,
+    searchParams: args.searchParams,
+    includeArchived: false,
+  });
+
+  if (!resolvedScope) return null;
+
+  return readSessionDisplayOrder({
+    guildId: resolvedScope.guildId,
+    campaignSlug: args.campaignSlug,
+  });
+}
+
+export async function updateWebSessionDisplayOrder(args: {
+  campaignSlug: string;
+  orderedSessionIds: string[];
+  searchParams?: QueryInput;
+}): Promise<string[]> {
+  const auth = await resolveWebAuthContext(args.searchParams);
+
+  const resolvedScope = resolveGuildScopeForSlug({
+    auth,
+    campaignSlug: args.campaignSlug,
+    searchParams: args.searchParams,
+    includeArchived: false,
+  });
+
+  if (!resolvedScope) {
+    throw new ScopeGuardError("Campaign is out of scope for the authorized guild set.");
+  }
+
+  assertUserCanWriteCampaignArchive({
+    guildId: resolvedScope.guildId,
+    campaignSlug: args.campaignSlug,
+    userId: auth.user?.id ?? null,
+  });
+
+  const MAX_IDS = 200;
+  const ids = args.orderedSessionIds;
+  if (!Array.isArray(ids) || ids.length > MAX_IDS || ids.some((id) => typeof id !== "string")) {
+    throw new WebDataError("invalid_request", 422, "orderedSessionIds must be a string array (max 200).");
+  }
+
+  const written = writeSessionDisplayOrder({
+    guildId: resolvedScope.guildId,
+    campaignSlug: args.campaignSlug,
+    orderedSessionIds: ids,
+  });
+
+  if (!written) {
+    throw new ScopeGuardError("Campaign is out of scope for the authorized guild set.");
+  }
+
+  return ids;
 }
