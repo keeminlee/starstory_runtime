@@ -220,6 +220,38 @@ ON session_artifacts(session_id);
 CREATE INDEX IF NOT EXISTS idx_session_artifacts_type
 ON session_artifacts(artifact_type);
 
+-- Session validation: persisted success/failure gate for star birth readiness
+CREATE TABLE IF NOT EXISTS session_validation (
+  session_id TEXT PRIMARY KEY,
+  guild_id TEXT NOT NULL,
+  campaign_slug TEXT,
+  outcome TEXT NOT NULL CHECK(outcome IN ('success', 'failure')),
+  line_count INTEGER NOT NULL,
+  min_line_count INTEGER NOT NULL,
+  duration_ms INTEGER,
+  min_duration_ms INTEGER,
+  reason TEXT,
+  validated_at_ms INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_validation_guild_outcome
+ON session_validation(guild_id, outcome, validated_at_ms DESC);
+
+-- Born stars: durable materialization of successful validated sessions.
+CREATE TABLE IF NOT EXISTS born_stars (
+  session_id TEXT PRIMARY KEY,
+  guild_id TEXT NOT NULL,
+  campaign_slug TEXT NOT NULL,
+  campaign_name TEXT,
+  session_label TEXT,
+  born_at_ms INTEGER NOT NULL,
+  validated_at_ms INTEGER NOT NULL,
+  line_count INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_born_stars_scope_born_at
+ON born_stars(guild_id, campaign_slug, born_at_ms DESC);
+
 -- Session recaps V2: canonical contract row containing all detail views
 CREATE TABLE IF NOT EXISTS session_recaps (
   session_id TEXT PRIMARY KEY,

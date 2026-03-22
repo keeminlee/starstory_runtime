@@ -21,6 +21,7 @@ export type CampaignSelectorOption = {
   slug: string;
   guildId: string | null;
   guildName: string;
+  guildIconUrl?: string | null;
   name: string;
   type: "user" | "system";
   editable: boolean;
@@ -76,6 +77,16 @@ export function resolveCampaignRouteState(
   if (parts.length >= 2 && parts[0] === "campaigns") {
     const campaignSlug = parts[1] ?? null;
 
+    /* ── Canonical: /campaigns/:slug ── */
+    if (parts.length === 2) {
+      const viewParam = searchParams?.get("view");
+      if (viewParam === "compendium") {
+        return { routeType: "campaign-compendium", routeCampaignSlug: campaignSlug, routeGuildId };
+      }
+      return { routeType: "campaign-sessions", routeCampaignSlug: campaignSlug, routeGuildId };
+    }
+
+    /* ── Legacy: /campaigns/:slug/sessions ── */
     if (parts.length === 3 && parts[2] === "sessions") {
       return { routeType: "campaign-sessions", routeCampaignSlug: campaignSlug, routeGuildId };
     }
@@ -84,6 +95,7 @@ export function resolveCampaignRouteState(
       return { routeType: "campaign-session-detail", routeCampaignSlug: campaignSlug, routeGuildId };
     }
 
+    /* ── Legacy: /campaigns/:slug/compendium ── */
     if (parts.length === 3 && parts[2] === "compendium") {
       return { routeType: "campaign-compendium", routeCampaignSlug: campaignSlug, routeGuildId };
     }
@@ -104,14 +116,15 @@ export function resolveCampaignTargetPath(args: {
   guildId?: string | null;
 }): string {
   const guildId = normalizeGuildId(args.guildId);
-  const suffix = guildId ? `?guild_id=${encodeURIComponent(guildId)}` : "";
+  const params = new URLSearchParams();
+  if (guildId) params.set("guild_id", guildId);
 
   if (args.routeType === "campaign-compendium") {
-    return `/campaigns/${args.campaignSlug}/compendium${suffix}`;
+    params.set("view", "compendium");
   }
 
-  // Session detail cannot be safely remapped across campaigns.
-  return `/campaigns/${args.campaignSlug}/sessions${suffix}`;
+  const suffix = params.toString();
+  return `/campaigns/${args.campaignSlug}${suffix ? `?${suffix}` : ""}`;
 }
 
 export function CampaignContextProvider({ value, children }: CampaignContextProviderProps) {

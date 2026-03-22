@@ -3,6 +3,7 @@
 import { Suspense, type ReactNode } from "react";
 import { SessionProvider } from "next-auth/react";
 import { AmbientPreferencesProvider } from "@/providers/preferences-provider";
+import { VerboseModeProvider } from "@/providers/verbose-mode-provider";
 import { ActiveCampaignGate } from "@/components/guards/active-campaign-gate";
 import { CampaignContextProvider } from "@/components/providers/campaign-context-provider";
 
@@ -24,7 +25,9 @@ export function Providers({ children }: ProvidersProps) {
         selectCampaign: () => {},
       }}
     >
-      <AmbientPreferencesProvider>{children}</AmbientPreferencesProvider>
+      <AmbientPreferencesProvider>
+        <VerboseModeProvider>{children}</VerboseModeProvider>
+      </AmbientPreferencesProvider>
     </CampaignContextProvider>
   );
 
@@ -32,7 +35,9 @@ export function Providers({ children }: ProvidersProps) {
     <SessionProvider>
       <Suspense fallback={suspenseFallback}>
         <ActiveCampaignGate>
-          <AmbientPreferencesProvider>{children}</AmbientPreferencesProvider>
+          <AmbientPreferencesProvider>
+            <VerboseModeProvider>{children}</VerboseModeProvider>
+          </AmbientPreferencesProvider>
         </ActiveCampaignGate>
       </Suspense>
     </SessionProvider>

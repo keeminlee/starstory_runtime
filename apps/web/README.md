@@ -1,18 +1,46 @@
-# Meepo Web Archive (`apps/web`)
+# StarStory Web Archive (`apps/web`)
 
-This package is the Track B web archive shell for Meepo.
+This package is the web archive shell for StarStory campaigns.
 
 ## Runtime
 
 - Framework: Next.js App Router
 - Active routes:
-  - `/`
-  - `/dashboard`
-   - `/settings`
-   - `/campaigns/[campaignSlug]/sessions`
-   - `/campaigns/[campaignSlug]/sessions/[sessionId]`
-   - `/campaigns/[campaignSlug]/compendium`
+  - `/` — logged-out landing and setup surface
+  - `/dashboard` — smart redirect to first authorized campaign
+  - `/settings`
+  - `/campaigns/[campaignSlug]` — campaign home (Chronicle/Compendium tabbed shell)
+  - `/campaigns/[campaignSlug]/sessions/[sessionId]` — session detail
+  - `/campaigns/[campaignSlug]/compendium` — direct compendium access
 - Route-level shells are implemented with `loading.tsx` and `error.tsx` for main archive routes.
+
+## Shell Architecture
+
+Navigation uses a fixed floating rail (`components/layout/app-floating-rail.tsx`) with top-right shell controls (`components/layout/app-shell-controls.tsx`). The old sidebar and top header are removed.
+
+- `app-floating-rail.tsx` — expandable left rail with campaign and settings buttons
+- `account-control.tsx` — avatar menu with sign-out
+- `app-shell-controls.tsx` — top-right container for campaign selector and account control
+
+## Campaign Tabbed Shell
+
+The campaign page (`/campaigns/[campaignSlug]`) is a tabbed shell that switches between Chronicle and Compendium:
+
+- `components/campaign/campaign-page.tsx` — root shell coordinating tabs, session selection, and constellation
+- `components/campaign/campaign-header.tsx` — editable campaign title and metadata
+- `components/campaign/campaign-mode-toggle.tsx` — Chronicle/Compendium tab switch
+- `components/campaign/compendium-surface.tsx` — conditional wrapper for Compendium
+
+## Chronicle Surface
+
+Chronicle is the session reading and timeline surface:
+
+- **Session constellation**: `components/chronicle/campaign-session-constellation.tsx` renders sessions as interactive star nodes with drag-to-reorder and archive zone. Layout computed by `components/chronicle/use-session-rail-model.ts`.
+- **Recap pane**: `components/chronicle/chronicle-recap-pane.tsx` shows recap text with concise/balanced/detailed tabs, speaker attribution, and entity overlay.
+- **Entity overlay**: `lib/chronicle/recapEntityOverlay.ts` matches entity names in recap text. `components/shared/annotated-recap-renderer.tsx` renders highlighted spans with hover/pinned previews.
+
+Full architecture: `docs/STARSTORY_SHELL_RESET.md`.
+Entity detection details: `docs/CHRONICLE_COMPENDIUM_ENTITY_OVERHAUL_B2.md`.
 
 ## Campaign and Session Metadata Editing
 

@@ -20,7 +20,16 @@ export type RegistryPendingCandidateDto = {
   display: string;
   count: number;
   primaryCount: number;
+  sentenceInitialCount: number;
   examples: string[];
+  sessions: Array<{ sessionId: string; count: number; primaryCount: number }>;
+};
+
+export type KnownSessionHitDto = {
+  canonicalName: string;
+  count: number;
+  primaryCount: number;
+  sessions: Array<{ sessionId: string; count: number; primaryCount: number }>;
 };
 
 export type RegistryPendingDto = {
@@ -28,6 +37,7 @@ export type RegistryPendingDto = {
   sourceCampaignSlug: string | null;
   sourceGuildId: string | null;
   items: RegistryPendingCandidateDto[];
+  knownHits: KnownSessionHitDto[];
 };
 
 export type RegistrySnapshotDto = {
@@ -117,6 +127,15 @@ export type EntityCandidateDto = {
     confidence: "exact" | "alias" | "fuzzy";
   }[];
   resolution: EntityResolutionDto | null;
+};
+
+/** A known canonical entity detected in a session's transcript. */
+export type SessionKnownHitDto = {
+  canonicalName: string;
+  entityId: string;
+  category: RegistryCategoryKey;
+  count: number;
+  primaryCount: number;
 };
 
 /** A persisted resolution decision for one candidate name in one session. */

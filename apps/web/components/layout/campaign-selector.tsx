@@ -14,21 +14,14 @@ export function CampaignSelector() {
   }, [activeScopeKey, campaigns]);
 
   const hasRealCampaigns = realCampaigns.length > 0;
+  const shouldShowSelector = realCampaigns.length > 1;
 
-  if (!hasRealCampaigns) {
-    return (
-      <div className="inline-flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
-        <span>Campaign</span>
-        <span className="text-[11px] normal-case tracking-normal text-muted-foreground/90">
-          Start a session from Discord to surface a campaign here.
-        </span>
-      </div>
-    );
+  if (!hasRealCampaigns || !shouldShowSelector) {
+    return null;
   }
 
   return (
-    <label className="inline-flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
-      <span>Campaign</span>
+    <label className="inline-flex items-center">
       <select
         aria-label="Switch campaign"
         value={currentValue}
@@ -36,7 +29,7 @@ export function CampaignSelector() {
           const nextCampaignScopeKey = event.currentTarget.value;
           selectCampaign(nextCampaignScopeKey);
         }}
-        className="control-select min-w-48 rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-wider"
+        className="control-select min-w-44 rounded-full px-3 py-2 text-xs font-semibold tracking-wide"
       >
         {campaigns.map((campaign) => (
           <option key={campaign.scopeKey} value={campaign.scopeKey}>

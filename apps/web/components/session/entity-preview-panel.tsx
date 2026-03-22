@@ -207,7 +207,7 @@ export function EntityPreviewPanel({
 
           <div className="border-t border-border/40 pt-3">
             <a
-              href={`/campaigns/${encodeURIComponent(campaignSlug)}?tab=compendium`}
+              href={`/campaigns/${encodeURIComponent(campaignSlug)}?view=compendium`}
               className="text-[10px] font-bold uppercase tracking-wider text-amber-400 hover:text-amber-300"
             >
               Open in Compendium →

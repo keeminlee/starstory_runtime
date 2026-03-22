@@ -6,6 +6,7 @@ import { listWebCampaignsForGuilds } from "@/lib/server/campaignReaders";
 import { getDemoSessionDetail, isDemoSessionId } from "@/lib/server/demoCampaign";
 import {
   archiveSession,
+  unarchiveSession,
   findSessionByGuildAndId,
   getGuildCampaignSlug,
   listGuildCampaignRecords,
@@ -269,6 +270,49 @@ export async function archiveWebSession(args: {
         campaignSlug: canonical.campaignSlug,
         sessionId: args.sessionId,
         archivedAtMs: Date.now(),
+      });
+
+      if (!updated) {
+        throw new ScopeGuardError("Session is out of scope for the authorized guild set.");
+      }
+    }
+
+    return getWebSessionDetail({
+      sessionId: args.sessionId,
+      searchParams: args.searchParams,
+    });
+  } catch (error) {
+    throw mapToWebDataError(error);
+  }
+}
+
+export async function unarchiveWebSession(args: {
+  sessionId: string;
+  searchParams?: Record<string, string | string[] | undefined>;
+}): Promise<SessionDetail> {
+  try {
+    if (isDemoSessionId(args.sessionId)) {
+      throw new WebDataError("invalid_request", 422, "Demo sessions do not support archive actions.");
+    }
+
+    const auth = await resolveWebAuthContext(args.searchParams);
+    const canonical = await getCanonicalSessionDetail({
+      authorizedGuildIds: auth.authorizedGuildIds,
+      sessionId: args.sessionId,
+      searchParams: args.searchParams,
+    });
+
+    assertUserCanWriteCampaignArchive({
+      guildId: canonical.guildId,
+      campaignSlug: canonical.campaignSlug,
+      userId: auth.user?.id ?? null,
+    });
+
+    if (canonical.session.archived_at_ms !== null) {
+      const updated = unarchiveSession({
+        guildId: canonical.guildId,
+        campaignSlug: canonical.campaignSlug,
+        sessionId: args.sessionId,
       });
 
       if (!updated) {

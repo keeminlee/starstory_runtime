@@ -34,6 +34,7 @@ function mapCampaignOption(campaign: CampaignsResponse["dashboard"]["campaigns"]
     slug: campaign.slug,
     guildId,
     guildName: campaign.guildName,
+    guildIconUrl: campaign.guildIconUrl ?? null,
     name: campaign.name,
     type,
     editable: campaign.editable ?? type !== "system",

@@ -9,6 +9,18 @@ export type Star = {
   phi: number;
   layer: StarLayer;
   type: StarType;
+  nodeKind?: "ambient" | "session" | "anchor";
+  campaignId?: string;
+  campaignSlug?: string;
+  campaignName?: string;
+  guildIconUrl?: string | null;
+  sessionId?: string;
+  label?: string;
+  prominence?: "minor" | "major" | "anchor";
+  brightness?: number;
+  glow?: number;
+  size?: number;
+  sessionCount?: number;
 };
 
 export type ProtoStarRendererPhase =

@@ -57,7 +57,7 @@ export default async function CampaignSessionPage({ params, searchParams }: Page
   const showRecapSection = session.recapPhase !== "live";
 
   return (
-    <ArchiveShell section="Sessions" campaignName={session.campaignName}>
+    <ArchiveShell section="Sessions" campaignName={session.campaignName} showCampaignSelector={false}>
       <div className="space-y-8 pb-16">
         <SessionHeader session={session} searchParams={query} />
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">

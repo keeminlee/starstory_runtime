@@ -66,12 +66,31 @@ Deliberately not public:
 
 Primary user routes:
 
-- `/`
-- `/dashboard`
+- `/` — logged-out landing and setup surface
+- `/dashboard` — smart redirect to first real campaign (no standalone dashboard UI)
 - `/settings`
-- `/campaigns/[campaignSlug]/sessions`
-- `/campaigns/[campaignSlug]/sessions/[sessionId]`
-- `/campaigns/[campaignSlug]/compendium`
+- `/campaigns/[campaignSlug]` — campaign home with Chronicle/Compendium tabbed shell
+- `/campaigns/[campaignSlug]/sessions` — compatibility redirect to campaign home
+- `/campaigns/[campaignSlug]/sessions/[sessionId]` — session detail
+- `/campaigns/[campaignSlug]/compendium` — direct compendium access
+
+Current shell architecture:
+
+- Navigation is a fixed floating rail (`app-floating-rail.tsx`), not a sidebar or top header.
+- Top-right shell controls (`app-shell-controls.tsx`) host campaign selector and account menu.
+- Campaign page is a tabbed shell switching between Chronicle and Compendium via `campaign-mode-toggle.tsx`.
+- Chronicle surface includes a session constellation timeline and a recap reading pane with entity overlay.
+- Session constellation supports drag-to-reorder and drag-to-archive in edit mode.
+- Dashboard no longer renders a standalone page; it redirects to the first authorized campaign.
+- Full branch-level architecture is documented in [STARSTORY_SHELL_RESET.md](STARSTORY_SHELL_RESET.md).
+
+Current Chronicle and Compendium entity posture:
+
+- Chronicle recap rendering and recap annotation share one line-normalization path.
+- Chronicle panel spacing is slightly tighter than earlier archive-shell defaults.
+- Compendium `Current Session` entity filtering is transcript-backed and includes both unresolved candidates and known canonical entity hits.
+- Campaign pending review data is session-aware and sourced from durable YAML, not rebuilt ad hoc in the UI.
+- The Compendium entity list does not expose a Chronicle drill-in button until a real product flow exists.
 
 Web authority rules:
 
@@ -96,6 +115,8 @@ Web authority rules:
   - compatibility lanes still exist
   - session end must not depend on recap success
 - Detailed recap convergence, fallback drift, and compatibility behavior are tracked in [RECAP_SURFACE_MAP.md](RECAP_SURFACE_MAP.md) and the recap-track docs linked from [INDEX.md](INDEX.md).
+- Chronicle and Compendium entity-overhaul details are tracked in [CHRONICLE_COMPENDIUM_ENTITY_OVERHAUL_B2.md](CHRONICLE_COMPENDIUM_ENTITY_OVERHAUL_B2.md).
+- Full shell reset and Chronicle architecture are tracked in [STARSTORY_SHELL_RESET.md](STARSTORY_SHELL_RESET.md).
 
 ## Current Constraints
 

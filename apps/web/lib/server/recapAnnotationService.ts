@@ -20,17 +20,11 @@ import type { RegistryCategoryKey, RegistryEntityDto } from "@/lib/registry/type
 import type { RecapSpan, RecapTab, AnnotatedRecap, AnnotatedRecapLine, SessionAnnotatedRecaps } from "@/lib/types";
 import { getDbForCampaignScope } from "../../../../src/db";
 import { normKey } from "../../../../src/registry/loadRegistry";
+import { normalizeRecapLines } from "@/lib/shared/normalizeRecapLines";
 
 // ── Recap line parsing ─────────────────────────────────────────────
 
 const RECAP_TABS: RecapTab[] = ["concise", "balanced", "detailed"];
-
-function normalizeRecapLines(text: string): string[] {
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-}
 
 // ── Entity name → span segmentation ───────────────────────────────
 

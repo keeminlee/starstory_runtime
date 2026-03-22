@@ -8,21 +8,30 @@ import { resolveCampaignSlug } from "../../campaign/guildConfig.js";
 import { getDefaultCampaignSlug } from "../../campaign/defaultCampaign.js";
 import { getEnv } from "../../config/rawEnv.js";
 import { resolveCampaignDbPath } from "../../dataPaths.js";
-import { pickTranscriptRows, scanNamesCore, type PendingCandidate } from "../../registry/scanNamesCore.js";
+import {
+  pickTranscriptRows,
+  scanNamesCorePerSession,
+  type PendingCandidate,
+  type KnownHitSummary,
+  type ScanSourceRow,
+  type SessionScanInput,
+} from "../../registry/scanNamesCore.js";
 
 /**
- * Phase 1B: Name Scanner (campaign-scoped)
+ * Phase 1B: Name Scanner (campaign-scoped, per-session)
  *
- * Scans SQLite ledger for proper-name candidates, filters against registry,
- * and outputs decisions.pending.yml in the campaign's registry folder.
+ * Scans bronze_transcript (preferred) or ledger_entries per-session for
+ * proper-name candidates, filters against registry, and outputs
+ * decisions.pending.yml in the campaign's registry folder.
  *
  * Usage:
  *   npx tsx src/tools/registry/scan-names.ts --campaign faeterra-main
  *   npx tsx src/tools/registry/scan-names.ts --campaign auto --guild 123456789012345678
+ *   npx tsx src/tools/registry/scan-names.ts --rebuild
  *   npx tsx src/tools/registry/scan-names.ts  # uses DEFAULT_CAMPAIGN_SLUG or "default"
  */
 
-type PendingDecisions = {
+type PendingDecisionsYaml = {
   version: number;
   generated_at: string;
   source: {
@@ -32,9 +41,10 @@ type PendingDecisions = {
     primaryOnly: boolean;
     minCount: number;
     sessionCount: number;
-    transcriptSource: "ledger_entries" | "bronze_transcript";
+    transcriptSource: "bronze_transcript" | "ledger_entries" | "per_session";
   };
   pending: PendingCandidate[];
+  knownHits: KnownHitSummary[];
 };
 
 /**
@@ -58,9 +68,6 @@ function parseArgs(): Record<string, string | boolean> {
   return args;
 }
 
-/**
- * Main scanner.
- */
 function resolveCampaignFromArgs(args: Record<string, string | boolean>): string {
   const campaignOpt = (args.campaign as string) ?? "auto";
   const guildId = args.guild as string | undefined;
@@ -73,11 +80,55 @@ function resolveCampaignFromArgs(args: Record<string, string | boolean>): string
   return getDefaultCampaignSlug();
 }
 
+/**
+ * Load transcript rows for a single session, preferring bronze_transcript
+ * over ledger_entries.
+ */
+function loadSessionTranscriptRows(
+  db: Database.Database,
+  sessionId: string,
+  primaryOnly: boolean,
+): { rows: ScanSourceRow[]; source: "bronze_transcript" | "ledger_entries" } {
+  const bronzeRows = db
+    .prepare(
+      `SELECT bt.content, bt.source_type as source, 'primary' as narrative_weight
+       FROM bronze_transcript bt
+       WHERE bt.session_id = ?
+         AND bt.content IS NOT NULL
+         AND TRIM(bt.content) <> ''`,
+    )
+    .all(sessionId) as ScanSourceRow[];
+
+  if (bronzeRows.length > 0) {
+    return { rows: bronzeRows, source: "bronze_transcript" };
+  }
+
+  const ledgerWhereParts = [
+    "le.session_id = ?",
+    "le.content IS NOT NULL",
+    "TRIM(le.content) <> ''",
+  ];
+  if (primaryOnly) {
+    ledgerWhereParts.push("le.narrative_weight IN ('primary', 'elevated')");
+  }
+
+  const ledgerRows = db
+    .prepare(
+      `SELECT le.content, le.source, le.narrative_weight
+       FROM ledger_entries le
+       WHERE ${ledgerWhereParts.join(" AND ")}`,
+    )
+    .all(sessionId) as ScanSourceRow[];
+
+  return { rows: ledgerRows, source: "ledger_entries" };
+}
+
 function scanNames(): void {
   const args = parseArgs();
 
   const guildId = (args.guild as string | undefined)?.trim() || null;
   const campaignSlug = resolveCampaignFromArgs(args);
+  const rebuild = args.rebuild === true;
   console.log(`Campaign: ${campaignSlug}`);
 
   if (guildId) {
@@ -97,7 +148,16 @@ function scanNames(): void {
   const primaryOnly = args.primaryOnly === true || args.primaryOnly === "true";
   const maxExamples = parseInt((args.maxExamples as string) || "3", 10);
   const pendingPath = (args.pendingOut as string) || path.join(registryDir, "decisions.pending.yml");
-  const includeKnown = args.includeKnown === true || args.includeKnown === "true";
+  // Known-hit tracking is now on by default
+  const includeKnown = args.noKnown !== true;
+
+  if (rebuild) {
+    console.log("[scan-names] --rebuild: wiping existing pending decisions...");
+    if (fs.existsSync(pendingPath)) {
+      fs.unlinkSync(pendingPath);
+      console.log(`[scan-names] Deleted ${pendingPath}`);
+    }
+  }
 
   console.log(`[scan-names] Loading registry...`);
   const registry = loadRegistry({ campaignSlug });
@@ -136,53 +196,23 @@ function scanNames(): void {
     console.log(`[scan-names] Session scope size: ${sessionRows.length}`);
   }
 
-  const ledgerWhereParts = [
-    "le.content IS NOT NULL",
-    "TRIM(le.content) <> ''",
-    ...sessionWhereParts,
-  ];
-  const ledgerParams: unknown[] = [...sessionParams];
-  if (primaryOnly) {
-    ledgerWhereParts.push("le.narrative_weight IN ('primary', 'elevated')");
+  // ── Per-session transcript loading (bronze-first) ─────────────────
+  const sessionInputs: SessionScanInput[] = [];
+  let totalRows = 0;
+  for (const session of sessionRows) {
+    const { rows } = loadSessionTranscriptRows(db, session.session_id, primaryOnly);
+    if (rows.length > 0) {
+      sessionInputs.push({ sessionId: session.session_id, rows });
+      totalRows += rows.length;
+    }
   }
 
-  console.log("[scan-names] Executing session-scoped ledger query...");
-  const ledgerRows = db.prepare(
-    `SELECT le.content, le.source, le.narrative_weight
-     FROM ledger_entries le
-     JOIN sessions s ON s.session_id = le.session_id
-     WHERE ${ledgerWhereParts.join(" AND ")}`,
-  ).all(...ledgerParams) as Array<{
-    content: string;
-    source: string;
-    narrative_weight: string;
-  }>;
+  console.log(
+    `[scan-names] Loaded ${totalRows} transcript rows across ${sessionInputs.length} sessions, extracting candidates...`,
+  );
 
-  let bronzeRows: Array<{ content: string; source: string; narrative_weight: string }> = [];
-  if (ledgerRows.length === 0) {
-    console.log("[scan-names] No qualifying ledger rows found; falling back to bronze_transcript...");
-    bronzeRows = db.prepare(
-      `SELECT bt.content, bt.source_type as source, 'primary' as narrative_weight
-       FROM bronze_transcript bt
-       JOIN sessions s ON s.session_id = bt.session_id
-       WHERE bt.content IS NOT NULL
-         AND TRIM(bt.content) <> ''
-         AND ${sessionWhere}`,
-    ).all(...sessionParams) as Array<{
-      content: string;
-      source: string;
-      narrative_weight: string;
-    }>;
-  }
-
-  const transcriptSelection = pickTranscriptRows(ledgerRows, bronzeRows);
-  const rows = transcriptSelection.rows;
-  const transcriptSource = transcriptSelection.source;
-
-  console.log(`[scan-names] Scanned ${rows.length} rows from ${transcriptSource}, extracting candidates...`);
-
-  const scanResult = scanNamesCore({
-    rows,
+  const scanResult = scanNamesCorePerSession({
+    sessionRows: sessionInputs,
     registry,
     minCount,
     maxExamples,
@@ -192,14 +222,16 @@ function scanNames(): void {
   db.close();
 
   const filtered = scanResult.pending;
-
-  console.log(`[scan-names] Found ${filtered.length} candidates (minCount=${minCount})`);
   const knownHitsList = scanResult.knownHits;
 
-  // Console output (unchanged)
+  console.log(`[scan-names] Found ${filtered.length} candidates (minCount=${minCount})`);
+
+  // Console output
   console.log("\n=== TOP UNKNOWN NAMES ===\n");
   for (const cand of filtered) {
-    console.log(`${cand.display} (${cand.count} total, ${cand.primaryCount} primary)`);
+    const sessionLabel = cand.sessions ? ` [${cand.sessions.length} sessions]` : "";
+    const initLabel = cand.sentenceInitialCount > 0 ? `, ${cand.sentenceInitialCount} sentence-initial` : "";
+    console.log(`${cand.display} (${cand.count} total, ${cand.primaryCount} primary${initLabel}${sessionLabel})`);
     for (const ex of cand.examples) {
       console.log(`  > ${ex}`);
     }
@@ -209,20 +241,22 @@ function scanNames(): void {
   if (includeKnown && knownHitsList.length > 0) {
     console.log("\n=== KNOWN NAMES HIT COUNTS ===\n");
     for (const hit of knownHitsList) {
-      console.log(`${hit.canonical_name} (${hit.count} total, ${hit.primaryCount} primary)`);
+      const sessionLabel = hit.sessions ? ` [${hit.sessions.length} sessions]` : "";
+      console.log(`${hit.canonical_name} (${hit.count} total, ${hit.primaryCount} primary${sessionLabel})`);
     }
     console.log("");
   }
 
   console.log(`\n=== SUMMARY ===`);
+  console.log(`Sessions scanned: ${sessionInputs.length}`);
   console.log(`Candidates: ${filtered.length}`);
   if (includeKnown) {
     console.log(`Known hits: ${knownHitsList.length}`);
   }
 
   // Write pending decisions file
-  const pendingData: PendingDecisions = {
-    version: 1,
+  const pendingData: PendingDecisionsYaml = {
+    version: 2,
     generated_at: new Date().toISOString(),
     source: {
       db: dbPath,
@@ -230,10 +264,11 @@ function scanNames(): void {
       campaignSlug,
       primaryOnly,
       minCount,
-      sessionCount: sessionRows.length,
-      transcriptSource,
+      sessionCount: sessionInputs.length,
+      transcriptSource: "per_session",
     },
     pending: filtered,
+    knownHits: includeKnown ? knownHitsList : [],
   };
 
   const pendingDir = path.dirname(pendingPath);
