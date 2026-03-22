@@ -1,9 +1,4 @@
-import { notFound } from "next/navigation";
-import { CampaignOverview } from "@/components/campaign/campaign-overview";
-import { ArchiveShell } from "@/components/layout/archive-shell";
-import { EmptyState } from "@/components/shared/empty-state";
-import { WebApiError } from "@/lib/api/http";
-import { getCampaignSessionsApi } from "@/lib/api/campaigns";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -12,50 +7,21 @@ type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
+/**
+ * Legacy route — redirects to the unified campaign page.
+ * Preserves guild_id and show_archived params.
+ */
 export default async function CampaignSessionsPage({ params, searchParams }: PageProps) {
   const { campaignSlug } = await params;
   const query = await searchParams;
-  const showArchived = (() => {
-    const raw = query.show_archived;
-    const value = Array.isArray(raw) ? raw[0] : raw;
-    if (typeof value !== "string") return false;
-    const normalized = value.trim().toLowerCase();
-    return normalized === "1" || normalized === "true" || normalized === "yes";
-  })();
-  let campaign = null as Awaited<ReturnType<typeof getCampaignSessionsApi>>["campaign"] | null;
-  let routeAmbiguous = false;
+  const outParams = new URLSearchParams();
 
-  try {
-    const response = await getCampaignSessionsApi(campaignSlug, query);
-    campaign = response.campaign;
-  } catch (error) {
-    if (error instanceof WebApiError && error.status === 404) {
-      campaign = null;
-    } else if (error instanceof WebApiError && error.status === 409 && error.code === "ambiguous_campaign_scope") {
-      routeAmbiguous = true;
-    } else {
-      throw error;
-    }
-  }
+  const guildId = Array.isArray(query.guild_id) ? query.guild_id[0] : query.guild_id;
+  if (guildId) outParams.set("guild_id", guildId);
 
-  if (routeAmbiguous) {
-    return (
-      <ArchiveShell section="Sessions" showCampaignSelector={false}>
-        <EmptyState
-          title="Choose guild context"
-          description="This campaign slug exists in multiple authorized guilds. Open it from Dashboard so the app can pass an explicit guild scope."
-        />
-      </ArchiveShell>
-    );
-  }
+  const showArchived = Array.isArray(query.show_archived) ? query.show_archived[0] : query.show_archived;
+  if (showArchived) outParams.set("show_archived", showArchived);
 
-  if (!campaign) {
-    notFound();
-  }
-
-  return (
-    <ArchiveShell section="Sessions" campaignName={campaign.name} showCampaignSelector={false}>
-      <CampaignOverview campaign={campaign} searchParams={query} showArchived={showArchived} />
-    </ArchiveShell>
-  );
+  const suffix = outParams.toString();
+  redirect(`/campaigns/${campaignSlug}${suffix ? `?${suffix}` : ""}`);
 }

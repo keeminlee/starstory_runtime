@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, History, LayoutDashboard, SlidersHorizontal, Sparkles } from "lucide-react";
+import { BookOpen, SlidersHorizontal, Sparkles } from "lucide-react";
 import type { ComponentType } from "react";
 import { useSession } from "next-auth/react";
 import { resolveCampaignTargetPath, useCampaignContext } from "@/components/providers/campaign-context-provider";
 import { STARSTORY_DISCORD_INSTALL_URL } from "@/lib/auth/primaryAuth";
 
 type FloatingItem = {
-  key: "campaigns" | "sessions" | "compendium" | "settings";
+  key: "campaign" | "settings";
   href: string;
   label: string;
   icon: ComponentType<{ className?: string }>;
@@ -64,24 +64,16 @@ function FloatingRailButton({
 export function AppFloatingRail() {
   const pathname = usePathname();
   const { status } = useSession();
-  const { activeCampaignSlug, activeGuildId, realCampaigns } = useCampaignContext();
+  const { activeCampaignSlug, activeGuildId } = useCampaignContext();
 
   const hasActiveCampaign = Boolean(activeCampaignSlug);
-  const hasMultipleRealCampaigns = realCampaigns.length > 1;
   const showSettings = status === "authenticated";
-  const sessionsHref = hasActiveCampaign
+  const campaignHref = hasActiveCampaign
     ? resolveCampaignTargetPath({ routeType: "campaign-sessions", campaignSlug: activeCampaignSlug ?? "", guildId: activeGuildId })
-    : "/dashboard";
-  const compendiumHref = hasActiveCampaign
-    ? resolveCampaignTargetPath({ routeType: "campaign-compendium", campaignSlug: activeCampaignSlug ?? "", guildId: activeGuildId })
     : "/dashboard";
 
   const items: FloatingItem[] = [
-    ...(hasMultipleRealCampaigns
-      ? [{ key: "campaigns" as const, href: "/dashboard", label: "Campaigns", icon: LayoutDashboard }]
-      : []),
-    { key: "sessions", href: sessionsHref, label: "Sessions", icon: History, disabled: !hasActiveCampaign },
-    { key: "compendium", href: compendiumHref, label: "Compendium", icon: BookOpen, disabled: !hasActiveCampaign },
+    { key: "campaign", href: campaignHref, label: "Campaign", icon: BookOpen, disabled: !hasActiveCampaign },
     ...(showSettings ? [{ key: "settings" as const, href: "/settings", label: "Settings", icon: SlidersHorizontal }] : []),
   ];
 
@@ -105,13 +97,9 @@ export function AppFloatingRail() {
       <nav className="pointer-events-auto flex flex-col gap-3">
           {items.map((item) => {
             const active =
-              item.key === "campaigns"
-                ? pathname.startsWith("/dashboard")
-                : item.key === "sessions"
-                  ? pathname.includes("/sessions") && pathname.startsWith("/campaigns/")
-                  : item.key === "compendium"
-                    ? pathname.includes("/compendium") && pathname.startsWith("/campaigns/")
-                    : pathname.startsWith("/settings");
+              item.key === "campaign"
+                ? pathname.startsWith("/campaigns/")
+                : pathname.startsWith("/settings");
 
             return (
               <FloatingRailButton

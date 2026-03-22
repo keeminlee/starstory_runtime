@@ -23,7 +23,7 @@ export function LandingPage() {
             </span>
           </a>
           <Link
-            href="/campaigns/demo/sessions"
+            href="/campaigns/demo"
             className="control-button-ghost rounded-full px-8 py-4 text-lg font-semibold text-primary/90"
           >
             See Examples

@@ -110,9 +110,7 @@ export function SessionHeader({ session, searchParams }: SessionHeaderProps) {
   return (
     <header className="space-y-4">
       <nav className="flex flex-wrap items-center gap-1 text-xs uppercase tracking-wider text-muted-foreground">
-        <Link href="/dashboard" className="hover:text-primary">Dashboard</Link>
-        <ChevronRight className="h-3 w-3" />
-          <Link href={`/campaigns/${session.campaignSlug}/sessions`} className="hover:text-primary">{session.campaignSlug}</Link>
+        <Link href={`/campaigns/${session.campaignSlug}`} className="hover:text-primary">{session.campaignName ?? session.campaignSlug}</Link>
         <ChevronRight className="h-3 w-3" />
         <span className="text-foreground/80">{sessionLabel}</span>
       </nav>

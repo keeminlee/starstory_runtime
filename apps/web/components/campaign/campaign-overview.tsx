@@ -18,9 +18,10 @@ type CampaignOverviewProps = {
   campaign: CampaignSummary;
   searchParams?: Record<string, string | string[] | undefined>;
   showArchived: boolean;
+  showHeader?: boolean;
 };
 
-export function CampaignOverview({ campaign, searchParams, showArchived }: CampaignOverviewProps) {
+export function CampaignOverview({ campaign, searchParams, showArchived, showHeader = true }: CampaignOverviewProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { verboseModeEnabled } = useVerboseMode();
@@ -101,81 +102,107 @@ export function CampaignOverview({ campaign, searchParams, showArchived }: Campa
 
   return (
     <div className="space-y-8">
-      <header>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="flex flex-wrap items-center gap-3">
-              <InlineEditableText
-                value={campaignName}
-                canEdit={Boolean(campaign.canWrite)}
-                ariaLabel="Campaign title"
-                maxLength={100}
-                emptyValueMessage="Campaign name cannot be empty."
-                maxLengthMessage="Campaign name must be 100 characters or fewer."
-                inputClassName="min-w-[16rem] border-b border-primary/30 bg-transparent px-0 py-0 text-4xl font-serif text-foreground outline-none transition-colors focus:border-primary"
-                onSave={async (nextName) => {
-                  try {
-                    const result = await updateCampaignNameApi(campaign.slug, { campaignName: nextName }, scopedSearchParams);
-                    setCampaignName(result.campaign.name);
-                    router.refresh();
-                    return result.campaign.name;
-                  } catch (error) {
-                    if (error instanceof WebApiError) {
-                      throw new Error(error.message);
-                    }
+      {showHeader ? (
+        <header>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="flex flex-wrap items-center gap-3">
+                <InlineEditableText
+                  value={campaignName}
+                  canEdit={Boolean(campaign.canWrite)}
+                  ariaLabel="Campaign title"
+                  maxLength={100}
+                  emptyValueMessage="Campaign name cannot be empty."
+                  maxLengthMessage="Campaign name must be 100 characters or fewer."
+                  inputClassName="min-w-[16rem] border-b border-primary/30 bg-transparent px-0 py-0 text-4xl font-serif text-foreground outline-none transition-colors focus:border-primary"
+                  onSave={async (nextName) => {
+                    try {
+                      const result = await updateCampaignNameApi(campaign.slug, { campaignName: nextName }, scopedSearchParams);
+                      setCampaignName(result.campaign.name);
+                      router.refresh();
+                      return result.campaign.name;
+                    } catch (error) {
+                      if (error instanceof WebApiError) {
+                        throw new Error(error.message);
+                      }
 
-                    throw new Error("Unable to rename campaign right now.");
-                  }
-                }}
-                renderDisplay={({ displayValue, canEdit, isSaving, startEditing }) => (
-                  <h1 className="text-4xl font-serif">
-                    {canEdit ? (
-                      <button
-                        type="button"
-                        onClick={startEditing}
-                        disabled={isSaving}
-                        className="cursor-text text-left text-foreground decoration-primary/40 underline-offset-4 transition hover:text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {displayValue}
-                      </button>
-                    ) : (
-                      displayValue
-                    )}
-                  </h1>
-                )}
-              />
-              <CampaignHeaderSwitcher />
-              {hasArchivedSessions ? (
-                <button
-                  type="button"
-                  onClick={() => setArchivedVisibility(!showArchived)}
-                  aria-pressed={showArchived}
-                  className={`group flex h-10 w-10 items-center overflow-hidden rounded-full border px-3 shadow-[0_12px_30px_rgba(0,0,0,0.16)] backdrop-blur transition-[width,border-color,background-color] duration-200 ${
-                    showArchived
-                      ? "border-primary/32 bg-primary/10 text-foreground hover:w-[12.5rem]"
-                      : "border-border/70 bg-background/62 text-foreground/90 hover:w-[12.5rem] hover:border-primary/25 hover:bg-background/82"
-                  }`}
-                  title={showArchived ? "Hide archive" : "View archive"}
-                >
-                  <span className="inline-flex items-center gap-2 whitespace-nowrap">
-                    <Archive className={`h-4 w-4 shrink-0 ${showArchived ? "text-primary" : "text-primary/80"}`} />
-                    <span className="max-w-0 overflow-hidden text-[11px] font-semibold tracking-wide opacity-0 transition-all duration-200 group-hover:max-w-[9rem] group-hover:opacity-100">
-                      {showArchived ? `Showing Archive · ${archivedSessionCount}` : `View Archive · ${archivedSessionCount}`}
+                      throw new Error("Unable to rename campaign right now.");
+                    }
+                  }}
+                  renderDisplay={({ displayValue, canEdit, isSaving, startEditing }) => (
+                    <h1 className="text-4xl font-serif">
+                      {canEdit ? (
+                        <button
+                          type="button"
+                          onClick={startEditing}
+                          disabled={isSaving}
+                          className="cursor-text text-left text-foreground decoration-primary/40 underline-offset-4 transition hover:text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {displayValue}
+                        </button>
+                      ) : (
+                        displayValue
+                      )}
+                    </h1>
+                  )}
+                />
+                <CampaignHeaderSwitcher />
+                {hasArchivedSessions ? (
+                  <button
+                    type="button"
+                    onClick={() => setArchivedVisibility(!showArchived)}
+                    aria-pressed={showArchived}
+                    className={`group flex h-10 w-10 items-center overflow-hidden rounded-full border px-3 shadow-[0_12px_30px_rgba(0,0,0,0.16)] backdrop-blur transition-[width,border-color,background-color] duration-200 ${
+                      showArchived
+                        ? "border-primary/32 bg-primary/10 text-foreground hover:w-[12.5rem]"
+                        : "border-border/70 bg-background/62 text-foreground/90 hover:w-[12.5rem] hover:border-primary/25 hover:bg-background/82"
+                    }`}
+                    title={showArchived ? "Hide archive" : "View archive"}
+                  >
+                    <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                      <Archive className={`h-4 w-4 shrink-0 ${showArchived ? "text-primary" : "text-primary/80"}`} />
+                      <span className="max-w-0 overflow-hidden text-[11px] font-semibold tracking-wide opacity-0 transition-all duration-200 group-hover:max-w-[9rem] group-hover:opacity-100">
+                        {showArchived ? `Showing Archive · ${archivedSessionCount}` : `View Archive · ${archivedSessionCount}`}
+                      </span>
                     </span>
-                  </span>
-                </button>
-              ) : null}
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-3">
-              {verboseModeEnabled ? (
-                <p className="font-mono text-xs uppercase tracking-[0.24em] text-muted-foreground">{campaign.slug}</p>
-              ) : null}
+                  </button>
+                ) : null}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                {verboseModeEnabled ? (
+                  <p className="font-mono text-xs uppercase tracking-[0.24em] text-muted-foreground">{campaign.slug}</p>
+                ) : null}
+              </div>
             </div>
           </div>
+          <p className="mt-2 max-w-3xl text-muted-foreground">{campaign.description}</p>
+          {errorMessage ? <p className="mt-2 text-sm text-rose-400">{errorMessage}</p> : null}
+        </header>
+      ) : null}
+
+      {!showHeader && hasArchivedSessions ? (
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setArchivedVisibility(!showArchived)}
+            aria-pressed={showArchived}
+            className={`group flex h-10 w-10 items-center overflow-hidden rounded-full border px-3 shadow-[0_12px_30px_rgba(0,0,0,0.16)] backdrop-blur transition-[width,border-color,background-color] duration-200 ${
+              showArchived
+                ? "border-primary/32 bg-primary/10 text-foreground hover:w-[12.5rem]"
+                : "border-border/70 bg-background/62 text-foreground/90 hover:w-[12.5rem] hover:border-primary/25 hover:bg-background/82"
+            }`}
+            title={showArchived ? "Hide archive" : "View archive"}
+          >
+            <span className="inline-flex items-center gap-2 whitespace-nowrap">
+              <Archive className={`h-4 w-4 shrink-0 ${showArchived ? "text-primary" : "text-primary/80"}`} />
+              <span className="max-w-0 overflow-hidden text-[11px] font-semibold tracking-wide opacity-0 transition-all duration-200 group-hover:max-w-[9rem] group-hover:opacity-100">
+                {showArchived ? `Showing Archive · ${archivedSessionCount}` : `View Archive · ${archivedSessionCount}`}
+              </span>
+            </span>
+          </button>
+          {errorMessage ? <p className="text-sm text-rose-400">{errorMessage}</p> : null}
         </div>
-        <p className="mt-2 max-w-3xl text-muted-foreground">{campaign.description}</p>
-        {errorMessage ? <p className="mt-2 text-sm text-rose-400">{errorMessage}</p> : null}
-      </header>
+      ) : null}
 
       <div className="space-y-4">
         {localSessions.map((session) => {
