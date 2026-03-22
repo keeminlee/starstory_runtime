@@ -31,7 +31,15 @@ function cloneSnapshot(snapshot: RegistrySnapshotDto): RegistrySnapshotDto {
       generatedAt: snapshot.pending.generatedAt,
       sourceCampaignSlug: snapshot.pending.sourceCampaignSlug,
       sourceGuildId: snapshot.pending.sourceGuildId,
-      items: snapshot.pending.items.map((item) => ({ ...item, examples: [...item.examples] })),
+      items: snapshot.pending.items.map((item) => ({
+        ...item,
+        examples: [...item.examples],
+        sessions: item.sessions.map((session) => ({ ...session })),
+      })),
+      knownHits: snapshot.pending.knownHits.map((hit) => ({
+        ...hit,
+        sessions: hit.sessions.map((session) => ({ ...session })),
+      })),
     },
   };
 }
