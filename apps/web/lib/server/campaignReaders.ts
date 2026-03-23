@@ -840,7 +840,6 @@ export async function getWebCampaignDetail(args: {
   campaignSlug: string;
   searchParams?: QueryInput;
 }): Promise<CampaignSummary | null> {
-  const includeArchived = readIncludeArchived(args.searchParams);
   let auth = null as Awaited<ReturnType<typeof resolveWebAuthContext>> | null;
   try {
     auth = await resolveWebAuthContext(args.searchParams);
@@ -855,7 +854,7 @@ export async function getWebCampaignDetail(args: {
     auth,
     campaignSlug: args.campaignSlug,
     searchParams: args.searchParams,
-    includeArchived,
+    includeArchived: true,
   });
 
   if (!resolvedScope) {
@@ -867,11 +866,9 @@ export async function getWebCampaignDetail(args: {
     guildId,
     campaignSlug: args.campaignSlug,
     limit: 50,
-    includeArchived,
+    includeArchived: true,
   });
-  const archivedSessionCount = includeArchived
-    ? sessions.filter((entry) => entry.session.isArchived).length
-    : countArchivedSessionsForGuildCampaign({ guildId, campaignSlug: args.campaignSlug });
+  const archivedSessionCount = sessions.filter((entry) => entry.session.isArchived).length;
   const guildDisplayName = resolveGuildDisplayName({ guildId, guildName: resolvedScope.guildName });
   const guildIconUrl = resolveGuildIconUrl(resolvedScope.guildIconUrl);
   const canWrite = canUserWriteCampaignArchive({ guildId, campaignSlug: args.campaignSlug, userId: auth.user?.id ?? null });

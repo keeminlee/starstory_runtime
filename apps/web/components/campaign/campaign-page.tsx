@@ -170,9 +170,7 @@ export function CampaignPage({
     onUnarchive: handleUnarchive,
   });
 
-  const archivedSessionCount =
-    campaign.archivedSessionCount ??
-    effectiveSessions.filter((s) => s.isArchived).length;
+  const archivedSessionCount = effectiveSessions.filter((s) => s.isArchived).length;
 
   const selectedSession = useMemo(
     () =>
