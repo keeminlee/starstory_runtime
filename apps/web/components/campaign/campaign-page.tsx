@@ -165,7 +165,7 @@ export function CampaignPage({
   return (
     <>
       {/* ── Fixed constellation — viewport-anchored, scrolls independently ── */}
-      <div className="fixed left-[80px] top-24 bottom-0 z-20 w-[300px] overflow-y-auto custom-scrollbar">
+      <div className="fixed left-[80px] top-28 bottom-0 z-20 w-[300px] overflow-y-auto custom-scrollbar">
         <CampaignSessionConstellation
           nodes={constellation.nodes}
           previewNodes={constellation.previewNodes}
@@ -190,40 +190,42 @@ export function CampaignPage({
       </div>
 
       {/* ── Scrolling main content — shifted right to clear fixed constellation ── */}
-      <div className="ml-[316px] max-w-5xl space-y-8 pr-4">
-        {/* ── Campaign identity + mode toggle ── */}
-        <div>
-          <CampaignHeader
-            campaign={campaign}
-            campaignName={campaignName}
-            onNameSaved={setCampaignName}
-            scopedSearchParams={scopedSearchParams}
-            headerError={headerError}
-          />
-          <CampaignModeToggle activeView={activeView} onSwitch={switchView} />
-        </div>
+      <div className="ml-[316px] pr-4" style={{ width: "calc(100% - 316px)" }}>
+        <div className="mx-auto max-w-6xl space-y-8 px-4 sm:px-6 lg:px-8">
+          {/* ── Campaign identity + mode toggle ── */}
+          <div>
+            <CampaignHeader
+              campaign={campaign}
+              campaignName={campaignName}
+              onNameSaved={setCampaignName}
+              scopedSearchParams={scopedSearchParams}
+              headerError={headerError}
+            />
+            <CampaignModeToggle activeView={activeView} onSwitch={switchView} />
+          </div>
 
-        {/* ── Active surface ── */}
-        {activeView === "chronicle" ? (
-          <ChronicleSurface
-            selectedSessionId={constellation.selectedSessionId}
-            selectedSession={selectedSession}
-            campaignSlug={campaign.slug}
-            guildId={campaign.guildId}
-            canEditSessionTitle={Boolean(campaign.canWrite)}
-            canWrite={Boolean(campaign.canWrite)}
-            searchParams={searchParams}
-            registry={registry}
-          />
-        ) : (
-          <CompendiumSurface
-            campaign={campaign}
-            registry={registry}
-            seenDiscordUsers={seenDiscordUsers}
-            searchParams={searchParams}
-            selectedSessionId={constellation.selectedSessionId}
-          />
-        )}
+          {/* ── Active surface ── */}
+          {activeView === "chronicle" ? (
+            <ChronicleSurface
+              selectedSessionId={constellation.selectedSessionId}
+              selectedSession={selectedSession}
+              campaignSlug={campaign.slug}
+              guildId={campaign.guildId}
+              canEditSessionTitle={Boolean(campaign.canWrite)}
+              canWrite={Boolean(campaign.canWrite)}
+              searchParams={searchParams}
+              registry={registry}
+            />
+          ) : (
+            <CompendiumSurface
+              campaign={campaign}
+              registry={registry}
+              seenDiscordUsers={seenDiscordUsers}
+              searchParams={searchParams}
+              selectedSessionId={constellation.selectedSessionId}
+            />
+          )}
+        </div>
       </div>
     </>
   );

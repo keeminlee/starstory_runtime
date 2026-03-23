@@ -416,7 +416,7 @@ export function ChronicleRecapPane({
           </div>
         ) : null}
 
-        <article className="mx-auto max-w-3xl px-4 py-5 sm:px-5 sm:py-6">
+        <article className="mx-auto max-w-4xl px-5 py-5 sm:px-6 sm:py-6 lg:px-8">
           <header className="border-b border-border/50 pb-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0 flex-1">
