@@ -66,7 +66,10 @@ export function CampaignSessionConstellation({
   const [archiveZoneHovered, setArchiveZoneHovered] = useState(false);
 
   const renderNodes = dragState ? previewNodes : nodes;
-  const lastNode = renderNodes[renderNodes.length - 1];
+  const anchorNodes = dragState?.fromSource === "live" && dragState.isOverArchiveZone
+    ? nodes
+    : renderNodes;
+  const lastNode = anchorNodes[anchorNodes.length - 1];
   const starAreaHeight = lastNode ? lastNode.y + BOTTOM_PADDING : 120;
 
   const archiveAreaHeight = isEditMode
@@ -75,6 +78,10 @@ export function CampaignSessionConstellation({
       : ARCHIVE_EMPTY_HEIGHT
     : 0;
   const constellationHeight = starAreaHeight + archiveAreaHeight;
+  const previewNodeMap = new Map(renderNodes.map((node) => [node.session.id, node]));
+  const positionedNodes = nodes
+    .map((node) => previewNodeMap.get(node.session.id))
+    .filter((node): node is ConstellationNode => node != null);
 
   /* ── Pointer handlers for drag tracking ── */
   const handlePointerMove = useCallback(
@@ -159,6 +166,7 @@ export function CampaignSessionConstellation({
           overflow: "visible",
           touchAction: isDragging ? "none" : undefined,
           userSelect: isDragging ? "none" : undefined,
+          transition: isDragging ? "none" : "height 220ms ease",
         }}
         role="listbox"
         aria-label="Session constellation"
@@ -196,7 +204,7 @@ export function CampaignSessionConstellation({
         </svg>
 
         {/* Star nodes */}
-        {renderNodes.map((node) => {
+        {positionedNodes.map((node) => {
           const isBeingDragged = draggedSessionId === node.session.id;
           return (
             <SessionConstellationNode
@@ -272,6 +280,9 @@ export function CampaignSessionConstellation({
             style={{
               top: starAreaHeight,
               height: archiveAreaHeight,
+              transition: isDragging
+                ? "border-color 180ms ease, background-color 180ms ease"
+                : "top 220ms ease, height 220ms ease, border-color 180ms ease, background-color 180ms ease",
             }}
           >
             {archivedSessions.length > 0 ? (

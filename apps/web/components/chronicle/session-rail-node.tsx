@@ -43,6 +43,7 @@ export function SessionConstellationNode({
     label: session.label,
     sessionId: session.id,
   });
+  const editModeTitle = displayTitle.slice(0, 12);
 
   return (
     <div
@@ -54,8 +55,9 @@ export function SessionConstellationNode({
         height: SLOT_HEIGHT,
         filter: isSelected && !isDragging ? "brightness(1.18)" : undefined,
         opacity: isDragging ? 0.3 : undefined,
-        transition: isDragging ? "none" : "top 200ms ease, left 200ms ease, opacity 200ms ease",
+        transition: isDragging ? "none" : "top 220ms ease, left 220ms ease, opacity 200ms ease, filter 200ms ease",
         cursor: isEditMode ? "grab" : "pointer",
+        willChange: isDragging ? undefined : "top, left, opacity",
       }}
       onClick={isEditMode ? undefined : onSelect}
       onMouseEnter={onHoverEnter}
@@ -101,6 +103,7 @@ export function SessionConstellationNode({
             transform: isSelected && !isDragging
               ? "translate(-50%, -50%) scale(1.18)"
               : "translate(-50%, -50%)",
+            transition: "transform 220ms ease, box-shadow 220ms ease",
             ...(isSelected && !isDragging
               ? {
                   boxShadow:
@@ -138,9 +141,13 @@ export function SessionConstellationNode({
           <div
             className="pointer-events-none absolute whitespace-nowrap"
             style={{
-              [xOffset >= 0 ? "left" : "right"]: 20,
+              left: 0,
               top: -2,
-              transform: "translateY(-50%)",
+              transform:
+                xOffset >= 0
+                  ? "translate(20px, -50%)"
+                  : "translate(calc(-100% - 20px), -50%)",
+              transition: "transform 220ms ease, opacity 150ms ease",
             }}
             aria-hidden="true"
           >
@@ -148,7 +155,7 @@ export function SessionConstellationNode({
               className="text-[10px] font-medium tracking-wide"
               style={{ color: "rgba(180, 195, 230, 0.55)" }}
             >
-              {displayTitle}
+              {editModeTitle}
             </span>
           </div>
         ) : null}

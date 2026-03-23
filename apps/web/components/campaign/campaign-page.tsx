@@ -42,10 +42,79 @@ export function CampaignPage({
   const [campaignName, setCampaignName] = useState(campaign.name);
   const [headerError, setHeaderError] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<CampaignView>(initialView);
+  const [sessionArchiveOverrides, setSessionArchiveOverrides] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setCampaignName(campaign.name);
   }, [campaign.name]);
+
+  useEffect(() => {
+    setSessionArchiveOverrides((prev) => {
+      let changed = false;
+      const serverState = new Map(campaign.sessions.map((session) => [session.id, session.isArchived]));
+      const next: Record<string, boolean> = {};
+
+      for (const [sessionId, isArchived] of Object.entries(prev)) {
+        const serverArchived = serverState.get(sessionId);
+        if (serverArchived === undefined) {
+          changed = true;
+          continue;
+        }
+        if (serverArchived === isArchived) {
+          changed = true;
+          continue;
+        }
+        next[sessionId] = isArchived;
+      }
+
+      return changed ? next : prev;
+    });
+  }, [campaign.sessions]);
+
+  const effectiveSessions = useMemo(
+    () =>
+      campaign.sessions.map((session) => {
+        const isArchived = sessionArchiveOverrides[session.id];
+        return isArchived === undefined ? session : { ...session, isArchived };
+      }),
+    [campaign.sessions, sessionArchiveOverrides],
+  );
+
+  const isDemoMode = campaign.readOnlyReason === "demo_mode";
+
+  const setOptimisticArchiveState = useCallback(
+    (sessionId: string, isArchived: boolean) => {
+      setSessionArchiveOverrides((prev) => ({ ...prev, [sessionId]: isArchived }));
+    },
+    [],
+  );
+
+  const rollbackArchiveState = useCallback(
+    (sessionId: string) => {
+      const serverSession = campaign.sessions.find((session) => session.id === sessionId);
+      if (!serverSession) {
+        setSessionArchiveOverrides((prev) => {
+          if (!(sessionId in prev)) {
+            return prev;
+          }
+          const next = { ...prev };
+          delete next[sessionId];
+          return next;
+        });
+        return;
+      }
+
+      setSessionArchiveOverrides((prev) => {
+        if (prev[sessionId] === serverSession.isArchived) {
+          const next = { ...prev };
+          delete next[sessionId];
+          return next;
+        }
+        return { ...prev, [sessionId]: serverSession.isArchived };
+      });
+    },
+    [campaign.sessions],
+  );
 
   const scopedSearchParams = useMemo(
     () => ({
@@ -67,25 +136,33 @@ export function CampaignPage({
 
   const handleArchive = useCallback(
     (sessionId: string) => {
+      setOptimisticArchiveState(sessionId, true);
+      if (isDemoMode) {
+        return;
+      }
       archiveSessionApi(sessionId, scopedSearchParams)
         .then(() => router.refresh())
-        .catch(() => {});
+        .catch(() => rollbackArchiveState(sessionId));
     },
-    [scopedSearchParams, router],
+    [isDemoMode, rollbackArchiveState, scopedSearchParams, router, setOptimisticArchiveState],
   );
 
   const handleUnarchive = useCallback(
     (sessionId: string) => {
+      setOptimisticArchiveState(sessionId, false);
+      if (isDemoMode) {
+        return;
+      }
       unarchiveSessionApi(sessionId, scopedSearchParams)
         .then(() => router.refresh())
-        .catch(() => {});
+        .catch(() => rollbackArchiveState(sessionId));
     },
-    [scopedSearchParams, router],
+    [isDemoMode, rollbackArchiveState, scopedSearchParams, router, setOptimisticArchiveState],
   );
 
   /* ── Session constellation model (shell-level, persists across modes) ── */
   const constellation = useSessionConstellationModel({
-    sessions: campaign.sessions,
+    sessions: effectiveSessions,
     showArchived,
     initialSelectedId: initialSessionId,
     onReorder: handleReorder,
@@ -95,13 +172,13 @@ export function CampaignPage({
 
   const archivedSessionCount =
     campaign.archivedSessionCount ??
-    campaign.sessions.filter((s) => s.isArchived).length;
+    effectiveSessions.filter((s) => s.isArchived).length;
 
   const selectedSession = useMemo(
     () =>
-      campaign.sessions.find((session) => session.id === constellation.selectedSessionId) ??
+      effectiveSessions.find((session) => session.id === constellation.selectedSessionId) ??
       null,
-    [campaign.sessions, constellation.selectedSessionId],
+    [effectiveSessions, constellation.selectedSessionId],
   );
 
   /* ── Archive toggle URL sync ── */
