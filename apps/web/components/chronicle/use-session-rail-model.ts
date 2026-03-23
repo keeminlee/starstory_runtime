@@ -5,7 +5,6 @@ import type { SessionSummary } from "@/lib/types";
 
 /* ── Prominence tiers (visual weight) ── */
 export type ConstellationProminence = "anchor" | "major" | "minor";
-
 /* ── Positioned node for rendering ── */
 export type ConstellationNode = {
   session: SessionSummary;
@@ -212,11 +211,11 @@ export function useSessionConstellationModel({
   });
 
   const effectiveSelectedId = useMemo(() => {
-    if (selectedSessionId && stableOrderedIds.includes(selectedSessionId)) {
+    if (selectedSessionId && sessionMap.has(selectedSessionId)) {
       return selectedSessionId;
     }
     return stableOrderedIds[0] ?? null;
-  }, [selectedSessionId, stableOrderedIds]);
+  }, [selectedSessionId, sessionMap, stableOrderedIds]);
 
   const selectSession = useCallback((id: string) => {
     setSelectedSessionId(id);

@@ -1,7 +1,7 @@
 "use client";
 
 import type { SessionSummary } from "@/lib/types";
-import { formatSessionDisplayTitle } from "@/lib/campaigns/display";
+import { formatSessionDisplayTitle, formatSessionEditDate } from "@/lib/campaigns/display";
 import type { ConstellationProminence } from "@/components/chronicle/use-session-rail-model";
 import { CENTRE_X } from "@/components/chronicle/use-session-rail-model";
 import styles from "@/components/openalpha/sky/sky.module.css";
@@ -44,6 +44,7 @@ export function SessionConstellationNode({
     sessionId: session.id,
   });
   const editModeTitle = displayTitle.slice(0, 12);
+  const editModeDate = formatSessionEditDate(session.date);
 
   return (
     <div
@@ -151,12 +152,20 @@ export function SessionConstellationNode({
             }}
             aria-hidden="true"
           >
-            <span
-              className="text-[10px] font-medium tracking-wide"
-              style={{ color: "rgba(180, 195, 230, 0.55)" }}
-            >
-              {editModeTitle}
-            </span>
+            <div className="flex flex-col gap-0.5">
+              <span
+                className="text-[10px] font-medium tracking-wide"
+                style={{ color: "rgba(180, 195, 230, 0.55)" }}
+              >
+                {editModeTitle}
+              </span>
+              <span
+                className="text-[9px] tracking-[0.18em] uppercase"
+                style={{ color: "rgba(180, 195, 230, 0.34)" }}
+              >
+                {editModeDate}
+              </span>
+            </div>
           </div>
         ) : null}
 

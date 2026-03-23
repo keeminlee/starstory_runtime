@@ -163,7 +163,7 @@ export function CampaignPage({
   /* ── Session constellation model (shell-level, persists across modes) ── */
   const constellation = useSessionConstellationModel({
     sessions: effectiveSessions,
-    showArchived,
+    showArchived: false,
     initialSelectedId: initialSessionId,
     onReorder: handleReorder,
     onArchive: handleArchive,

@@ -6,14 +6,14 @@ import { SessionConstellationNode } from "@/components/chronicle/session-rail-no
 import { SessionConstellationEdge } from "@/components/chronicle/session-constellation-edge";
 import type { ConstellationNode, ConstellationDragState } from "@/components/chronicle/use-session-rail-model";
 import { CENTRE_X } from "@/components/chronicle/use-session-rail-model";
-import { formatSessionDisplayTitle } from "@/lib/campaigns/display";
+import { formatSessionDisplayTitle, formatSessionEditDate } from "@/lib/campaigns/display";
 import type { SessionSummary } from "@/lib/types";
 import styles from "@/components/openalpha/sky/sky.module.css";
 
 const BOTTOM_PADDING = 72;
-const ARCHIVE_HEADER_HEIGHT = 32;
+const ARCHIVE_HEADER_HEIGHT = 40;
 const ARCHIVE_STAR_SPACING = 36;
-const ARCHIVE_EMPTY_HEIGHT = 72;
+const ARCHIVE_EMPTY_HEIGHT = 112;
 /** Slot size mirrors the node component's hitbox. */
 const SLOT_WIDTH = 210;
 const SLOT_HEIGHT = 108;
@@ -71,10 +71,11 @@ export function CampaignSessionConstellation({
     : renderNodes;
   const lastNode = anchorNodes[anchorNodes.length - 1];
   const starAreaHeight = lastNode ? lastNode.y + BOTTOM_PADDING : 120;
+  const shouldRevealArchived = isEditMode && showArchived;
 
   const archiveAreaHeight = isEditMode
-    ? archivedSessions.length > 0
-      ? ARCHIVE_HEADER_HEIGHT + archivedSessions.length * ARCHIVE_STAR_SPACING + 16
+    ? shouldRevealArchived && archivedSessions.length > 0
+      ? ARCHIVE_HEADER_HEIGHT + archivedSessions.length * ARCHIVE_STAR_SPACING + 20
       : ARCHIVE_EMPTY_HEIGHT
     : 0;
   const constellationHeight = starAreaHeight + archiveAreaHeight;
@@ -285,22 +286,45 @@ export function CampaignSessionConstellation({
                 : "top 220ms ease, height 220ms ease, border-color 180ms ease, background-color 180ms ease",
             }}
           >
-            {archivedSessions.length > 0 ? (
-              <>
-                <div
-                  className="flex items-center gap-2 px-4 text-[10px] font-semibold tracking-wide text-muted-foreground/40 uppercase"
-                  style={{ height: ARCHIVE_HEADER_HEIGHT }}
-                >
-                  <Archive className="h-3 w-3" />
-                  Archive · {archivedSessions.length}
+            <div className="flex h-full flex-col px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/50">
+                    <Archive className="h-3 w-3" />
+                    Archive
+                  </div>
+                  <p className={`text-xs leading-relaxed ${archiveZoneHovered && isDragging ? "text-destructive" : "text-muted-foreground/45"}`}>
+                    Drag nodes into the box to archive.
+                  </p>
                 </div>
+                {hasArchivedSessions ? (
+                  <button
+                    type="button"
+                    onClick={onToggleArchived}
+                    aria-pressed={showArchived}
+                    className={`shrink-0 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide transition-colors ${
+                      showArchived
+                        ? "border-primary/35 bg-primary/10 text-primary"
+                        : "border-border/70 bg-background/55 text-muted-foreground hover:border-primary/25 hover:text-foreground"
+                    }`}
+                    title={showArchived ? "Hide archived sessions" : "Reveal archived sessions"}
+                  >
+                    {showArchived ? `Hide Archived · ${archivedSessionCount}` : `Reveal Archived · ${archivedSessionCount}`}
+                  </button>
+                ) : null}
+              </div>
+
+              {shouldRevealArchived && archivedSessions.length > 0 ? (
+              <>
+                <div style={{ height: ARCHIVE_HEADER_HEIGHT - 8 }} />
                 {archivedSessions.map((session, i) => {
                   const isBeingDragged = draggedSessionId === session.id;
                   const title = formatSessionDisplayTitle({ label: session.label, sessionId: session.id });
+                  const dateLabel = formatSessionEditDate(session.date);
                   return (
                     <div
                       key={session.id}
-                      className="relative flex items-center gap-3 px-4"
+                      className="relative flex items-center gap-3"
                       style={{
                         height: ARCHIVE_STAR_SPACING,
                         opacity: isBeingDragged ? 0.3 : 1,
@@ -315,54 +339,32 @@ export function CampaignSessionConstellation({
                         style={{ flexShrink: 0 }}
                       />
                       <span
-                        className="text-[10px] font-medium tracking-wide truncate"
+                        className="min-w-0 flex-1 truncate text-[10px] font-medium tracking-wide"
                         style={{ color: "rgba(180, 195, 230, 0.45)" }}
                       >
                         {title}
+                      </span>
+                      <span
+                        className="shrink-0 text-[9px] uppercase tracking-[0.16em]"
+                        style={{ color: "rgba(180, 195, 230, 0.32)" }}
+                      >
+                        {dateLabel}
                       </span>
                     </div>
                   );
                 })}
               </>
             ) : (
-              <div className="flex h-full items-center justify-center">
-                <span className={`flex items-center gap-2 text-xs font-medium ${
-                  archiveZoneHovered && isDragging
-                    ? "text-destructive"
-                    : "text-muted-foreground/40"
-                }`}>
-                  <Archive className="h-3.5 w-3.5" />
-                  Move stars here to archive them
+              <div className="mt-auto flex min-h-[28px] items-end">
+                <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/28">
+                  {hasArchivedSessions ? `${archivedSessionCount} archived session${archivedSessionCount === 1 ? "" : "s"} hidden` : "Archive is empty"}
                 </span>
               </div>
             )}
+            </div>
           </div>
         ) : null}
       </div>
-
-      {/* Archive toggle */}
-      {hasArchivedSessions && !isEditMode ? (
-        <div className="mt-4 px-2">
-          <button
-            type="button"
-            onClick={onToggleArchived}
-            aria-pressed={showArchived}
-            className={`group flex h-9 w-9 items-center overflow-hidden rounded-full border px-2.5 shadow-[0_12px_30px_rgba(0,0,0,0.16)] backdrop-blur transition-[width,border-color,background-color] duration-200 ${
-              showArchived
-                ? "border-primary/32 bg-primary/10 text-foreground hover:w-[12rem]"
-                : "border-border/70 bg-background/62 text-foreground/90 hover:w-[12rem] hover:border-primary/25 hover:bg-background/82"
-            }`}
-            title={showArchived ? "Hide archive" : "View archive"}
-          >
-            <span className="inline-flex items-center gap-2 whitespace-nowrap">
-              <Archive className={`h-3.5 w-3.5 shrink-0 ${showArchived ? "text-primary" : "text-primary/80"}`} />
-              <span className="max-w-0 overflow-hidden text-[10px] font-semibold tracking-wide opacity-0 transition-all duration-200 group-hover:max-w-[8rem] group-hover:opacity-100">
-                {showArchived ? `Showing Archive · ${archivedSessionCount}` : `View Archive · ${archivedSessionCount}`}
-              </span>
-            </span>
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }

@@ -14,3 +14,17 @@ export function formatSessionDisplayTitle(args: {
   if (label) return label;
   return `Session ${args.sessionId.slice(0, 8)}`;
 }
+
+const sessionDateFormatter = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+
+export function formatSessionEditDate(date: string): string {
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) {
+    return date;
+  }
+  return sessionDateFormatter.format(parsed);
+}
