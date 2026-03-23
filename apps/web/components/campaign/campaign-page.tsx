@@ -165,7 +165,7 @@ export function CampaignPage({
   return (
     <>
       {/* ── Fixed constellation — viewport-anchored, scrolls independently ── */}
-      <div className="fixed left-[80px] top-28 bottom-0 z-20 w-[300px] overflow-y-auto custom-scrollbar">
+      <div className="fixed left-[80px] top-28 bottom-0 z-20 w-[340px] overflow-y-auto custom-scrollbar">
         <CampaignSessionConstellation
           nodes={constellation.nodes}
           previewNodes={constellation.previewNodes}
@@ -190,7 +190,7 @@ export function CampaignPage({
       </div>
 
       {/* ── Scrolling main content — shifted right to clear fixed constellation ── */}
-      <div className="ml-[316px] pr-4" style={{ width: "calc(100% - 316px)" }}>
+      <div className="ml-[356px] pr-4" style={{ width: "calc(100% - 356px)" }}>
         <div className="mx-auto max-w-6xl space-y-8 px-4 sm:px-6 lg:px-8">
           {/* ── Campaign identity + mode toggle ── */}
           <div>

@@ -121,7 +121,7 @@ export function CampaignSessionConstellation({
 
   if (nodes.length === 0) {
     return (
-      <div className="w-[300px] shrink-0 flex items-center justify-center py-24">
+      <div className="w-[340px] shrink-0 flex items-center justify-center py-24">
         <p className="text-sm text-muted-foreground text-center">No sessions yet.</p>
       </div>
     );
@@ -131,7 +131,7 @@ export function CampaignSessionConstellation({
   const draggedSessionId = dragState?.sessionId ?? null;
 
   return (
-    <div className="w-[300px] shrink-0 flex flex-col">
+    <div className="w-[340px] shrink-0 flex flex-col">
       {/* Edit mode toggle */}
       <div className="flex justify-end px-2 mb-2">
         <button
