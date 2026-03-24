@@ -23,7 +23,6 @@ import { buildMeepoPromptBundle } from "../llm/buildMeepoPromptBundle.js";
 import { chat } from "../llm/client.js";
 import { loadMeepoContextSnapshot } from "../recall/loadMeepoContextSnapshot.js";
 import { getSanitizedSpeakerName } from "../ledger/speakerSanitizer.js";
-import { logSystemEvent } from "../ledger/system.js";
 import { applyPostTtsFx } from "./audioFx.js";
 import { getActiveSession } from "../sessions/sessions.js";
 import { logConvoTurn } from "../ledger/meepoConvo.js";
@@ -591,14 +590,24 @@ export async function respondToVoiceUtterance(
       userDisplayName: "[voice-reply]",
     });
 
-    // Log as system event
-    logSystemEvent({
-      guildId,
-      channelId,
-      eventType: "voice_reply",
+    // Log Meepo's spoken voice reply to the ledger as a voice transcript row.
+    // Uses source="voice" so the spoken transcript reader picks it up alongside
+    // inbound STT. Tags distinguish Meepo spoken output from human inbound.
+    const botUserId = voiceState.guild.client.user?.id ?? "system";
+    const speakerLabel = persona?.displayName ?? "Meepo";
+    appendLedgerEntry({
+      guild_id: guildId,
+      channel_id: channelId,
+      message_id: `voice-reply-${randomUUID()}`,
+      author_id: botUserId,
+      author_name: speakerLabel,
+      timestamp_ms: Date.now(),
       content: responseText,
-      authorId: "system",
-      authorName: "Meepo",
+      tags: "npc,meepo,spoken",
+      source: "voice",
+      narrative_weight: "primary",
+      speaker_id: botUserId,
+      session_id: activeSession?.session_id ?? null,
     });
 
     voiceReplyLog.info(`🔊 Meepo: "${responseText}"`);

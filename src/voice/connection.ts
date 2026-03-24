@@ -66,6 +66,8 @@ export async function joinVoice(opts: {
   // Set up disconnect handlers to keep state clean
   setupDisconnectHandlers(connection, opts.guildId);
 
+  import("../runtime/heartbeatWriter.js").then(m => m.emitHeartbeat(opts.guildId)).catch(() => {});
+
   return connection;
 }
 
@@ -94,6 +96,8 @@ export function leaveVoice(guildId: string): void {
   // Clear Meepo's overlay presence
   overlayEmitPresence("meepo", false);
   overlayLog.debug(`Cleared Meepo presence on leave`);
+
+  import("../runtime/heartbeatWriter.js").then(m => m.emitHeartbeat(guildId)).catch(() => {});
 }
 
 /**

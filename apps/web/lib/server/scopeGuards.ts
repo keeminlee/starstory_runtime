@@ -33,3 +33,17 @@ export function assertSessionGuildInAuthorizedScope(args: {
     throw new ScopeGuardError("Session is out of scope for the authorized guild set.");
   }
 }
+
+/**
+ * Gate for dev-only surfaces.
+ * In production: rejects unless devBypass is explicitly enabled (operator action).
+ * In non-production: allows authenticated users or dev bypass.
+ */
+export function assertDevSurfaceAccess(auth: {
+  user: { id: string } | null;
+  devBypass: boolean;
+}): void {
+  if (auth.user?.id) return;
+  if (auth.devBypass) return;
+  throw new ScopeGuardError("Dev surface access requires authentication.");
+}

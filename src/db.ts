@@ -2240,6 +2240,33 @@ function applyMigrations(db: Database.Database) {
     `);
   }
 
+  // Migration: bot_runtime_heartbeat table (dev dashboard snapshot source)
+  const tablesForHeartbeat = db.pragma("table_list") as any[];
+  const hasHeartbeat = tablesForHeartbeat.some((t: any) => t.name === "bot_runtime_heartbeat");
+  if (!hasHeartbeat) {
+    console.log("Migrating: Creating bot_runtime_heartbeat table");
+    db.exec(`
+      CREATE TABLE bot_runtime_heartbeat (
+        guild_id TEXT PRIMARY KEY,
+        lifecycle_state TEXT NOT NULL DEFAULT 'Dormant',
+        voice_channel_id TEXT,
+        voice_connected INTEGER NOT NULL DEFAULT 0,
+        stt_enabled INTEGER NOT NULL DEFAULT 0,
+        hush_enabled INTEGER NOT NULL DEFAULT 0,
+        active_session_id TEXT,
+        active_session_label TEXT,
+        active_persona_id TEXT,
+        persona_label TEXT,
+        form_id TEXT,
+        effective_mode TEXT,
+        context_worker_running INTEGER NOT NULL DEFAULT 0,
+        context_queue_queued INTEGER NOT NULL DEFAULT 0,
+        context_queue_failed INTEGER NOT NULL DEFAULT 0,
+        updated_at_ms INTEGER NOT NULL
+      );
+    `);
+  }
+
   // (Future migrations can go here)
 }
 

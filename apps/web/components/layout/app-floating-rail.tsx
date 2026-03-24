@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, SlidersHorizontal, Sparkles } from "lucide-react";
+import { BookOpen, SlidersHorizontal, Sparkles, Terminal } from "lucide-react";
 import type { ComponentType } from "react";
 import { useSession } from "next-auth/react";
 import { resolveCampaignTargetPath, useCampaignContext } from "@/components/providers/campaign-context-provider";
 import { STARSTORY_DISCORD_INSTALL_URL } from "@/lib/auth/primaryAuth";
+import { useVerboseMode } from "@/providers/verbose-mode-provider";
 
 type FloatingItem = {
   key: "campaign" | "settings";
@@ -66,6 +67,7 @@ export function AppFloatingRail() {
   const { status } = useSession();
   const { activeCampaignSlug, activeGuildId } = useCampaignContext();
 
+  const { verboseModeEnabled } = useVerboseMode();
   const hasActiveCampaign = Boolean(activeCampaignSlug);
   const showSettings = status === "authenticated";
   const campaignHref = hasActiveCampaign
@@ -112,6 +114,14 @@ export function AppFloatingRail() {
               />
             );
           })}
+          {verboseModeEnabled && activeGuildId && (
+            <FloatingRailButton
+              href={`/dev/meepo?guild_id=${activeGuildId}`}
+              label="Dev Dashboard"
+              icon={Terminal}
+              active={pathname.startsWith("/dev/meepo")}
+            />
+          )}
       </nav>
     </div>
   );
