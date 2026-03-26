@@ -29,6 +29,7 @@ import {
   resolveSessionSelection,
 } from "./shared/sessionResolve.js";
 import { isDevUser } from "../security/devAccess.js";
+import { routeToPrime } from "../prime/primeRouter.js";
 import { loadAwakenScript } from "../scripts/awakening/_loader.js";
 import { loadState } from "../ledger/awakeningStateRepo.js";
 import { getPendingPromptFromState, resolveModalTextFallback } from "../awakening/wakeIdentity.js";
@@ -736,6 +737,17 @@ function buildLabData(): SlashCommandBuilder {
       sub
         .setName("sleep")
         .setDescription("Put Meepo to sleep and end active session.")
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("prime")
+        .setDescription("Send an operator request to Prime (dev only).")
+        .addStringOption((opt) =>
+          opt
+            .setName("input")
+            .setDescription("The operator input to send to Prime.")
+            .setRequired(true)
+        )
     );
 
   for (const [family, command] of Object.entries(familyCommands)) {
@@ -885,6 +897,11 @@ export const lab = {
 
       if (exposedSubcommand === "sleep") {
         await executeLabSleep(interaction);
+        return;
+      }
+
+      if (exposedSubcommand === "prime") {
+        await routeToPrime(interaction, ctx);
         return;
       }
 
