@@ -1,9 +1,9 @@
-# StarStory Platform
+# Starstory Platform
 **PROD DISCORD APP LINK: https://discord.com/oauth2/authorize?client_id=1470521616747200524&permissions=1051648&integration_type=0&scope=bot+applications.commands**
 **DEV DISCORD APP LINK: https://discord.com/oauth2/authorize?client_id=1479618157650907276&permissions=3148800&integration_type=0&scope=bot+applications.commands**
 
 
-**StarStory** is the platform for preserving tabletop RPG campaigns.  
+**Starstory** is the platform for preserving tabletop RPG campaigns.  
 It sits beside your party in Discord, listens as the story unfolds, and preserves the adventure in an append-only narrative ledger.
 
 During the game, **Meepo** can still appear as the in-world archivist character.  
@@ -11,7 +11,7 @@ After the game, StarStory helps you revisit what happened, generate recaps, and 
 
 Naming doctrine:
 
-- StarStory = platform
+- Starstory = platform
 - Chronicle = archive
 - Archivist = system role
 - Meepo = archivist character / internal codename
@@ -177,7 +177,7 @@ StarStory's current public Discord surface is intentionally narrow.
 
 ### Production Surface Rules
 
-- In production, StarStory does not provide ambient conversational text replies in channel chat.
+- In production, Starstory does not provide ambient conversational text replies in channel chat.
 - Public interaction is slash-command and voice/session first.
 - `/starstory status` responds ephemerally and shows a concise public status view.
 - Dev-only diagnostics and lab/legacy notes are shown only to dev-gated users.
@@ -189,9 +189,9 @@ See **[docs/CURRENT_STATE.md](docs/CURRENT_STATE.md)** for full command details 
 
 ---
 
-## What StarStory Does
+## What Starstory Does
 
-StarStory quietly builds a structured memory of your campaign as it unfolds.
+Starstory quietly builds a structured memory of your campaign as it unfolds.
 
 - **In-session listening**  
   Captures dialogue and events as they occur.
@@ -247,7 +247,7 @@ Start with the documentation map:
 
 ## Philosophy
 
-StarStory isn’t meant to replace a Dungeon Master or automate storytelling.
+Starstory isn’t meant to replace a Dungeon Master or automate storytelling.
 
 Instead, it acts as a **companion to the table** — a quiet witness to the adventure who helps preserve what happened.
 
