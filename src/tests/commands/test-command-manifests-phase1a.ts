@@ -77,7 +77,7 @@ describe("Phase 1A command manifests", () => {
 
     const options = (data.options ?? []) as any[];
     const directSubcommands = options.filter((option: any) => option.type === 1).map((option: any) => option.name).sort();
-    expect(directSubcommands).toEqual(["doctor", "sleep"]);
+    expect(directSubcommands).toEqual(["doctor", "prime", "sleep"]);
 
     const groups = options.filter((option: any) => option.type === 2);
     const groupNames = groups.map((group: any) => group.name).sort();
