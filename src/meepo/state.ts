@@ -2,6 +2,7 @@
 import { log } from "../utils/logger.js";
 import { getDbForCampaign } from "../db.js";
 import { resolveCampaignSlug } from "../campaign/guildConfig.js";
+import { emitHeartbeat } from "../runtime/heartbeatWriter.js";
 
 const meepoLog = log.withScope("meepo");
 
@@ -62,6 +63,7 @@ export function wakeMeepo(opts: {
   );
 
   meepoLog.info(`Woke up as form_id: meepo`);
+  emitHeartbeat(opts.guildId);
 
   return {
     id,
@@ -82,6 +84,7 @@ export function sleepMeepo(guildId: string): number {
   const info = db
     .prepare("UPDATE npc_instances SET is_active = 0 WHERE guild_id = ? AND is_active = 1")
     .run(guildId);
+  emitHeartbeat(guildId);
   return info.changes;
 }
 

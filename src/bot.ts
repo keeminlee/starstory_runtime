@@ -38,6 +38,7 @@ import { acquireLock } from "./pidlock.js";
 import { getDbForCampaign, seedMeepoMemories } from "./db.js";
 import { getEnv } from "./config/rawEnv.js";
 import { loadRegistryForScope } from "./registry/loadRegistry.js";
+import { startHeartbeatKeepalive } from "./runtime/heartbeatWriter.js";
 import { extractRegistryMatches } from "./registry/extractRegistryMatches.js";
 import { searchEventsByTitleScoped, type EventRow } from "./ledger/eventSearch.js";
 import { loadGptcap } from "./ledger/gptcapProvider.js";
@@ -261,6 +262,9 @@ client.once("ready", async () => {
 
   // Start context action worker (separate from heartbeat enqueue path)
   startMeepoContextActionWorker();
+
+  // Start runtime heartbeat writer for dev dashboard
+  startHeartbeatKeepalive();
 
 });
 

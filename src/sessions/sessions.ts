@@ -153,6 +153,8 @@ export function startSession(
 
   markRuntimeSessionStarted(guildId, sessionId);
 
+  import("../runtime/heartbeatWriter.js").then(m => m.emitHeartbeat(guildId)).catch(() => {});
+
   return {
     session_id: sessionId,
     guild_id: guildId,
@@ -190,6 +192,7 @@ export function endSession(guildId: string, reason: string | null = null): numbe
       changes: info.changes,
     });
   }
+  import("../runtime/heartbeatWriter.js").then(m => m.emitHeartbeat(guildId)).catch(() => {});
   return info.changes;
 }
 

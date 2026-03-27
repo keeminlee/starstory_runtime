@@ -298,7 +298,11 @@ describe("web dashboard Phase B state engine", () => {
       campaignSlug: campaign.campaign_slug,
       searchParams: { guild_id: "guild-1" },
     });
-    expect(campaignDetail).toBeNull();
+    // getWebCampaignDetail uses includeArchived: true, so the campaign
+    // is still returned — but every session should be marked archived.
+    expect(campaignDetail).not.toBeNull();
+    expect(campaignDetail!.archivedSessionCount).toBe(1);
+    expect(campaignDetail!.sessions.every((s: any) => s.isArchived)).toBe(true);
 
     db.close();
   });

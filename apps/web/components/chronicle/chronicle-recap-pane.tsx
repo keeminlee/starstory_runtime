@@ -98,6 +98,8 @@ export function ChronicleRecapPane({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [label, setLabel] = useState(selectedSession?.label ?? "");
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [regenerateError, setRegenerateError] = useState<string | null>(null);
 
   const scopedSearchParams = useMemo(
     () => {
@@ -168,6 +170,31 @@ export function ChronicleRecapPane({
     }
     void fetchSessionDetail(selectedSessionId);
   }, [selectedSessionId, fetchSessionDetail]);
+
+  function handleGenerateRecap(): void {
+    if (!selectedSessionId || !canWrite) return;
+    setIsRegenerating(true);
+    setRegenerateError(null);
+    regenerateSessionRecapApi(
+      selectedSessionId,
+      { reason: "chronicle-generate" },
+      scopedSearchParams,
+    )
+      .then(() => {
+        router.refresh();
+        void fetchSessionDetail(selectedSessionId);
+      })
+      .catch((err: unknown) => {
+        const msg =
+          err instanceof WebApiError && err.message
+            ? err.message
+            : "Recap generation failed. Please try again.";
+        setRegenerateError(msg);
+      })
+      .finally(() => {
+        setIsRegenerating(false);
+      });
+  }
 
   const activeRecapText = recap ? recap[activeTab] : "";
   const activeAnnotatedLines = useMemo(() => {
@@ -322,13 +349,29 @@ export function ChronicleRecapPane({
   if (recapPhase === "ended_ready") {
     return (
       <div className="flex flex-1 items-center justify-center py-24">
-        <div className="text-center space-y-2">
+        <div className="text-center space-y-3">
           <p className="text-muted-foreground text-sm">
             Recap is ready to generate.
           </p>
-          <p className="text-muted-foreground/70 text-xs">
-            Open the full session to generate or regenerate a recap.
-          </p>
+          {canWrite ? (
+            <>
+              <button
+                type="button"
+                onClick={handleGenerateRecap}
+                disabled={isRegenerating}
+                className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-xs font-bold uppercase tracking-wider text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isRegenerating ? "Generating\u2026" : "Generate recap"}
+              </button>
+              {regenerateError ? (
+                <p className="text-xs text-rose-400">{regenerateError}</p>
+              ) : null}
+            </>
+          ) : (
+            <p className="text-muted-foreground/70 text-xs">
+              Only the campaign DM can generate recaps.
+            </p>
+          )}
         </div>
       </div>
     );
@@ -348,11 +391,27 @@ export function ChronicleRecapPane({
   if (recapPhase === "failed") {
     return (
       <div className="flex flex-1 items-center justify-center py-24">
-        <div className="text-center space-y-2">
+        <div className="text-center space-y-3">
           <p className="text-sm text-rose-400">Recap generation failed.</p>
-          <p className="text-muted-foreground/70 text-xs">
-            Open the full session to review warnings and retry.
-          </p>
+          {canWrite ? (
+            <>
+              <button
+                type="button"
+                onClick={handleGenerateRecap}
+                disabled={isRegenerating}
+                className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-xs font-bold uppercase tracking-wider text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isRegenerating ? "Retrying\u2026" : "Retry recap generation"}
+              </button>
+              {regenerateError ? (
+                <p className="text-xs text-rose-400">{regenerateError}</p>
+              ) : null}
+            </>
+          ) : (
+            <p className="text-muted-foreground/70 text-xs">
+              Only the campaign DM can retry recap generation.
+            </p>
+          )}
         </div>
       </div>
     );
@@ -362,13 +421,29 @@ export function ChronicleRecapPane({
   if (recapStatus === "missing" || (recapStatus === "available" && !recap)) {
     return (
       <div className="flex flex-1 items-center justify-center py-24">
-        <div className="text-center space-y-2">
+        <div className="text-center space-y-3">
           <p className="text-muted-foreground text-sm">
             No recap has been generated for this session yet.
           </p>
-          <p className="text-muted-foreground/70 text-xs">
-            Open the full session to generate or regenerate a recap.
-          </p>
+          {canWrite ? (
+            <>
+              <button
+                type="button"
+                onClick={handleGenerateRecap}
+                disabled={isRegenerating}
+                className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-xs font-bold uppercase tracking-wider text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isRegenerating ? "Generating\u2026" : "Generate recap"}
+              </button>
+              {regenerateError ? (
+                <p className="text-xs text-rose-400">{regenerateError}</p>
+              ) : null}
+            </>
+          ) : (
+            <p className="text-muted-foreground/70 text-xs">
+              Only the campaign DM can generate recaps.
+            </p>
+          )}
         </div>
       </div>
     );

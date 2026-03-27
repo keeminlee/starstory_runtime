@@ -71,6 +71,7 @@ export function setActivePersonaId(guildId: string, personaId: string): void {
     `).run(guildId, sessionId, personaId, mode, null, now);
   }
   personaLog.debug(`Set active persona: guild=${guildId}, persona_id=${personaId}`);
+  import("../runtime/heartbeatWriter.js").then(m => m.emitHeartbeat(guildId)).catch(() => {});
 }
 
 export function getEffectivePersonaId(guildId: string): string {

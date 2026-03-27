@@ -223,6 +223,7 @@ Session recap regenerate is an action capability with explicit environment gatin
 Requirements:
 
 - Provider API keys can be supplied from the shared repo-root env for local development; `apps/web/.env.local` is not required for `OPENAI_API_KEY` specifically.
+- In production, the web service runs in its own systemd unit with a separate `EnvironmentFile` (`/etc/meepo/meepo-web.env`). Required LLM keys must be present in that file — there is no cross-service env inheritance. See `deploy/env/meepo-web.env.example`.
 - Missing key maps to typed capability-unavailable behavior (`openai_unconfigured`, HTTP `503`).
 
 What regenerate rebuilds:

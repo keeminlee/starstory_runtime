@@ -61,6 +61,7 @@ export default defineConfig({
       "apps/web/lib/__tests__/canonicalMiddleware.test.ts",
       "apps/web/lib/__tests__/authOriginGuard.test.ts",
       "apps/web/lib/__tests__/recapEntityOverlay.test.ts",
+      "apps/web/lib/__tests__/runtimeInspectorContract.test.ts",
       "apps/web/lib/shared/__tests__/normalizeRecapLines.test.ts",
       "src/tests/test-meepo-wake-response-gating.ts",
       "src/tests/test-meepo-auto-sleep.ts",
