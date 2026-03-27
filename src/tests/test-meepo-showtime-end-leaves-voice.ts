@@ -575,6 +575,7 @@ describe("showtime lifecycle hardening", () => {
       interaction_id: "interaction-event-failure",
     } as any;
 
+    await meepo.execute(buildInteraction({ subcommand: "awaken" }), execCtx);
     await meepo.execute(buildInteraction({ subcommand: "start", subcommandGroup: "showtime" }), execCtx);
     voiceConnected = true;
     await meepo.execute(buildInteraction({ subcommand: "end", subcommandGroup: "showtime" }), execCtx);
