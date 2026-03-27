@@ -58,20 +58,24 @@ export function LandingPage() {
             </li>
             <li className="grid grid-cols-[3.25rem_1fr] items-start gap-5 py-6 text-[1.08rem] leading-8 sm:grid-cols-[3.5rem_1fr] sm:py-7 sm:text-[1.16rem]">
               <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full border border-primary/24 bg-primary/8 text-base font-semibold text-primary/90 sm:h-10 sm:w-10 sm:text-lg">4</span>
-              <span>Play your session as normal</span>
+              <span>Run <span className="font-mono text-lg text-primary/95">/starstory showtime start</span></span>
             </li>
             <li className="grid grid-cols-[3.25rem_1fr] items-start gap-5 py-6 text-[1.08rem] leading-8 sm:grid-cols-[3.5rem_1fr] sm:py-7 sm:text-[1.16rem]">
               <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full border border-primary/24 bg-primary/8 text-base font-semibold text-primary/90 sm:h-10 sm:w-10 sm:text-lg">5</span>
-              <span>Run <span className="font-mono text-lg text-primary/95">/starstory end</span></span>
+              <span>Play your session as normal</span>
             </li>
             <li className="grid grid-cols-[3.25rem_1fr] items-start gap-5 py-6 text-[1.08rem] leading-8 sm:grid-cols-[3.5rem_1fr] sm:py-7 sm:text-[1.16rem]">
               <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full border border-primary/24 bg-primary/8 text-base font-semibold text-primary/90 sm:h-10 sm:w-10 sm:text-lg">6</span>
-              <span>
-                Return to Starstory and <Link href={buildPrimarySignInPath("/dashboard")} className="text-primary underline decoration-primary/45 underline-offset-4 transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background">log in</Link>
-              </span>
+              <span>Run <span className="font-mono text-lg text-primary/95">/starstory showtime end</span></span>
             </li>
             <li className="grid grid-cols-[3.25rem_1fr] items-start gap-5 py-6 text-[1.08rem] leading-8 sm:grid-cols-[3.5rem_1fr] sm:py-7 sm:text-[1.16rem]">
               <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full border border-primary/24 bg-primary/8 text-base font-semibold text-primary/90 sm:h-10 sm:w-10 sm:text-lg">7</span>
+              <span>
+                <Link href={buildPrimarySignInPath("/dashboard")} className="text-primary underline decoration-primary/45 underline-offset-4 transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background">Log in</Link> and generate your recap
+              </span>
+            </li>
+            <li className="grid grid-cols-[3.25rem_1fr] items-start gap-5 py-6 text-[1.08rem] leading-8 sm:grid-cols-[3.5rem_1fr] sm:py-7 sm:text-[1.16rem]">
+              <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full border border-primary/24 bg-primary/8 text-base font-semibold text-primary/90 sm:h-10 sm:w-10 sm:text-lg">8</span>
               <span>Starstory learns directly from your edits</span>
             </li>
           </ol>

@@ -190,7 +190,7 @@ describe("/meepo lifecycle run 1", () => {
     db.close();
   });
 
-  test("showtime start works without running awaken first", async () => {
+  test("showtime start requires awaken first", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-awaken-run1-"));
     tempDirs.push(tempDir);
     configureHermeticEnv(tempDir);
@@ -210,11 +210,11 @@ describe("/meepo lifecycle run 1", () => {
 
     expect(interaction.reply).toHaveBeenCalledTimes(1);
     const content = String(interaction.reply.mock.calls[0]?.[0]?.content ?? "");
-    expect(content).toContain("Showtime begins");
-    expect(content).toContain("listen-only");
+    expect(content).toContain("awakened first");
+    expect(content).toContain("/starstory awaken");
 
     const { getActiveSession } = await import("../sessions/sessions.js");
-    expect(getActiveSession("guild-1")).toBeTruthy();
+    expect(getActiveSession("guild-1")).toBeNull();
     db.close();
   });
 
