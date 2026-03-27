@@ -1583,7 +1583,7 @@ async function runDoctorChecks(interaction: any, ctx: CommandCtx): Promise<Docto
     checks.push({
       icon: "⚠️",
       label: "No session data yet",
-      action: "Use /starstory showtime start to begin a session, then /starstory showtime end to generate recap artifacts",
+      action: "Use /starstory showtime start to begin a session, then /starstory showtime end to finish recording. Generate recaps from the web app.",
     });
   } else {
     const baseStatus = getBaseStatus(guildId, ctx.campaignSlug, session.session_id, session.label);
@@ -2229,6 +2229,14 @@ async function handleShowtimeStart(interaction: any, ctx: CommandCtx): Promise<v
     user_id: interaction.user.id,
   });
 
+  if (deriveLifecycleState(guildId) === "Dormant") {
+    await interaction.reply({
+      content: "Meepo needs to be awakened first. Run `/starstory awaken`, then try `/starstory showtime start` again.",
+      ephemeral: true,
+    });
+    return;
+  }
+
   const activeSession = getGuildActiveSession(guildId) as SessionRow | null;
   if (activeSession) {
     await interaction.reply({
@@ -2415,6 +2423,14 @@ async function handleShowtimeStart(interaction: any, ctx: CommandCtx): Promise<v
 async function handleShowtimeEnd(interaction: any, ctx: CommandCtx): Promise<void> {
   const guildId = interaction.guildId as string;
 
+  if (deriveLifecycleState(guildId) === "Dormant") {
+    await interaction.reply({
+      content: "No active session — Meepo is not awakened. Run `/starstory awaken` first.",
+      ephemeral: true,
+    });
+    return;
+  }
+
   const activeSession = getGuildActiveSession(guildId) as SessionRow | null;
   if (!activeSession) {
     await interaction.reply({
@@ -2490,8 +2506,8 @@ async function handleShowtimeEnd(interaction: any, ctx: CommandCtx): Promise<voi
 
   await interaction.reply({
     content: leftVoiceOnEnd
-      ? "🎬 Session complete.\n\nMeepo has left voice for this guild.\nArtifacts are being generated."
-      : "🎬 Session complete.\n\nArtifacts are being generated.",
+      ? "🎬 Session complete.\n\nMeepo has left voice for this guild.\nTranscript is being saved. To generate your recap, visit the session on starstory.online."
+      : "🎬 Session complete.\n\nTranscript is being saved. To generate your recap, visit the session on starstory.online.",
     ephemeral: true,
   });
 }
