@@ -7,7 +7,7 @@
 It sits beside your party in Discord, listens as the story unfolds, and preserves the adventure in an append-only narrative ledger.
 
 During the game, **Meepo** can still appear as the in-world archivist character.  
-After the game, StarStory helps you revisit what happened, generate recaps, and build a living chronicle of your campaign.
+After the game, Starstory helps you revisit what happened, generate recaps, and build a living chronicle of your campaign.
 
 Naming doctrine:
 
