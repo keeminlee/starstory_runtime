@@ -114,7 +114,7 @@ function toRequestedLineNumbers(selector: TranscriptLineSelector): number[] {
  * Falls back to a live query from ledger_entries if bronze hasn't been compiled.
  *
  * @param sessionId - Session UUID
- * @param primaryOnly - If true, filters to narrative_weight='primary' only. Default: true
+ * @param primaryOnly - If true, filters to narrative_weight IN ('primary', 'elevated'). Default: true
  *                      (ignored when reading from bronze, which is always primary)
  * @returns Array of transcript entries with stable line indices
  */
@@ -161,8 +161,8 @@ export function buildTranscriptFromLedger(
 ): TranscriptEntry[] {
   const conn = resolveTranscriptDb(db);
 
-  const narrativeWeightFilter = primaryOnly ? "AND narrative_weight = ?" : "";
-  const params = primaryOnly ? [sessionId, "primary"] : [sessionId];
+  const narrativeWeightFilter = primaryOnly ? "AND narrative_weight IN (?, ?)" : "";
+  const params = primaryOnly ? [sessionId, "primary", "elevated"] : [sessionId];
 
   const rows = conn
     .prepare(
@@ -185,7 +185,7 @@ export function buildTranscriptFromLedger(
   if (rows.length === 0) {
     throw new Error(
       `No transcript entries found for session ${sessionId}` +
-        (primaryOnly ? " (filtered to primary narrative_weight)" : "")
+        (primaryOnly ? " (filtered to primary/elevated narrative_weight)" : "")
     );
   }
 

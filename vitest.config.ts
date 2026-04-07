@@ -29,6 +29,7 @@ export default defineConfig({
       "src/tests/test-runtime-scope-helpers.ts",
       "src/tests/test-voice-playback-controller.ts",
       "src/tests/test-transcript-system-isolation.ts",
+      "src/tests/test-ledger-narrative-weight.ts",
       "src/tests/test-transcript-bronze-view-contract.ts",
       "src/tests/test-silver-seq-determinism.ts",
       "src/tests/test-silver-seq-metrics-contract.ts",

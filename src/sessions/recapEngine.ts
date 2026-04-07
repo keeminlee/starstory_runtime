@@ -196,6 +196,39 @@ function buildSilverSegmentsForMegameecap(args: {
   return out;
 }
 
+function loadTranscriptForRecap(args: {
+  guildId: string;
+  campaignSlug: string;
+  sessionId: string;
+  db: any;
+}): TranscriptEntry[] {
+  try {
+    return buildTranscript(args.sessionId, { view: "auto", primaryOnly: true }, args.db);
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes(`No transcript entries found for session ${args.sessionId}`)) {
+      throw error;
+    }
+
+    const fallbackTranscript = buildTranscript(args.sessionId, { view: "auto", primaryOnly: false }, args.db);
+    recapEngineLog.warn(
+      "Recap transcript fell back to full session transcript after empty primary transcript",
+      {
+        event_type: "SESSION_RECAP_TRANSCRIPT_FALLBACK",
+        session_id: args.sessionId,
+        fallback_scope: "all_narrative_weights",
+        fallback_reason: "empty_primary_transcript",
+        fallback_line_count: fallbackTranscript.length,
+      },
+      {
+        guild_id: args.guildId,
+        campaign_slug: args.campaignSlug,
+        session_id: args.sessionId,
+      }
+    );
+    return fallbackTranscript;
+  }
+}
+
 export async function generateSessionRecap(
   args: GenerateSessionRecapArgs,
   deps?: { callLlm?: LlmCall; now?: () => number }
@@ -271,7 +304,12 @@ async function generateSessionRecapInternal(
     throw new Error(`Session not found: ${args.sessionId}`);
   }
 
-  const transcript = buildTranscript(args.sessionId, { view: "auto", primaryOnly: true }, db);
+  const transcript = loadTranscriptForRecap({
+    guildId: args.guildId,
+    campaignSlug,
+    sessionId: args.sessionId,
+    db,
+  });
   if (transcript.length === 0) {
     throw new Error(`No transcript lines found for session ${args.sessionId}`);
   }

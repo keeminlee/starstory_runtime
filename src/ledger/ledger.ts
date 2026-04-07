@@ -62,6 +62,21 @@ function getLedgerDbForGuild(guildId: string) {
   return getDbForCampaign(campaignSlug);
 }
 
+function resolveNarrativeWeight(
+  source: "text" | "voice" | "system",
+  requested?: "primary" | "secondary" | "elevated"
+): "primary" | "secondary" | "elevated" {
+  if (source === "voice") {
+    return requested === "elevated" ? "elevated" : "primary";
+  }
+
+  if (requested) {
+    return requested;
+  }
+
+  return source === "system" ? "primary" : "secondary";
+}
+
 export function appendLedgerEntry(
   e: Omit<LedgerEntry, "id" | "tags" | "source" | "narrative_weight" | "speaker_id" | "audio_chunk_path" | "t_start_ms" | "t_end_ms" | "confidence" | "content_norm" | "session_id"> & {
     tags?: string;
@@ -80,11 +95,7 @@ export function appendLedgerEntry(
   const id = randomUUID();
   const tags = e.tags ?? "public";
   const source = e.source ?? "text";
-  
-  // Default narrative_weight based on source type
-  // Voice/system are primary narrative; text is secondary unless elevated
-  const narrative_weight = e.narrative_weight ?? 
-    (source === "voice" || source === "system" ? "primary" : "secondary");
+  const narrative_weight = resolveNarrativeWeight(source, e.narrative_weight);
 
   try {
     db.prepare(

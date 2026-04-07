@@ -146,6 +146,62 @@ async function seedSessionFixture(guildId: string, sessionId: string): Promise<s
   return campaignSlug;
 }
 
+async function seedSecondaryOnlySessionFixture(guildId: string, sessionId: string): Promise<string> {
+  const { getDbForCampaign } = await import("../db.js");
+  const { resolveCampaignSlug } = await import("../campaign/guildConfig.js");
+  const campaignSlug = resolveCampaignSlug({ guildId });
+  const db = getDbForCampaign(campaignSlug);
+
+  db.prepare(
+    `
+      INSERT INTO sessions (
+        session_id, guild_id, kind, mode_at_start, label,
+        created_at_ms, started_at_ms, ended_at_ms, ended_reason,
+        started_by_id, started_by_name, source
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+  ).run(
+    sessionId,
+    guildId,
+    "canon",
+    "canon",
+    "Secondary Only Arc",
+    Date.now() - 10_000,
+    Date.now() - 10_000,
+    Date.now() - 1_000,
+    "test_end",
+    "user-1",
+    "Tester",
+    "live"
+  );
+
+  db.prepare(
+    `
+      INSERT INTO ledger_entries (
+        id, guild_id, channel_id, message_id, author_id, author_name,
+        timestamp_ms, content, content_norm, session_id, tags,
+        source, narrative_weight
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+  ).run(
+    `${sessionId}-ledger-secondary`,
+    guildId,
+    "channel-1",
+    `${sessionId}-msg-secondary`,
+    "user-1",
+    "Tester",
+    Date.now() - 9_000,
+    "We only have text for this session",
+    "We only have text for this session",
+    sessionId,
+    "human",
+    "text",
+    "secondary"
+  );
+
+  return campaignSlug;
+}
+
 test("generateSessionRecap returns non-empty text and stable metadata fields", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-recap-engine-"));
   tempDirs.push(tempDir);
@@ -195,6 +251,34 @@ test("generateSessionRecap returns non-empty text and stable metadata fields", a
   );
   expect(fs.existsSync(finalPathsByLabel.recapPath)).toBe(true);
   expect(fs.existsSync(finalPathsByLabel.metaPath)).toBe(true);
+});
+
+test("generateSessionRecap falls back to non-primary transcript rows when needed", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-recap-secondary-fallback-"));
+  tempDirs.push(tempDir);
+  configureHermeticEnv(tempDir);
+  vi.resetModules();
+
+  const { generateSessionRecap } = await import("../sessions/recapEngine.js");
+
+  const guildId = "guild-recap-secondary-fallback";
+  const sessionId = "session-recap-secondary-fallback";
+  await seedSecondaryOnlySessionFixture(guildId, sessionId);
+
+  const result = await generateSessionRecap(
+    {
+      guildId,
+      sessionId,
+      strategy: "balanced",
+    },
+    {
+      callLlm: async () => "Segment summary output",
+    }
+  );
+
+  expect(result.text.length).toBeGreaterThan(0);
+  expect(result.sourceTranscriptHash).toHaveLength(64);
+  expect(result.sourceRange?.lineCount).toBe(1);
 });
 
 test("final style regeneration reuses base cache and avoids base rerun", async () => {

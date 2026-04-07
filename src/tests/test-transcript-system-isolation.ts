@@ -64,3 +64,45 @@ test("buildTranscriptFromLedger excludes system events such as voice interrupts"
 
   db.close();
 });
+
+test("buildTranscriptFromLedger includes elevated rows in primary-only transcript mode", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "meepo-transcript-elevated-"));
+  tempDirs.push(tempDir);
+  configureEnv(tempDir);
+
+  const { buildTranscriptFromLedger } = await import("../ledger/transcripts.js");
+
+  const db = new Database(path.join(tempDir, "test.sqlite"));
+  db.exec(`
+    CREATE TABLE ledger_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT,
+      author_name TEXT NOT NULL,
+      content TEXT NOT NULL,
+      content_norm TEXT,
+      timestamp_ms INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      narrative_weight TEXT NOT NULL
+    );
+  `);
+
+  const sessionId = "session-elevated";
+
+  db.prepare(`
+    INSERT INTO ledger_entries (session_id, author_name, content, content_norm, timestamp_ms, source, narrative_weight)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(sessionId, "Spectator", "off-topic", "off-topic", 1000, "text", "secondary");
+
+  db.prepare(`
+    INSERT INTO ledger_entries (session_id, author_name, content, content_norm, timestamp_ms, source, narrative_weight)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(sessionId, "DM", "this matters", "this matters", 1001, "text", "elevated");
+
+  const transcript = buildTranscriptFromLedger(sessionId, true, db);
+
+  expect(transcript).toHaveLength(1);
+  expect(transcript[0]?.author_name).toBe("DM");
+  expect(transcript[0]?.content).toBe("this matters");
+
+  db.close();
+});
